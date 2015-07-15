@@ -1,0 +1,380 @@
+/*
+
+  This file is provided under a dual BSD/GPLv2 license.  When using or
+  redistributing this file, you may do so under either license.
+
+  GPL LICENSE SUMMARY
+
+  Copyright(c) 2015 Intel Corporation.
+
+  This program is free software; you can redistribute it and/or modify
+  it under the terms of version 2 of the GNU General Public License as
+  published by the Free Software Foundation.
+
+  This program is distributed in the hope that it will be useful, but
+  WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+  General Public License for more details.
+
+  Contact Information:
+  Intel Corporation, www.intel.com
+
+  BSD LICENSE
+
+  Copyright(c) 2015 Intel Corporation.
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions
+  are met:
+
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in
+      the documentation and/or other materials provided with the
+      distribution.
+    * Neither the name of Intel Corporation nor the names of its
+      contributors may be used to endorse or promote products derived
+      from this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+  OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+  LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+*/
+
+/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+
+/*
+ * This file implements the PSM PTL for self (loopback)
+ */
+
+#include "psm_user.h"
+#include "psm_mq_internal.h"
+#include "psm_am_internal.h"
+
+struct ptl {
+	psm_ep_t ep;
+	psm_epid_t epid;
+	psm_epaddr_t epaddr;
+	ptl_ctl_t *ctl;
+} __attribute__((aligned(16)));
+
+static
+psm_error_t
+ptl_handle_rtsmatch(psm_mq_req_t recv_req, int was_posted)
+{
+	psm_mq_req_t send_req = (psm_mq_req_t) recv_req->ptl_req_ptr;
+
+	if (recv_req->recv_msglen > 0) {
+		PSM_VALGRIND_DEFINE_MQ_RECV(recv_req->buf, recv_req->buf_len,
+					    recv_req->recv_msglen);
+		VALGRIND_MAKE_MEM_DEFINED(send_req->buf, send_req->buf_len);
+		VALGRIND_MAKE_MEM_DEFINED(send_req->buf, recv_req->recv_msglen);
+
+		psmi_mq_mtucpy(recv_req->buf, send_req->buf,
+			       recv_req->recv_msglen);
+	}
+
+	psmi_mq_handle_rts_complete(recv_req);
+
+	/* If the send is already marked complete, that's because it was internally
+	 * buffered. */
+	if (send_req->state == MQ_STATE_COMPLETE) {
+		psmi_mq_stats_rts_account(send_req);
+		if (send_req->buf != NULL && send_req->send_msglen > 0)
+			psmi_sysbuf_free(send_req->buf);
+		/* req was left "live" even though the sender was told that the
+		 * send was done */
+		psmi_mq_req_free(send_req);
+	} else
+		psmi_mq_handle_rts_complete(send_req);
+
+	_HFI_VDBG("[self][complete][b=%p][sreq=%p][rreq=%p]\n",
+		  recv_req->buf, send_req, recv_req);
+	return PSM_OK;
+}
+
+static
+psm_error_t self_mq_send_testwait(psm_mq_req_t *ireq)
+{
+	uint8_t *ubuf;
+	psm_mq_req_t req = *ireq;
+
+	PSMI_PLOCK_ASSERT();
+
+	/* We're waiting on a send request, and the matching receive has not been
+	 * posted yet.  This is a deadlock condition in MPI but we accodomate it
+	 * here in the "self ptl" by using system-allocated memory.
+	 */
+	req->testwait_callback = NULL;	/* no more calls here */
+
+	ubuf = req->buf;
+	if (ubuf != NULL && req->send_msglen > 0) {
+		req->buf = psmi_sysbuf_alloc(req->send_msglen);
+		if (req->buf == NULL)
+			return PSM_NO_MEMORY;
+		psmi_mq_mtucpy(req->buf, ubuf, req->send_msglen);
+	}
+
+	/* Mark it complete but don't free the req, it's freed when the receiver
+	 * does the match */
+	req->state = MQ_STATE_COMPLETE;
+	*ireq = PSM_MQ_REQINVALID;
+	return PSM_OK;
+}
+
+/* Self is different.  We do everything as rendezvous. */
+static
+psm_error_t
+self_mq_isend(psm_mq_t mq, psm_epaddr_t epaddr, uint32_t flags,
+	      psm_mq_tag_t *tag, const void *ubuf, uint32_t len, void *context,
+	      psm_mq_req_t *req_o)
+{
+	psm_mq_req_t send_req;
+	psm_mq_req_t recv_req;
+	int rc;
+
+	send_req = psmi_mq_req_alloc(mq, MQE_TYPE_SEND);
+	if_pf(send_req == NULL)
+	    return PSM_NO_MEMORY;
+
+	rc = psmi_mq_handle_rts(mq, epaddr, tag,
+				len, NULL, 0, 1,
+				ptl_handle_rtsmatch, &recv_req);
+	send_req->tag = *tag;
+	send_req->buf = (void *)ubuf;
+	send_req->send_msglen = len;
+	send_req->context = context;
+	recv_req->ptl_req_ptr = (void *)send_req;
+	recv_req->rts_sbuf = (uintptr_t) ubuf;
+	recv_req->rts_peer = epaddr;
+	if (rc == MQ_RET_MATCH_OK)
+		ptl_handle_rtsmatch(recv_req, 1);
+	else
+		send_req->testwait_callback = self_mq_send_testwait;
+
+	_HFI_VDBG("[self][b=%p][m=%d][t=%08x.%08x.%08x][match=%s][req=%p]\n",
+		  ubuf, len, tag->tag[0], tag->tag[1], tag->tag[2],
+		  rc == MQ_RET_MATCH_OK ? "YES" : "NO", send_req);
+	*req_o = send_req;
+	return PSM_OK;
+}
+
+static
+psm_error_t
+self_mq_send(psm_mq_t mq, psm_epaddr_t epaddr, uint32_t flags,
+	     psm_mq_tag_t *tag, const void *ubuf, uint32_t len)
+{
+	psm_error_t err;
+	psm_mq_req_t req;
+	err = self_mq_isend(mq, epaddr, flags, tag, ubuf, len, NULL, &req);
+	psmi_mq_wait_internal(&req);
+	return err;
+}
+
+/* Fill in AM capabilities parameters */
+static psm_error_t
+self_am_get_parameters(psm_ep_t ep, struct psm_am_parameters *parameters)
+{
+	if (parameters == NULL) {
+		return PSM_PARAM_ERR;
+	}
+
+	/* Self is just a loop-back and has no restrictions. */
+	parameters->max_handlers = INT_MAX;
+	parameters->max_nargs = INT_MAX;
+	parameters->max_request_short = INT_MAX;
+	parameters->max_reply_short = INT_MAX;
+
+	return PSM_OK;
+}
+
+static
+psm_error_t
+self_am_short_request(psm_epaddr_t epaddr,
+		      psm_handler_t handler, psm_amarg_t *args, int nargs,
+		      void *src, size_t len, int flags,
+		      psm_am_completion_fn_t completion_fn,
+		      void *completion_ctxt)
+{
+	psm_am_handler_fn_t hfn;
+	psm_ep_t ep = epaddr->ptlctl->ptl->ep;
+	struct psmi_am_token tok;
+
+	tok.epaddr_from = epaddr;
+
+	hfn = psm_am_get_handler_function(ep, handler);
+	hfn(&tok, args, nargs, src, len);
+
+	if (completion_fn) {
+		completion_fn(completion_ctxt);
+	}
+
+	return PSM_OK;
+}
+
+static
+psm_error_t
+self_am_short_reply(psm_am_token_t token,
+		    psm_handler_t handler, psm_amarg_t *args, int nargs,
+		    void *src, size_t len, int flags,
+		    psm_am_completion_fn_t completion_fn, void *completion_ctxt)
+{
+	psm_am_handler_fn_t hfn;
+	struct psmi_am_token *tok = token;
+	psm_ep_t ep = tok->epaddr_from->ptlctl->ptl->ep;
+
+	hfn = psm_am_get_handler_function(ep, handler);
+	hfn(token, args, nargs, src, len);
+
+	if (completion_fn) {
+		completion_fn(completion_ctxt);
+	}
+
+	return PSM_OK;
+}
+
+static
+psm_error_t
+self_connect(ptl_t *ptl,
+	     int numep,
+	     const psm_epid_t array_of_epid[],
+	     const int array_of_epid_mask[],
+	     psm_error_t array_of_errors[],
+	     psm_epaddr_t array_of_epaddr[], uint64_t timeout_ns)
+{
+	psmi_assert_always(ptl->epaddr != NULL);
+	psm_epaddr_t epaddr;
+	psm_error_t err = PSM_OK;
+	int i;
+
+	PSMI_PLOCK_ASSERT();
+
+	for (i = 0; i < numep; i++) {
+		if (!array_of_epid_mask[i])
+			continue;
+
+		if (array_of_epid[i] == ptl->epid) {
+			epaddr = psmi_epid_lookup(ptl->ep, ptl->epid);
+			psmi_assert_always(epaddr == NULL);
+			array_of_epaddr[i] = ptl->epaddr;
+			array_of_epaddr[i]->ptlctl = ptl->ctl;
+			array_of_epaddr[i]->epid = ptl->epid;
+			if (psmi_epid_set_hostname(psm_epid_nid(ptl->epid),
+						   psmi_gethostname(), 0)) {
+				err = PSM_NO_MEMORY;
+				goto fail;
+			}
+			psmi_epid_add(ptl->ep, ptl->epid, ptl->epaddr);
+			array_of_errors[i] = PSM_OK;
+		} else {
+			array_of_epaddr[i] = NULL;
+			array_of_errors[i] = PSM_EPID_UNREACHABLE;
+		}
+	}
+
+fail:
+	return err;
+}
+
+#if 0
+static
+psm_error_t
+self_disconnect(ptl_t *ptl, int numep,
+		const psm_epaddr_t array_of_epaddr[],
+		int array_of_epaddr_mask[], int force, uint64_t timeout_ns)
+{
+	int i;
+	for (i = 0; i < numep; i++) {
+		if (array_of_epaddr_mask[i] == 0)
+			continue;
+
+		if (array_of_epaddr[i] == ptl->epaddr)
+			array_of_epaddr_mask[i] = 1;
+		else
+			array_of_epaddr_mask[i] = 0;
+	}
+	return PSM_OK;
+}
+#endif
+
+static
+size_t self_ptl_sizeof(void)
+{
+	return sizeof(ptl_t);
+}
+
+static
+psm_error_t self_ptl_init(const psm_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
+{
+	psmi_assert_always(ep != NULL);
+	psmi_assert_always(ep->epaddr != NULL);
+	psmi_assert_always(ep->epid != 0);
+
+	ptl->ep = ep;
+	ptl->epid = ep->epid;
+	ptl->epaddr = ep->epaddr;
+	ptl->ctl = ctl;
+
+	memset(ctl, 0, sizeof(*ctl));
+	/* Fill in the control structure */
+	ctl->ptl = ptl;
+	ctl->ep_poll = NULL;
+	ctl->ep_connect = self_connect;
+	ctl->ep_disconnect = NULL;
+
+	ctl->mq_send = self_mq_send;
+	ctl->mq_isend = self_mq_isend;
+
+	ctl->am_get_parameters = self_am_get_parameters;
+	ctl->am_short_request = self_am_short_request;
+	ctl->am_short_reply = self_am_short_reply;
+
+	/* No stats in self */
+	ctl->epaddr_stats_num = NULL;
+	ctl->epaddr_stats_init = NULL;
+	ctl->epaddr_stats_get = NULL;
+
+	return PSM_OK;
+}
+
+static psm_error_t self_ptl_fini(ptl_t *ptl, int force, uint64_t timeout_ns)
+{
+	return PSM_OK;		/* nothing to do */
+}
+
+static
+psm_error_t
+self_ptl_setopt(const void *component_obj, int optname,
+		const void *optval, uint64_t optlen)
+{
+	/* No options for SELF PTL at the moment */
+	return psmi_handle_error(NULL, PSM_PARAM_ERR,
+				 "Unknown SELF ptl option %u.", optname);
+}
+
+static
+psm_error_t
+self_ptl_getopt(const void *component_obj, int optname,
+		void *optval, uint64_t *optlen)
+{
+	/* No options for SELF PTL at the moment */
+	return psmi_handle_error(NULL, PSM_PARAM_ERR,
+				 "Unknown SELF ptl option %u.", optname);
+}
+
+/* Only symbol we expose out of here */
+struct ptl_ctl_init
+psmi_ptl_self = {
+	self_ptl_sizeof, self_ptl_init, self_ptl_fini, self_ptl_setopt,
+	self_ptl_getopt
+};
