@@ -95,16 +95,13 @@
 	 ((((uint64_t)mtu)&0x7)<<34)		|			\
 	 ((((uint64_t)rank)&0x3ffffff)<<37))
 
-/* Rank for ptl_am: unit | ctxt | subctxt */
-#define PSMI_EPID_GET_CTXTID(epid)	(((epid)>>5)&0x1fff)
-
 #define PSMI_EPID_GET_LID(epid)		(((epid)>>18)&0xffff)
 #define PSMI_EPID_GET_CONTEXT(epid)	(((epid)>>10)&0xff)
 #define PSMI_EPID_GET_SUBCONTEXT(epid)	(((epid)>>7)&0x7)
 #define PSMI_EPID_GET_HFIUNIT(epid)	(((epid)>>5)&0x3)
 #define PSMI_EPID_GET_HFITYPE(epid)	(((epid)>>0)&0x1f)
 #define PSMI_EPID_GET_MTU(epid)		(((epid)>>34)&0x7)
-#define PSMI_EPID_GET_RANK(epid)	(((epid)>>5)&0x3ffffff)
+#define PSMI_EPID_GET_RANK(epid)	(((epid)>>37)&0x3ffffff)
 
 #define PSMI_MIN_EP_CONNECT_TIMEOUT (2 * SEC_ULL)
 #define PSMI_MIN_EP_CLOSE_TIMEOUT   (2 * SEC_ULL)

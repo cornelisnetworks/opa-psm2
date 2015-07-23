@@ -356,17 +356,6 @@ ips_ptl_mq_rndv(struct ips_proto *proto, psm_mq_req_t req,
 	req->recv_msgoff = 0;
 	req->rts_peer = (psm_epaddr_t) ipsaddr;
 
-	/* expected tid protocol will be used for this message */
-	if (len > proto->mq->hfi_thresh_rv && proto->protoexp) {
-		req->tsess_count = min((len + proto->mq->hfi_window_rv - 1)
-				       / proto->mq->hfi_window_rv, HFI_TF_NFLOWS);
-		while (req->tsess_count >
-				proto->protoexp->tid_desc_send_free)
-			psmi_poll_internal(proto->mq->ep, 1);
-
-		proto->protoexp->tid_desc_send_free -= req->tsess_count;
-	}
-
 	scb = mq_alloc_pkts(proto, 1, pktlen,
 			    pktlen ? IPS_SCB_FLAG_ADD_BUFFER : 0);
 

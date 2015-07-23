@@ -76,7 +76,7 @@ ptl_handle_rtsmatch_request(psm_mq_req_t req, int was_posted,
 
 	if ((ptl->psmi_kassist_mode & PSMI_KASSIST_GET)
 	    && req->recv_msglen > 0
-	    && (pid = psmi_epaddr_kassist_pid(epaddr))) {
+	    && (pid = psmi_epaddr_pid(epaddr))) {
 		/* cma can be done in handler context or not. */
 		size_t nbytes = cma_get(pid, (void *)req->rts_sbuf,
 					req->buf, req->recv_msglen);
@@ -205,7 +205,7 @@ psmi_am_mq_handler_rtsmatch(void *toki, psm_amarg_t *args, int narg, void *buf,
 		int kassist_mode = ptl->psmi_kassist_mode;
 
 		if (kassist_mode & PSMI_KASSIST_PUT) {
-			int pid = psmi_epaddr_kassist_pid(tok->tok.epaddr_from);
+			int pid = psmi_epaddr_pid(tok->tok.epaddr_from);
 
 			size_t nbytes = cma_put(sreq->buf, pid, dest, msglen);
 			psmi_assert_always(nbytes == msglen);

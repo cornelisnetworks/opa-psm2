@@ -94,7 +94,7 @@ static void amsh_conn_handler(void *toki, psm_amarg_t *args, int narg,
 /* Kassist helper functions */
 static const char *psmi_kassist_getmode(int mode);
 static int psmi_get_kassist_mode();
-int psmi_epaddr_kassist_pid(psm_epaddr_t epaddr);
+int psmi_epaddr_pid(psm_epaddr_t epaddr);
 
 static inline void
 am_ctl_qhdr_init(volatile am_ctl_qhdr_t *q, int elem_cnt, int elem_sz)
@@ -201,8 +201,7 @@ psm_error_t psmi_shm_create(ptl_t *ptl)
 	int shmfd;
 	char *amsh_keyname;
 
-	snprintf(shmbuf, sizeof(shmbuf), "/psm_shm.%04lx-%04lx",
-		 PSMI_EPID_GET_LID(ep->epid), PSMI_EPID_GET_CTXTID(ep->epid));
+	snprintf(shmbuf, sizeof(shmbuf), "/psm_shm.%016lx", ep->epid);
 	amsh_keyname = psmi_strdup(NULL, shmbuf);
 	if (amsh_keyname == NULL) {
 		err = PSM_NO_MEMORY;
@@ -218,8 +217,7 @@ psm_error_t psmi_shm_create(ptl_t *ptl)
 		   psmi_kassist_getmode(ptl->psmi_kassist_mode), use_kassist);
 
 	segsz = am_ctl_sizeof_block();
-	shmfd = shm_open(amsh_keyname,
-				  O_RDWR | O_CREAT | O_EXCL | O_TRUNC, S_IRWXU);
+	shmfd = shm_open(amsh_keyname, O_RDWR | O_CREAT, S_IRWXU);
 	if (shmfd < 0) {
 		err = psmi_handle_error(NULL, PSM_SHMEM_SEGMENT_ERR,
 					"Error creating shared memory object in shm_open%s%s",
@@ -314,8 +312,7 @@ psm_error_t psmi_shm_map_remote(ptl_t *ptl, psm_epid_t epid, uint16_t *shmidx_o)
 		}
 	}
 
-	snprintf(shmbuf, sizeof(shmbuf), "/psm_shm.%04lx-%04lx",
-		 PSMI_EPID_GET_LID(epid), PSMI_EPID_GET_CTXTID(epid));
+	snprintf(shmbuf, sizeof(shmbuf), "/psm_shm.%016lx", epid);
 	use_kassist = (ptl->psmi_kassist_mode != PSMI_KASSIST_OFF);
 
 	segsz = am_ctl_sizeof_block();
@@ -365,7 +362,7 @@ psm_error_t psmi_shm_map_remote(ptl_t *ptl, psm_epid_t epid, uint16_t *shmidx_o)
 		if (ptl->am_ep[i].epid == 0) {
 			ptl->am_ep[i].epid = epid;
 			ptl->am_ep[i].psm_verno = dest_nodeinfo->psm_verno;
-			ptl->am_ep[i].kassist_pid = dest_nodeinfo->kassist_pid;
+			ptl->am_ep[i].pid = dest_nodeinfo->pid;
 			if (use_kassist) {
 				/* If we are able to use CMA assume everyone
 				 * else on the node can also use it.
@@ -644,6 +641,37 @@ fail:
 	return err;
 }
 
+static
+void
+amsh_epaddr_update(ptl_t *ptl, psm_epaddr_t epaddr)
+{
+	am_epaddr_t *amaddr;
+	uint16_t shmidx;
+	struct am_ctl_nodeinfo *nodeinfo;
+
+	amaddr = (am_epaddr_t *) epaddr;
+	shmidx = amaddr->_shmidx;
+	nodeinfo = (struct am_ctl_nodeinfo *) ptl->am_ep[shmidx].amsh_shmbase;
+
+	/* restart the connection process */
+	amaddr->_return_shmidx = -1;
+	AMSH_CSTATE_TO_SET(amaddr, NONE);
+
+	/* wait for the other process to init again */
+	{
+		volatile uint16_t *is_init = &nodeinfo->is_init;
+		while (*is_init == 0)
+			usleep(1);
+	}
+
+	/* get the updated values from the new nodeinfo page */
+	ptl->am_ep[shmidx].psm_verno = nodeinfo->psm_verno;
+	ptl->am_ep[shmidx].pid = nodeinfo->pid;
+	ptl->am_ep[shmidx].amsh_qsizes = nodeinfo->amsh_qsizes;
+	am_update_directory(&ptl->am_ep[shmidx]);
+	return;
+}
+
 struct ptl_connection_req {
 	int isdone;
 	int op;			/* connect or disconnect */
@@ -844,6 +872,20 @@ amsh_ep_connreq_poll(ptl_t *ptl, struct ptl_connection_req *req)
 			}
 			epaddr = req->epaddr[i];
 			psmi_assert(epaddr != NULL);
+
+			/* detect if a race has occurred on due to re-using an
+			 * old shm file - if so, restart the connection */
+			shmidx = ((am_epaddr_t *) epaddr)->_shmidx;
+			if (((am_epaddr_t *) epaddr)->_peer_pid !=
+			    ((struct am_ctl_nodeinfo *) ptl->am_ep[shmidx].amsh_shmbase)->pid) {
+				req->epid_mask[i] = AMSH_CMASK_PREREQ;
+				AMSH_CSTATE_TO_SET((am_epaddr_t *) epaddr,
+						   NONE);
+				n_prereq++;
+				amsh_epaddr_update(ptl, epaddr);
+				continue;
+			}
+
 			cstate = AMSH_CSTATE_TO_GET((am_epaddr_t *) epaddr);
 			if (cstate == AMSH_CSTATE_TO_REPLIED) {
 				req->numep_left--;
@@ -918,6 +960,7 @@ amsh_ep_connreq_poll(ptl_t *ptl, struct ptl_connection_req *req)
 						return err;
 					}
 				}
+				((am_epaddr_t *)epaddr)->_peer_pid = ptl->am_ep[shmidx].pid;
 				req->epaddr[i] = epaddr;
 				req->args[0].u32w0 = PSMI_AM_CONN_REQ;
 				req->args[0].u32w1 = ptl->connect_phase;
@@ -1842,10 +1885,10 @@ amsh_mq_send(psm_mq_t mq, psm_epaddr_t epaddr, uint32_t flags,
 }
 
 /* kassist-related handling */
-int psmi_epaddr_kassist_pid(psm_epaddr_t epaddr)
+int psmi_epaddr_pid(psm_epaddr_t epaddr)
 {
 	uint16_t shmidx = ((am_epaddr_t *) epaddr)->_shmidx;
-	return epaddr->ptlctl->ptl->am_ep[shmidx].kassist_pid;
+	return epaddr->ptlctl->ptl->am_ep[shmidx].pid;
 }
 
 static
@@ -1969,6 +2012,15 @@ amsh_conn_handler(void *toki, psm_amarg_t *args, int narg, void *buf,
 			return;
 		}
 		epaddr = ptl->am_ep[shmidx].epaddr;
+		/* check if a race has occurred on shm-file reuse.
+		 * if so, don't transition to the next state.
+		 * the next call to connreq_poll() will restart the
+		 * connection.
+		*/
+		if (((am_epaddr_t *) epaddr)->_peer_pid !=
+		    ((struct am_ctl_nodeinfo *) ptl->am_ep[shmidx].amsh_shmbase)->pid)
+			break;
+
 		*perr = err;
 		AMSH_CSTATE_TO_SET((am_epaddr_t *) epaddr, REPLIED);
 		((am_epaddr_t *)epaddr)->_return_shmidx = return_shmidx;
@@ -2091,18 +2143,18 @@ amsh_init(psm_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 				AMSH_HAVE_CMA;
 			psmi_shm_mq_rv_thresh =
 				PSMI_MQ_RV_THRESH_CMA;
-			ptl->self_nodeinfo->kassist_pid = (int) getpid();
+			ptl->self_nodeinfo->pid = (int) getpid();
 		} else {
 			ptl->psmi_kassist_mode =
 				PSMI_KASSIST_OFF;
 			psmi_shm_mq_rv_thresh =
 				PSMI_MQ_RV_THRESH_NO_KASSIST;
-			ptl->self_nodeinfo->kassist_pid = 0;
+			ptl->self_nodeinfo->pid = 0;
 		}
 	} else {
 		psmi_shm_mq_rv_thresh =
 			PSMI_MQ_RV_THRESH_NO_KASSIST;
-		ptl->self_nodeinfo->kassist_pid = 0;
+		ptl->self_nodeinfo->pid = 0;
 	}
 	ptl->self_nodeinfo->epid = ep->epid;
 	ptl->self_nodeinfo->epaddr = ep->epaddr;

@@ -271,8 +271,6 @@ ips_protoexp_init(const psmi_context_t *context,
 						"Couldn't allocate tid descriptor memory pool");
 			goto fail;
 		}
-
-		protoexp->tid_desc_send_free = maxsz;
 	}
 
 	/* Receive descriptors are an array in tidflow structure. */
@@ -648,8 +646,6 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 	/* Check if we can complete the send request. */
 	req->send_msgoff += tidsendc->length;
 	if (req->send_msgoff == req->send_msglen) {
-		req->rts_peer->proto->protoexp->tid_desc_send_free +=
-				req->tsess_count;
 		psmi_mq_handle_rts_complete(req);
 	}
 

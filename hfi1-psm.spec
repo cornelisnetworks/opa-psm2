@@ -53,7 +53,7 @@
 Summary: Intel PSM Libraries
 Name: hfi1-psm
 Version: 0.7
-Release: 92
+Release: 97
 License: GPL
 Group: System Environment/Libraries
 URL: http://www.intel.com/
@@ -185,6 +185,18 @@ rm -rf $RPM_BUILD_ROOT
 /usr/include/psm_mq.h
 /usr/include/psm_am.h
 %changelog
+* Thu Jul 23 2015 <paul.j.reger@intel.com>
+- Removes README.OLD and test subdirectory from distribution as it is not needed.
+
+* Tue Jul 21 2015 <paul.j.reger@intel.com>
+- Updates README file for upstreaming PSM 2 source code.
+
+* Mon Jul 20 2015 <paul.j.reger@intel.com>
+- Fixes hang in PSM library.
+
+* Wed Jul 15 2015 <kyle.liddell@intel.com>
+- Improvements to ptl_am shm object naming and initialization
+
 * Tue Jul 7 2015 <kyle.liddell@intel.com>
 - Remove PSM per-job local process limit, cleanup ptl_am
 

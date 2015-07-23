@@ -53,7 +53,7 @@
 
 top_srcdir := ..
 include $(top_srcdir)/buildflags.mak
-INCLUDES += -I$(top_srcdir) -I$(top_srcidr)/ptl_ips
+INCLUDES += -I$(top_srcdir) -I$(top_srcdir)/ptl_ips
 
 ${TARGLIB}-objs := ptl.o ptl_rcvthread.o ips_proto.o ipserror.o ips_recvq.o \
 		   ips_recvhdrq.o ips_spio.o ips_proto_recv.o ips_proto_connect.o \

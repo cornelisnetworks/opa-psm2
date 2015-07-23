@@ -119,7 +119,7 @@ typedef struct psmi_handlertab {
 #define PSMI_KASSIST_MODE_DEFAULT PSMI_KASSIST_CMA_GET
 #define PSMI_KASSIST_MODE_DEFAULT_STRING  "cma-get"
 
-int psmi_epaddr_kassist_pid(psm_epaddr_t epaddr);
+int psmi_epaddr_pid(psm_epaddr_t epaddr);
 
 /*
  * Eventually, we will allow users to register handlers as "don't reply", which
@@ -281,7 +281,8 @@ void psmi_am_reqq_add(int amtype, ptl_t *ptl, psm_epaddr_t epaddr,
 
 #define _shmidx		_ptladdr_u16[0]
 #define _return_shmidx	_ptladdr_u16[1]
-#define _cstate		_ptladdr_u32[1]
+#define _cstate		_ptladdr_u16[2]
+#define _peer_pid	_ptladdr_u16[3]
 
 #define AMSH_CMASK_NONE    0
 #define AMSH_CMASK_PREREQ  1
@@ -431,7 +432,7 @@ struct am_ctl_nodeinfo {
 	uint32_t amsh_features;
 	psm_epid_t epid;
 	psm_epaddr_t epaddr;
-	int kassist_pid;
+	int pid;
 	int shmfd;
 	char *amsh_keyname;
 	uintptr_t amsh_shmbase;

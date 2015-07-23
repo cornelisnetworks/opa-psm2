@@ -108,7 +108,6 @@ struct ips_protoexp {
 	mpool_t tid_sreq_pool;	/* backptr into proto->ep->mq */
 	mpool_t tid_rreq_pool;	/* backptr into proto->ep->mq */
 
-	uint32_t tid_desc_send_free;
 	uint32_t tidflow_seed;
 	uint32_t tid_flags;
 	uint32_t tid_send_fragsize;
@@ -314,9 +313,9 @@ struct ips_tid_get_request {
 	    .env_level = PSMI_ENVVAR_LEVEL_HIDDEN,		\
 	    .minval = 1,					\
 	    .maxval = 1<<30,					\
-	    .mode[PSMI_MEMMODE_NORMAL]  = { 256, 4096 },	\
-	    .mode[PSMI_MEMMODE_MINIMAL] = {   1,    1 },	\
-	    .mode[PSMI_MEMMODE_LARGE]   = { 512, 8192 }		\
+	    .mode[PSMI_MEMMODE_NORMAL]  = { 256,  8192 },	\
+	    .mode[PSMI_MEMMODE_MINIMAL] = {   1,     1 },	\
+	    .mode[PSMI_MEMMODE_LARGE]   = { 512, 16384 }	\
 	}
 
 /*

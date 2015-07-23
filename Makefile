@@ -214,7 +214,7 @@ dist: distclean specfile
 			-name "libcm"                          -prune -o	\
 			-name "makesrpm.sh"                    -prune -o	\
 			-name "psm.supp"                       -prune -o	\
-			-name "README"                         -prune -o	\
+			-name "README.OLD"                     -prune -o	\
 			-name "test"                           -prune -o	\
 			-print); do \
 		dir=$$(dirname $$x); \

@@ -174,8 +174,6 @@ struct psm_mq_req {
 	uint32_t error_code;
 
 	uint16_t msg_seqnum;	/* msg seq num for mctxt */
-	uint16_t tsess_count;	/* tid session count for this message */
-
 	uint32_t recv_msglen;	/* Message length we are ready to receive */
 	uint32_t send_msglen;	/* Message length from sender */
 	uint32_t recv_msgoff;	/* Message offset into buf */
