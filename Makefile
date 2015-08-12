@@ -152,9 +152,9 @@ install: all
 		ln -sf ${TARGLIB}.so.${MAJOR}.${MINOR} ${COMPATLIB}.so ; \
 		ln -sf ${TARGLIB}.so.${MAJOR}.${MINOR} ${TARGLIB}.so.${MAJOR} ; \
 		ln -sf ${TARGLIB}.so.${MAJOR} ${TARGLIB}.so)
-	install -D psm2.h ${DESTDIR}/usr/include/psm2.h
-	install -D psm2_mq.h ${DESTDIR}/usr/include/psm2_mq.h
-	install -D psm2_am.h ${DESTDIR}/usr/include/psm2_am.h
+	install -m 0644 -D psm2.h ${DESTDIR}/usr/include/psm2.h
+	install -m 0644 -D psm2_mq.h ${DESTDIR}/usr/include/psm2_mq.h
+	install -m 0644 -D psm2_am.h ${DESTDIR}/usr/include/psm2_am.h
 	(cd ${DESTDIR}/usr/include ; \
 		ln -sf psm2.h psm.h ; \
 		ln -sf psm2_mq.h psm_mq.h ; \
