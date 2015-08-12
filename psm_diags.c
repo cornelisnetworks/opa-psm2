@@ -275,6 +275,10 @@ void *memcpy_check_one(memcpy_fn_t fn, void *dst, void *src, size_t n)
 	    ((uintptr_t) dst ^ (uintptr_t) src ^ (uintptr_t) n);
 	unsigned int state;
 	size_t i;
+
+	if (!n)
+		return dst;
+
 	memset(src, 0x55, n);
 	memset(dst, 0xaa, n);
 	srand(seed);
