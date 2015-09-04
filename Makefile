@@ -116,6 +116,13 @@ VERSION_RELEASE := $(VERSION)-$(RELEASE)
 
 LDLIBS := -lrt -lpthread -ldl ${EXTRA_LIBS}
 
+PKG_CONFIG ?= pkg-config
+
+UDEVDIR := $(shell $(PKG_CONFIG) --variable=udevdir udev 2>/dev/null)
+ifndef UDEVDIR
+	UDEVDIR = /lib/udev
+endif
+
 all: symlinks
 	for subdir in $(SUBDIRS); do \
 		$(MAKE) -C $$subdir $@ ;\
@@ -152,14 +159,14 @@ install: all
 		ln -sf ${TARGLIB}.so.${MAJOR}.${MINOR} ${COMPATLIB}.so ; \
 		ln -sf ${TARGLIB}.so.${MAJOR}.${MINOR} ${TARGLIB}.so.${MAJOR} ; \
 		ln -sf ${TARGLIB}.so.${MAJOR} ${TARGLIB}.so)
-	install -D psm2.h ${DESTDIR}/usr/include/psm2.h
-	install -D psm2_mq.h ${DESTDIR}/usr/include/psm2_mq.h
-	install -D psm2_am.h ${DESTDIR}/usr/include/psm2_am.h
+	install -m 0644 -D psm2.h ${DESTDIR}/usr/include/psm2.h
+	install -m 0644 -D psm2_mq.h ${DESTDIR}/usr/include/psm2_mq.h
+	install -m 0644 -D psm2_am.h ${DESTDIR}/usr/include/psm2_am.h
 	(cd ${DESTDIR}/usr/include ; \
 		ln -sf psm2.h psm.h ; \
 		ln -sf psm2_mq.h psm_mq.h ; \
 		ln -sf psm2_am.h psm_am.h)
-	install -m 0644 -D 40-psm-compat.rules ${DESTDIR}/etc/udev/rules.d/40-psm-compat.rules
+	install -m 0644 -D 40-psm-compat.rules ${DESTDIR}$(UDEVDIR)/rules.d/40-psm-compat.rules
 
 install-noship: all
 	mkdir -p ${DESTDIR}/usr/include/hfi1diag
