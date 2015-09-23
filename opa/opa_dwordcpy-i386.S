@@ -78,3 +78,7 @@ hfi_dwordcpy:
 	mov %eax,%edi
 	mov %edx,%esi
 	ret
+
+#if defined(__linux__) && defined(__ELF__)
+.section .note.GNU-stack,"",%progbits
+#endif
