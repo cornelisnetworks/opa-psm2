@@ -69,7 +69,7 @@ struct psmi_stats_type {
 static STAILQ_HEAD(, psmi_stats_type) psmi_stats =
 STAILQ_HEAD_INITIALIZER(psmi_stats);
 
-psm_error_t
+psm2_error_t
 psmi_stats_register_type(const char *heading,
 			 uint32_t statstype,
 			 const struct psmi_stats_entry *entries_i,
@@ -78,7 +78,7 @@ psmi_stats_register_type(const char *heading,
 	struct psmi_stats_entry *entries;
 	struct psmi_stats_type *type;
 	int i;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	entries =
 	    psmi_calloc(PSMI_EP_NONE, STATS, num_entries,
@@ -112,7 +112,7 @@ fail:
 	return err;
 }
 
-psm_error_t psmi_stats_deregister_all(void)
+psm2_error_t psmi_stats_deregister_all(void)
 {
 	struct psmi_stats_type *type;
 
@@ -124,7 +124,7 @@ psm_error_t psmi_stats_deregister_all(void)
 		psmi_free(type);
 	}
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 static uint32_t typestring_to_type(const char *typestr)
@@ -200,8 +200,8 @@ void psmi_stats_mpspawn_callback(struct mpspawn_stats_req_args *args)
 
 	if (type->statstype == PSMI_STATSTYPE_DEVCOUNTERS ||
 	    type->statstype == PSMI_STATSTYPE_DEVSTATS) {
-		int unit_id = ((psm_ep_t) type->context)->unit_id;
-		int portno = ((psm_ep_t) type->context)->portnum;
+		int unit_id = ((psm2_ep_t) type->context)->unit_id;
+		int portno = ((psm2_ep_t) type->context)->portnum;
 		uintptr_t off;
 		uint8_t *p = NULL;
 		int nc, npc, ns;
@@ -300,10 +300,10 @@ stats_register_mpspawn_single(mpspawn_stats_add_fn add_fn,
 	return;
 }
 
-static void stats_register_hfi_counters(psm_ep_t ep);
-static void stats_register_hfi_stats(psm_ep_t ep);
-static void stats_register_mem_stats(psm_ep_t ep);
-static psm_error_t psmi_stats_epaddr_register(struct mpspawn_stats_init_args
+static void stats_register_hfi_counters(psm2_ep_t ep);
+static void stats_register_hfi_stats(psm2_ep_t ep);
+static void stats_register_mem_stats(psm2_ep_t ep);
+static psm2_error_t psmi_stats_epaddr_register(struct mpspawn_stats_init_args
 					      *args);
 
 /*
@@ -370,7 +370,7 @@ void *psmi_stats_register(struct mpspawn_stats_init_args *args)
 }
 
 struct stats_epaddr {
-	psm_ep_t ep;
+	psm2_ep_t ep;
 	mpspawn_map_epaddr_fn epaddr_map_fn;
 	int num_ep;
 	int num_ep_stats;
@@ -382,8 +382,8 @@ void psmi_stats_epaddr_callback(struct mpspawn_stats_req_args *args)
 	int i, num, off;
 	uint64_t *statsp;
 	struct stats_epaddr *stats_ctx = (struct stats_epaddr *)args->context;
-	psm_ep_t ep = stats_ctx->ep;
-	psm_epaddr_t epaddr;
+	psm2_ep_t ep = stats_ctx->ep;
+	psm2_epaddr_t epaddr;
 
 	num = stats_ctx->num_ep * stats_ctx->num_ep_stats;
 
@@ -439,7 +439,7 @@ void psmi_stats_epaddr_callback(struct mpspawn_stats_req_args *args)
 }
 
 static
-psm_error_t
+psm2_error_t
 psmi_stats_epaddr_register(struct mpspawn_stats_init_args *args)
 {
 	int i = 0, j;
@@ -450,13 +450,13 @@ psmi_stats_epaddr_register(struct mpspawn_stats_init_args *args)
 	uint16_t *flags, *flags_i;
 	char *p;
 	char buf[128];
-	psm_ep_t ep;
+	psm2_ep_t ep;
 	struct mpspawn_stats_add_args mp_add;
 	struct stats_epaddr *stats_ctx;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	if (args->mq == NULL)
-		return PSM_OK;
+		return PSM2_OK;
 	ep = args->mq->ep;
 
 	/* Figure out how many stats there are in an endpoint from all devices */
@@ -473,13 +473,13 @@ psmi_stats_epaddr_register(struct mpspawn_stats_init_args *args)
 	    psmi_malloc(ep, STATS,
 			sizeof(char *) * num_ep_stats * (num_ep + 1));
 	if (desc == NULL)
-		return PSM_NO_MEMORY;
+		return PSM2_NO_MEMORY;
 	flags =
 	    psmi_malloc(ep, STATS,
 			sizeof(uint16_t) * num_ep_stats * (num_ep + 1));
 	if (flags == NULL) {
 		psmi_free(desc);
-		return PSM_NO_MEMORY;
+		return PSM2_NO_MEMORY;
 	}
 
 	/* Get the descriptions/flags from each device */
@@ -512,7 +512,7 @@ psmi_stats_epaddr_register(struct mpspawn_stats_init_args *args)
 			buf[sizeof(buf) - 1] = '\0';
 			p = psmi_strdup(ep, buf);
 			if (p == NULL) {
-				err = PSM_NO_MEMORY;
+				err = PSM2_NO_MEMORY;
 				goto clean;
 			}
 			desc_i[i * num_ep_stats + j] = p;
@@ -528,7 +528,7 @@ psmi_stats_epaddr_register(struct mpspawn_stats_init_args *args)
 	mp_add.flags = flags_i;
 	stats_ctx = psmi_malloc(ep, STATS, sizeof(struct stats_epaddr));
 	if (stats_ctx == NULL) {
-		err = PSM_NO_MEMORY;
+		err = PSM2_NO_MEMORY;
 		goto clean;
 	}
 	stats_ctx->ep = ep;
@@ -554,7 +554,7 @@ clean:
 }
 
 static
-void stats_register_hfi_counters(psm_ep_t ep)
+void stats_register_hfi_counters(psm2_ep_t ep)
 {
 	int i, nc, npc;
 	char *cnames = NULL, *pcnames = NULL;
@@ -600,7 +600,7 @@ bail:
 }
 
 static
-void stats_register_hfi_stats(psm_ep_t ep)
+void stats_register_hfi_stats(psm2_ep_t ep)
 {
 	int i, ns;
 	char *snames = NULL;
@@ -641,7 +641,7 @@ bail:
 	}
 
 static
-void stats_register_mem_stats(psm_ep_t ep)
+void stats_register_mem_stats(psm2_ep_t ep)
 {
 	struct psmi_stats_entry entries[] = {
 		_SDECL("Total (current)", m_all_total),

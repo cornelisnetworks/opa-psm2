@@ -73,7 +73,7 @@ struct ips_hwcontext_ctrl {
 	struct ips_recvhdrq_state recvq_state;	/* state shared by all subctxts */
 } __attribute__ ((aligned(64)));
 
-psm_error_t
+psm2_error_t
 ips_subcontext_ureg_get(ptl_t *ptl, uint32_t subcontext_cnt,
 			psmi_context_t *context,
 			struct ips_subcontext_ureg **uregp);

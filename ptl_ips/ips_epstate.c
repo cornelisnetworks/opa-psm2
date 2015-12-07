@@ -66,29 +66,29 @@
 /* Allocate new epaddrs in chunks of 128 */
 #define PTL_EPADDR_ALLOC_CHUNK  128
 
-psm_error_t
+psm2_error_t
 ips_epstate_init(struct ips_epstate *eps, const psmi_context_t *context)
 {
 	memset(eps, 0, sizeof(*eps));
 	eps->context = context;
 	eps->eps_base_idx = ((ips_epstate_idx)get_cycles()) &
 				(IPS_EPSTATE_CONNIDX_MAX-1);
-	return PSM_OK;
+	return PSM2_OK;
 }
 
-psm_error_t ips_epstate_fini(struct ips_epstate *eps)
+psm2_error_t ips_epstate_fini(struct ips_epstate *eps)
 {
 	if (eps->eps_tab)
 		psmi_free(eps->eps_tab);
 	memset(eps, 0, sizeof(*eps));
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 /*
  * Add ipsaddr with epid to the epstate table, return new index to caller in
  * 'connidx'.
  */
-psm_error_t
+psm2_error_t
 ips_epstate_add(struct ips_epstate *eps, struct ips_epaddr *ipsaddr,
 		ips_epstate_idx *connidx_o)
 {
@@ -103,7 +103,7 @@ ips_epstate_add(struct ips_epstate *eps, struct ips_epaddr *ipsaddr,
 				eps->eps_tabsize,
 				sizeof(struct ips_epstate_entry));
 		if (newtab == NULL)
-			return PSM_NO_MEMORY;
+			return PSM2_NO_MEMORY;
 		else if (eps->eps_tab) {	/* NOT first alloc */
 			for (i = 0;
 			     i < eps->eps_tabsize - PTL_EPADDR_ALLOC_CHUNK; i++)
@@ -127,20 +127,20 @@ ips_epstate_add(struct ips_epstate *eps, struct ips_epaddr *ipsaddr,
 	psmi_assert_always(i != eps->eps_tabsize);
 	connidx = (j - eps->eps_base_idx) & (IPS_EPSTATE_CONNIDX_MAX-1);
 	_HFI_VDBG("node %s gets connidx=%d (table idx %d)\n",
-		  psmi_epaddr_get_name(((psm_epaddr_t) ipsaddr)->epid), connidx,
+		  psmi_epaddr_get_name(((psm2_epaddr_t) ipsaddr)->epid), connidx,
 		  j);
 	eps->eps_tab[j].ipsaddr = ipsaddr;
 	if (j >= IPS_EPSTATE_CONNIDX_MAX) {
 		return psmi_handle_error(eps->context->ep,
-					 PSM_TOO_MANY_ENDPOINTS,
+					 PSM2_TOO_MANY_ENDPOINTS,
 					 "Can't connect to more than %d non-local endpoints",
 					 IPS_EPSTATE_CONNIDX_MAX);
 	}
 	*connidx_o = connidx;
-	return PSM_OK;
+	return PSM2_OK;
 }
 
-psm_error_t ips_epstate_del(struct ips_epstate *eps, ips_epstate_idx connidx)
+psm2_error_t ips_epstate_del(struct ips_epstate *eps, ips_epstate_idx connidx)
 {
 	ips_epstate_idx idx;
 	/* actual table index */
@@ -150,5 +150,5 @@ psm_error_t ips_epstate_del(struct ips_epstate *eps, ips_epstate_idx connidx)
 	eps->eps_tab[idx].ipsaddr = NULL;
 	/* We may eventually want to release memory, but probably not */
 	eps->eps_tabsizeused--;
-	return PSM_OK;
+	return PSM2_OK;
 }

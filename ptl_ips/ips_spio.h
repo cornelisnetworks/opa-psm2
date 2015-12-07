@@ -62,17 +62,43 @@
 struct ips_spio;
 struct ptl;
 
-psm_error_t ips_spio_init(const psmi_context_t *context,
-			  struct ptl *ptl, struct ips_spio *ctrl);
-psm_error_t ips_spio_fini(struct ips_spio *ctrl);
+/* 64B move instruction support */
+#define AVX512F_BIT		16	/* level 07h, ebx */
+/* 32B move instruction support */
+#define AVX2_BIT		 5	/* level 07h, ebx */
+/* 16B move instruction support */
+#define SSE2_BIT		26	/* level 01h, edx */
 
-psm_error_t ips_spio_transfer_frame(struct ips_proto *proto,
-				    struct ips_flow *flow, struct hfi_pbc *pbc,
-				    uint32_t *payload, uint32_t length,
-				    uint32_t isCtrlMsg, uint32_t cksum_valid,
-				    uint32_t cksum);
+typedef
+void (*ips_spio_blockcpy_fn_t)(volatile uint64_t *dest,
+				const uint64_t *src, uint32_t nblock);
+#ifdef __AVX512F__
+void hfi_pio_blockcpy_512(volatile uint64_t *dest,
+				const uint64_t *src, uint32_t nblock);
+#endif
+#ifdef __AVX2__
+void hfi_pio_blockcpy_256(volatile uint64_t *dest,
+				const uint64_t *src, uint32_t nblock);
+#endif
+#ifdef __SSE2__
+void hfi_pio_blockcpy_128(volatile uint64_t *dest,
+				const uint64_t *src, uint32_t nblock);
+#endif
+void hfi_pio_blockcpy_64(volatile uint64_t *dest,
+				const uint64_t *src, uint32_t nblock);
 
-psm_error_t ips_spio_process_events(struct ips_spio *ctrl);
+
+psm2_error_t ips_spio_init(const psmi_context_t *context,
+				struct ptl *ptl, struct ips_spio *ctrl);
+psm2_error_t ips_spio_fini(struct ips_spio *ctrl);
+
+psm2_error_t ips_spio_transfer_frame(struct ips_proto *proto,
+				struct ips_flow *flow, struct hfi_pbc *pbc,
+				uint32_t *payload, uint32_t length,
+				uint32_t isCtrlMsg, uint32_t cksum_valid,
+				uint32_t cksum);
+
+psm2_error_t ips_spio_process_events(const struct ptl *ptl);
 
 #define SPIO_CREDITS_Counter(value)       (((value) >> 0) & 0x7FF)
 #define SPIO_CREDITS_Status(value)        (((value) >> 11) & 0x1)
@@ -142,8 +168,12 @@ struct ips_spio {
 	uint64_t spio_last_stall_cyc;
 	uint64_t spio_init_cyc;
 
-	psm_error_t (*spio_reset_hfi)(struct ips_spio *ctrl);
-	psm_error_t (*spio_credit_return_update)(struct ips_spio *ctrl);
+	psm2_error_t (*spio_reset_hfi)(struct ips_spio *ctrl);
+	psm2_error_t (*spio_credit_return_update)(struct ips_spio *ctrl);
+
+	/* 8B copying, 16B copying, 32B copying, and 64B copying */
+	ips_spio_blockcpy_fn_t spio_blockcpy_routines[4];
+	ips_spio_blockcpy_fn_t spio_blockcpy_selected;
 };
 
 #endif /* IPS_SPIO_H */

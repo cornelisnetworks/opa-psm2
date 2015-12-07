@@ -244,8 +244,8 @@ int hfi_get_num_contexts(int unit_id)
 		if (unit_id == HFI_UNIT_ID_ANY) {
 			uint32_t u, p;
 			for (u = 0; u < units; u++) {
-				for (p = 1; p <= HFI_MAX_PORT; p++)
-					if (hfi_get_port_lid(u, p) != -1)
+				for (p = HFI_MIN_PORT; p <= HFI_MAX_PORT; p++)
+					if (hfi_get_port_lid(u, p) > 0)
 						break;
 				if (p <= HFI_MAX_PORT &&
 				    !hfi_sysfs_unit_read_s64(u, "nctxts", &val,
@@ -254,8 +254,8 @@ int hfi_get_num_contexts(int unit_id)
 			}
 		} else {
 			uint32_t p;
-			for (p = 1; p <= HFI_MAX_PORT; p++)
-				if (hfi_get_port_lid(unit_id, p) != -1)
+			for (p = HFI_MIN_PORT; p <= HFI_MAX_PORT; p++)
+				if (hfi_get_port_lid(unit_id, p) > 0)
 					break;
 			if (p <= HFI_MAX_PORT &&
 			    !hfi_sysfs_unit_read_s64(unit_id, "nctxts", &val,
@@ -267,18 +267,13 @@ int hfi_get_num_contexts(int unit_id)
 	return n;
 }
 
-/* Given the unit number, return an error, or the corresponding LID
-   For now, it's used only so the MPI code can determine it's own
-   LID, and which other LIDs (if any) are also assigned to this node
-   Returns an int, so -1 indicates an error.  0 may indicate that
-   the unit is valid, but no LID has been assigned.
-   No error print because we call this for both potential
-   ports without knowing if both ports exist (or are connected) */
-int hfi_get_port_lid(int unit, int port)
+/* Given a unit number and port number, returns 1 if the unit and port are active.
+   returns 0 if the unit and port are not active.
+   returns -1 when an error occurred. */
+int hfi_get_port_active(int unit, int port)
 {
 	int ret;
 	char *state;
-	int64_t val;
 
 	ret = hfi_sysfs_port_read(unit, port, "phys_state", &state);
 	if (ret == -1) {
@@ -291,17 +286,32 @@ int hfi_get_port_lid(int unit, int port)
 			_HFI_DBG
 			    ("Failed to get phys_state for unit %u:%u: %s\n",
 			     unit, port, strerror(errno));
+		return -1;
 	} else {
 		if (strncmp(state, "5: LinkUp", 9)) {
 			_HFI_DBG("Link is not Up for unit %u:%u\n", unit, port);
-			ret = -1;
+			free(state);
+			return 0;
 		}
 		free(state);
+		return 1;
 	}
-	/* If link is not up, we think lid not valid */
-	if (ret == -1)
-		return ret;
+}
 
+/* Given the unit number, return an error, or the corresponding LID
+   For now, it's used only so the MPI code can determine it's own
+   LID, and which other LIDs (if any) are also assigned to this node
+   Returns an int, so -1 indicates an error.  0 may indicate that
+   the unit is valid, but no LID has been assigned.
+   No error print because we call this for both potential
+   ports without knowing if both ports exist (or are connected) */
+int hfi_get_port_lid(int unit, int port)
+{
+	int ret;
+	int64_t val;
+
+	if (hfi_get_port_active(unit,port) != 1)
+		return -2;
 	ret = hfi_sysfs_port_read_s64(unit, port, "lid", &val, 0);
 	_HFI_VDBG("hfi_get_port_lid: ret %d, unit %d port %d\n", ret, unit,
 		  port);
@@ -638,7 +648,8 @@ int hfi_get_cc_settings_bin(int unit, int port, char *ccabuf)
 
 int hfi_get_cc_table_bin(int unit, int port, uint16_t **cctp)
 {
-	int i, ccti_limit;
+	int i;
+	unsigned short ccti_limit;
 	uint16_t *cct;
 	int fd;
 	char pathname[256];
@@ -651,12 +662,12 @@ int hfi_get_cc_table_bin(int unit, int port, uint16_t **cctp)
 		_HFI_CCADBG("Open cc_table_bin failed. using static CCA\n");
 		return 0;
 	}
-	if (read(fd, &ccti_limit, 2) != 2) {
+	if (read(fd, &ccti_limit, sizeof(ccti_limit)) != sizeof(ccti_limit)) {
 		_HFI_CCADBG("Read ccti_limit failed. using static CCA\n");
 		close(fd);
 		return 0;
 	}
-	if (ccti_limit < 63 || ccti_limit > 65535) {
+	if (ccti_limit < 63) {
 		_HFI_CCADBG("Read ccti_limit %d not in range [63, 65535], "
 			    "using static CCA.\n", ccti_limit);
 		close(fd);

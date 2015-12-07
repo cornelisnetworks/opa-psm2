@@ -59,14 +59,14 @@
 #include "psm_user.h"
 
 #if 0
-typedef psm_error_t(*psm_mq_unexpected_callback_fn_t)
-	(psm_mq_t mq, uint16_t mode, psm_epaddr_t epaddr,
+typedef psm2_error_t(*psm_mq_unexpected_callback_fn_t)
+	(psm2_mq_t mq, uint16_t mode, psm2_epaddr_t epaddr,
 	 uint64_t tag, uint32_t send_msglen, const void *payload,
 	 uint32_t paylen);
 #endif
 
-struct psm_mq {
-	psm_ep_t ep;		/**> ep back pointer */
+struct psm2_mq {
+	psm2_ep_t ep;		/**> ep back pointer */
 	mpool_t sreq_pool;
 	mpool_t rreq_pool;
 
@@ -78,7 +78,7 @@ struct psm_mq {
 
 	struct mqsq outoforder_q;
 				/**> OutofOrder queue */
-	 STAILQ_HEAD(, psm_mq_req) eager_q;
+	 STAILQ_HEAD(, psm2_mq_req) eager_q;
 				       /**> eager request queue */
 
 	uint32_t hfi_thresh_rv;
@@ -86,7 +86,7 @@ struct psm_mq {
 	uint32_t hfi_window_rv;
 	int memmode;
 
-	psm_mq_stats_t stats;	/**> MQ stats, accumulated by each PTL */
+	psm2_mq_stats_t stats;	/**> MQ stats, accumulated by each PTL */
 	int print_stats;
 };
 
@@ -124,7 +124,7 @@ struct psm_mq {
  * The 'LIMITS' predefines fill in a psmi_rlimits_mpool structure
  */
 #define MQ_SENDREQ_LIMITS {					\
-	    .env = "PSM_MQ_SENDREQS_MAX",			\
+	    .env = "PSM2_MQ_SENDREQS_MAX",			\
 	    .descr = "Max num of isend requests in flight",	\
 	    .env_level = PSMI_ENVVAR_LEVEL_USER,		\
 	    .minval = 1,					\
@@ -135,7 +135,7 @@ struct psm_mq {
 	}
 
 #define MQ_RECVREQ_LIMITS {					\
-	    .env = "PSM_MQ_RECVREQS_MAX",			\
+	    .env = "PSM2_MQ_RECVREQS_MAX",			\
 	    .descr = "Max num of irecv requests in flight",	\
 	    .env_level = PSMI_ENVVAR_LEVEL_USER,		\
 	    .minval = 1,					\
@@ -145,24 +145,24 @@ struct psm_mq {
 	    .mode[PSMI_MEMMODE_LARGE]   = { 8192, 16777216 }	\
 	}
 
-typedef psm_error_t(*mq_rts_callback_fn_t) (psm_mq_req_t req, int was_posted);
-typedef psm_error_t(*mq_testwait_callback_fn_t) (psm_mq_req_t *req);
+typedef psm2_error_t(*mq_rts_callback_fn_t) (psm2_mq_req_t req, int was_posted);
+typedef psm2_error_t(*mq_testwait_callback_fn_t) (psm2_mq_req_t *req);
 
 /* receive mq_req, the default */
-struct psm_mq_req {
+struct psm2_mq_req {
 	struct {
-		psm_mq_req_t next;
-		psm_mq_req_t *pprev;	/* used in completion queue */
-		 STAILQ_ENTRY(psm_mq_req) nextq;	/* used for eager only */
+		psm2_mq_req_t next;
+		psm2_mq_req_t *pprev;	/* used in completion queue */
+        STAILQ_ENTRY(psm2_mq_req) nextq;	/* used for eager only */
 	};
 	uint32_t state;
 	uint32_t type;
-	psm_mq_t mq;
+	psm2_mq_t mq;
 
 	/* Tag matching vars */
-	psm_epaddr_t peer;
-	psm_mq_tag_t tag;
-	psm_mq_tag_t tagsel;	/* used for receives */
+	psm2_epaddr_t peer;
+	psm2_mq_tag_t tag;
+	psm2_mq_tag_t tagsel;	/* used for receives */
 
 	/* Some PTLs want to get notified when there's a test/wait event */
 	mq_testwait_callback_fn_t testwait_callback;
@@ -188,11 +188,11 @@ struct psm_mq_req {
 
 	/* Used to keep track of unexpected rendezvous */
 	mq_rts_callback_fn_t rts_callback;
-	psm_epaddr_t rts_peer;
+	psm2_epaddr_t rts_peer;
 	uintptr_t rts_sbuf;
 
 	/* PTLs get to store their own per-request data.  MQ manages the allocation
-	 * by allocating psm_mq_req so that ptl_req_data has enough space for all
+	 * by allocating psm2_mq_req so that ptl_req_data has enough space for all
 	 * possible PTLs.
 	 */
 	union {
@@ -248,13 +248,13 @@ mq_copy_tiny(uint32_t *dest, uint32_t *src, uint8_t len))
 	}
 }
 
-/* Typedef describing a function to populate a psm_mq_status(2)_t given a
+/* Typedef describing a function to populate a psm2_mq_status(2)_t given a
  * matched request.  The purpose of this typedef is to avoid duplicating
  * code to handle both PSM v1 and v2 status objects.  Outer routines pass in
  * either mq_status_copy or mq_status2_copy and the inner routine calls that
  * provided routine to fill in the correct status type.
  */
-typedef void (*psmi_mq_status_copy_t) (psm_mq_req_t req, void *status);
+typedef void (*psmi_mq_status_copy_t) (psm2_mq_req_t req, void *status);
 
 /*
  * Given an req with buffer ubuf of length ubuf_len,
@@ -265,7 +265,7 @@ typedef void (*psmi_mq_status_copy_t) (psm_mq_req_t req, void *status);
  */
 PSMI_ALWAYS_INLINE(
 void
-mq_status_copy(psm_mq_req_t req, psm_mq_status_t *status))
+mq_status_copy(psm2_mq_req_t req, psm2_mq_status_t *status))
 {
 	status->msg_tag = *((uint64_t *) req->tag.tag);
 	status->msg_length = req->send_msglen;
@@ -276,7 +276,7 @@ mq_status_copy(psm_mq_req_t req, psm_mq_status_t *status))
 
 PSMI_ALWAYS_INLINE(
 void
-mq_status2_copy(psm_mq_req_t req, psm_mq_status2_t *status))
+mq_status2_copy(psm2_mq_req_t req, psm2_mq_status2_t *status))
 {
 	status->msg_peer = req->peer;
 	status->msg_tag = req->tag;
@@ -288,23 +288,23 @@ mq_status2_copy(psm_mq_req_t req, psm_mq_status2_t *status))
 
 PSMI_ALWAYS_INLINE(
 uint32_t
-mq_set_msglen(psm_mq_req_t req, uint32_t recvlen, uint32_t sendlen))
+mq_set_msglen(psm2_mq_req_t req, uint32_t recvlen, uint32_t sendlen))
 {
 	req->send_msglen = sendlen;
 	if (recvlen < sendlen) {
 		req->recv_msglen = recvlen;
-		req->error_code = PSM_MQ_TRUNCATION;
+		req->error_code = PSM2_MQ_TRUNCATION;
 		return recvlen;
 	} else {
 		req->recv_msglen = sendlen;
-		req->error_code = PSM_OK;
+		req->error_code = PSM2_OK;
 		return sendlen;
 	}
 }
 
 #ifndef PSM_DEBUG
 /*! Append to Queue */
-PSMI_ALWAYS_INLINE(void mq_qq_append(struct mqq *q, psm_mq_req_t req))
+PSMI_ALWAYS_INLINE(void mq_qq_append(struct mqq *q, psm2_mq_req_t req))
 {
 	req->next = NULL;
 	req->pprev = q->lastp;
@@ -324,14 +324,14 @@ PSMI_ALWAYS_INLINE(void mq_qq_append(struct mqq *q, psm_mq_req_t req))
 	} while (0)
 #endif
 
-PSMI_ALWAYS_INLINE(void mq_sq_append(struct mqsq *q, psm_mq_req_t req))
+PSMI_ALWAYS_INLINE(void mq_sq_append(struct mqsq *q, psm2_mq_req_t req))
 {
 	req->next = NULL;
 	*(q->lastp) = req;
 	q->lastp = &req->next;
 }
 
-PSMI_ALWAYS_INLINE(void mq_qq_remove(struct mqq *q, psm_mq_req_t req))
+PSMI_ALWAYS_INLINE(void mq_qq_remove(struct mqq *q, psm2_mq_req_t req))
 {
 	if (req->next != NULL)
 		req->next->pprev = req->pprev;
@@ -340,17 +340,17 @@ PSMI_ALWAYS_INLINE(void mq_qq_remove(struct mqq *q, psm_mq_req_t req))
 	*(req->pprev) = req->next;
 }
 
-psm_error_t psmi_mq_req_init(psm_mq_t mq);
-psm_error_t psmi_mq_req_fini(psm_mq_t mq);
-psm_mq_req_t psmi_mq_req_alloc(psm_mq_t mq, uint32_t type);
+psm2_error_t psmi_mq_req_init(psm2_mq_t mq);
+psm2_error_t psmi_mq_req_fini(psm2_mq_t mq);
+psm2_mq_req_t psmi_mq_req_alloc(psm2_mq_t mq, uint32_t type);
 #define      psmi_mq_req_free(req)  psmi_mpool_put(req)
 
 /*
  * Main receive progress engine, for shmops and hfi, in mq.c
  */
-psm_error_t psmi_mq_malloc(psm_mq_t *mqo);
-psm_error_t psmi_mq_initialize_defaults(psm_mq_t mq);
-psm_error_t psmi_mq_free(psm_mq_t mq);
+psm2_error_t psmi_mq_malloc(psm2_mq_t *mqo);
+psm2_error_t psmi_mq_initialize_defaults(psm2_mq_t mq);
+psm2_error_t psmi_mq_free(psm2_mq_t mq);
 
 /* Three functions that handle all MQ stuff */
 #define MQ_RET_MATCH_OK	0
@@ -359,40 +359,40 @@ psm_error_t psmi_mq_free(psm_mq_t mq);
 #define MQ_RET_DATA_OK 3
 #define MQ_RET_DATA_OUT_OF_ORDER 4
 
-void psmi_mq_handle_rts_complete(psm_mq_req_t req);
-int psmi_mq_handle_data(psm_mq_t mq, psm_mq_req_t req,
+void psmi_mq_handle_rts_complete(psm2_mq_req_t req);
+int psmi_mq_handle_data(psm2_mq_t mq, psm2_mq_req_t req,
 			uint32_t offset, const void *payload, uint32_t paylen);
-int psmi_mq_handle_rts(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *tag,
+int psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		       uint32_t msglen, const void *payload, uint32_t paylen,
 		       int msgorder, mq_rts_callback_fn_t cb,
-		       psm_mq_req_t *req_o);
-int psmi_mq_handle_envelope(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *tag,
+		       psm2_mq_req_t *req_o);
+int psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 			    uint32_t msglen, uint32_t offset,
 			    const void *payload, uint32_t paylen, int msgorder,
-			    uint32_t opcode, psm_mq_req_t *req_o);
-int psmi_mq_handle_outoforder(psm_mq_t mq, psm_mq_req_t req);
+			    uint32_t opcode, psm2_mq_req_t *req_o);
+int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t req);
 
-void psmi_mq_stats_register(psm_mq_t mq, mpspawn_stats_add_fn add_fn);
+void psmi_mq_stats_register(psm2_mq_t mq, mpspawn_stats_add_fn add_fn);
 
 /*! @brief Try to match against an mqsq using a tag only
  *
  * @param[in] q Match Queue
- * @param[in] src Source (sender) epaddr, may NOT be PSM_MQ_ANY_ADDR.
+ * @param[in] src Source (sender) epaddr, may NOT be PSM2_MQ_ANY_ADDR.
  * @param[in] tag Input Tag
  * @param[in] remove Non-zero to remove the req from the queue
  *
  * @returns NULL if no match or an mq request if there is a match
  */
 PSMI_ALWAYS_INLINE(
-psm_mq_req_t
-mq_req_match(struct mqsq *q, psm_epaddr_t src, psm_mq_tag_t *tag, int remove))
+psm2_mq_req_t
+mq_req_match(struct mqsq *q, psm2_epaddr_t src, psm2_mq_tag_t *tag, int remove))
 {
-	psm_mq_req_t *curp;
-	psm_mq_req_t cur;
+	psm2_mq_req_t *curp;
+	psm2_mq_req_t cur;
 
-	psmi_assert(src != PSM_MQ_ANY_ADDR);
+	psmi_assert(src != PSM2_MQ_ANY_ADDR);
 	for (curp = &q->first; (cur = *curp) != NULL; curp = &cur->next) {
-		if ((cur->peer == PSM_MQ_ANY_ADDR || src == cur->peer) &&
+		if ((cur->peer == PSM2_MQ_ANY_ADDR || src == cur->peer) &&
 		    !((tag->tag[0] ^ cur->tag.tag[0]) & cur->tagsel.tag[0]) &&
 		    !((tag->tag[1] ^ cur->tag.tag[1]) & cur->tagsel.tag[1]) &&
 		    !((tag->tag[2] ^ cur->tag.tag[2]) & cur->tagsel.tag[2])) {
@@ -409,11 +409,11 @@ mq_req_match(struct mqsq *q, psm_epaddr_t src, psm_mq_tag_t *tag, int remove))
 }
 
 PSMI_ALWAYS_INLINE(
-psm_mq_req_t
+psm2_mq_req_t
 mq_ooo_match(struct mqsq *q, void *msgctl, uint16_t msg_seqnum))
 {
-	psm_mq_req_t *curp;
-	psm_mq_req_t cur;
+	psm2_mq_req_t *curp;
+	psm2_mq_req_t cur;
 
 	for (curp = &q->first; (cur = *curp) != NULL; curp = &cur->next) {
 		if (cur->ptl_req_ptr == msgctl && cur->msg_seqnum == msg_seqnum) {
@@ -428,10 +428,10 @@ mq_ooo_match(struct mqsq *q, void *msgctl, uint16_t msg_seqnum))
 }
 
 PSMI_ALWAYS_INLINE(
-psm_mq_req_t
-mq_eager_match(psm_mq_t mq, void *peer, uint16_t msg_seqnum))
+psm2_mq_req_t
+mq_eager_match(psm2_mq_t mq, void *peer, uint16_t msg_seqnum))
 {
-	psm_mq_req_t cur;
+	psm2_mq_req_t cur;
 
 	cur = STAILQ_FIRST(&mq->eager_q);
 	while (cur) {
@@ -446,13 +446,13 @@ mq_eager_match(psm_mq_t mq, void *peer, uint16_t msg_seqnum))
 /* Not exposed in public psm, but may extend parts of PSM 2.1 to support
  * this feature before 2.3 */
 psm_mq_unexpected_callback_fn_t
-psmi_mq_register_unexpected_callback(psm_mq_t mq,
+psmi_mq_register_unexpected_callback(psm2_mq_t mq,
 				     psm_mq_unexpected_callback_fn_t fn);
 #endif
 
-PSMI_ALWAYS_INLINE(void psmi_mq_stats_rts_account(psm_mq_req_t req))
+PSMI_ALWAYS_INLINE(void psmi_mq_stats_rts_account(psm2_mq_req_t req))
 {
-	psm_mq_t mq = req->mq;
+	psm2_mq_t mq = req->mq;
 	if (MQE_TYPE_IS_SEND(req->type)) {
 		mq->stats.tx_num++;
 		mq->stats.tx_rndv_num++;

@@ -394,7 +394,7 @@ ips_proto_epaddr_stats_set(struct ips_proto *proto, uint8_t msgtype))
  * Exported there solely for inlining is_expected_or_nak and mq_tiny handling
  */
 extern
-psm_error_t ips_proto_send_ctrl_message(struct ips_flow *flow,
+psm2_error_t ips_proto_send_ctrl_message(struct ips_flow *flow,
 		uint8_t message_type, uint16_t *msg_queue_mask,
 		ips_scb_t *ctrlscb, void *payload, uint32_t paylen);
 
@@ -459,13 +459,13 @@ ips_proto_is_expected_or_nak(struct ips_recvhdrq_event *rcv_ev))
 	ips_epaddr_t *ipsaddr = rcv_ev->ipsaddr;
 	struct ips_message_header *p_hdr = rcv_ev->p_hdr;
 	ips_epaddr_flow_t flowid = ips_proto_flowid(p_hdr);
-	struct ips_flow *flow = &ipsaddr->flows[flowid];
+	struct ips_flow *flow;
 	psmi_seqnum_t sequence_num;
 
 	psmi_assert((flowid == EP_FLOW_GO_BACK_N_PIO) ||
-		    (flowid == EP_FLOW_GO_BACK_N_DMA)
+		           (flowid == EP_FLOW_GO_BACK_N_DMA)
 	    );
-
+	flow = &ipsaddr->flows[flowid];
 	/* If packet faced congestion generate BECN in NAK. */
 	if_pf((rcv_ev->is_congested & IPS_RECV_EVENT_FECN) &&
 	      ((flow->cca_ooo_pkts & 0xf) == 0)) {
@@ -575,7 +575,7 @@ ips_proto_check_msg_order(ips_epaddr_t *ipsaddr,
 
 	/* The first time to see an OOO message, leave it there and try
 	 * next time. But we need to revert back the receiving flow PSN. */
-	uint32_t psn_mask = ((psm_epaddr_t)ipsaddr)->proto->psn_mask;
+	uint32_t psn_mask = ((psm2_epaddr_t)ipsaddr)->proto->psn_mask;
 	flow->recv_seq_num.psn_num =
 		(flow->recv_seq_num.psn_num - 1) & psn_mask;
 	return IPS_MSG_ORDER_FUTURE;
@@ -627,12 +627,12 @@ ips_proto_process_packet(const struct ips_recvhdrq_event *rcv_ev))
  */
 
 PSMI_ALWAYS_INLINE(
-psm_error_t
-ips_recv_progress_if_busy(ptl_t *ptl, psm_error_t err))
+psm2_error_t
+ips_recv_progress_if_busy(ptl_t *ptl, psm2_error_t err))
 {
-	if (err == PSM_EP_NO_RESOURCES) {
+	if (err == PSM2_EP_NO_RESOURCES) {
 		ptl->ctl->ep_poll(ptl, 0);
-		return PSM_OK;
+		return PSM2_OK;
 	} else
 		return err;
 }

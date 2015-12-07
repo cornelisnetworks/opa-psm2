@@ -164,13 +164,15 @@ struct ips_scb {
 
 	union {
 		int (*callback) (void *, uint32_t);
-		psm_am_completion_fn_t completion_am;
+		psm2_am_completion_fn_t completion_am;
 	};
 	void *cb_param;
 
-	/* sdma header place hold, when psm code access
-	 * the 8 bytes before pbc, it should be OK. */
-	uint64_t sdmahdr;
+	/* sdma header place holder, psm code should access
+	 * the sdma_req_info only using the following accessor.
+	 * Given an IPS_SCB pointer, return the sdma_req_info pointer: */
+#define psmi_get_sdma_req_info(IPS_SCB) ((struct sdma_req_info *)(((char*)&IPS_SCB->pbc)-sizeof(struct sdma_req_info)))
+	struct sdma_req_info _DO_NOT_USE_;
 	struct {
 		struct hfi_pbc pbc;
 		struct ips_message_header ips_lrh;
@@ -184,13 +186,13 @@ ips_scb_t *ips_scbctrl_alloc(struct ips_scbctrl *scbc,
 			     int scbnum, int len, uint32_t flags);
 ips_scb_t *ips_scbctrl_alloc_tiny(struct ips_scbctrl *scbc);
 
-psm_error_t ips_scbctrl_init(const psmi_context_t *context,
+psm2_error_t ips_scbctrl_init(const psmi_context_t *context,
 			     uint32_t numscb, uint32_t numbufs,
 			     uint32_t imm_size, uint32_t bufsize,
 			     ips_scbctrl_avail_callback_fn_t,
 			     void *avail_context, struct ips_scbctrl *);
-psm_error_t ips_scbctrl_fini(struct ips_scbctrl *);
+psm2_error_t ips_scbctrl_fini(struct ips_scbctrl *);
 
-psm_error_t ips_scbctrl_writev(struct ips_scb_slist *slist, int fd);
+psm2_error_t ips_scbctrl_writev(struct ips_scb_slist *slist, int fd);
 
 #endif /* _IPS_SCB_H */

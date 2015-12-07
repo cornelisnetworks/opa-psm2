@@ -87,14 +87,14 @@ struct ips_writehdrq {
 	uint32_t runtime_flags;
 };
 
-psm_error_t
+psm2_error_t
 ips_writehdrq_init(const psmi_context_t *context,
 		   const struct ips_recvq_params *hdrq_params,
 		   const struct ips_recvq_params *egrq_params,
 		   struct ips_writehdrq *writeq,
 		   struct ips_writehdrq_state *state, uint32_t runtime_flags);
 
-psm_error_t ips_writehdrq_fini(struct ips_writehdrq *writeq);
+psm2_error_t ips_writehdrq_fini(struct ips_writehdrq *writeq);
 
 PSMI_ALWAYS_INLINE(
 void

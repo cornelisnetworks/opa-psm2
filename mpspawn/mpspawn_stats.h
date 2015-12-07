@@ -94,8 +94,8 @@ typedef void (*mpspawn_stats_req_fn) (struct mpspawn_stats_req_args *);
 /* mpspawn implements this function to allow clients to register new stats */
 typedef void (*mpspawn_stats_add_fn) (struct mpspawn_stats_add_args *);
 /* mpspawn implements this function to map rank indexes into epaddr structs */
-struct psm_epaddr;
-typedef struct psm_epaddr *(*mpspawn_map_epaddr_fn) (int rank);
+struct psm2_epaddr;
+typedef struct psm2_epaddr *(*mpspawn_map_epaddr_fn) (int rank);
 
 typedef struct mpspawn_stats_req_args {
 	int version;
@@ -119,7 +119,7 @@ struct mpspawn_stats_add_args {
 typedef
 struct mpspawn_stats_init_args {
 	int version;
-	psm_mq_t mq;		/* initialized mq endpoint */
+	psm2_mq_t mq;		/* initialized mq endpoint */
 	int num_epaddr;		/* number of endpoints in job */
 	mpspawn_stats_add_fn add_fn;	/* function for client to add stats */
 	mpspawn_map_epaddr_fn epaddr_map_fn;

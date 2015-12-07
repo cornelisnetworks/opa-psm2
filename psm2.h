@@ -53,8 +53,8 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
-#ifndef PSM_H
-#define PSM_H
+#ifndef PSM2_H
+#define PSM2_H
 
 #include <stdint.h>
 
@@ -66,16 +66,16 @@ extern "C" {
  * @file psm.h
  */
 /*!
- * @mainpage PSM API
+ * @mainpage PSM2 API
  *
- * @brief PSM OPA Messaging Library
+ * @brief PSM2 OPA Messaging Library
  *
- * The PSM OPA Messaging API, or PSM API, is QLogic's low-level
+ * The PSM2 OPA Messaging API, or PSM2 API, is Intel's low-level
  * user-level communications interface for the OPA family of products.
- * PSM users are enabled with mechanisms necessary to implement higher level
+ * PSM2 users are enabled with mechanisms necessary to implement higher level
  * communications interfaces in parallel environments.
  *
- * Since PSM targets clusters of multicore processors, it internally implements
+ * Since PSM2 targets clusters of multicore processors, it internally implements
  * two levels of communication: intra-node shared memory communication and
  * inter-node OPA communication.  Both of these levels are encapsulated
  * below the interface and the user is free to assume that intra-node and
@@ -83,39 +83,39 @@ extern "C" {
  *
  * @section compat Compatibility
  *
- * PSM can coexist with other QLogic/Pathscale software distributions, such as
+ * PSM2 can coexist with other QLogic/Pathscale software distributions, such as
  * OpenIB/OpenFabrics, which allows applications to simultaneously target
  * PSM-based and non PSM-based applications on a single node without changing
- * any system-level configuration.  However, PSM does not support running
+ * any system-level configuration.  However, PSM2 does not support running
  * PSM-based and non PSM-based communication within the same user process.
  *
- * While there are future plans to extend PSM to support multi-threaded
- * applications, PSM
+ * While there are future plans to extend PSM2 to support multi-threaded
+ * applications, PSM2
  * is currently a single-threaded library. This means that the user cannot make
- * @e any concurrent PSM library calls.  While threads may
- * be a valid execution model for the wider set of potential PSM clients,
+ * @e any concurrent PSM2 library calls.  While threads may
+ * be a valid execution model for the wider set of potential PSM2 clients,
  * applications should currently expect better effective use
  * of OPA resources (and hence better performance) by dedicating a
- * single PSM communication endpoint to every CPU core.
+ * single PSM2 communication endpoint to every CPU core.
  *
- * Except where noted, PSM does not assume an SPMD (single program, multiple
+ * Except where noted, PSM2 does not assume an SPMD (single program, multiple
  * data) parallel model and extends to MPMD (multiple program, multiple data)
- * environments in specific areas. However, PSM assumes the runtime environment
+ * environments in specific areas. However, PSM2 assumes the runtime environment
  * to be homogeneous on all nodes in bit width (32-bit or 64-bit) and endianness
  * (little or big) and will fail at startup if any of these assumptions do not
- * hold.  For homogeneous systems PSM can run either in 32-bit or 64-bit
+ * hold.  For homogeneous systems PSM2 can run either in 32-bit or 64-bit
  * environments.  Even though both environments should expect similar
- * performance from the API, PSM has chosen to favor 64-bit environments in
+ * performance from the API, PSM2 has chosen to favor 64-bit environments in
  * some minor areas.
  *
  * @section ep_model Endpoint Communication Model
  *
- * PSM follows an endpoint communication model where an endpoint is defined as
+ * PSM2 follows an endpoint communication model where an endpoint is defined as
  * an object (or handle) instantiated to support sending and receiving messages
- * to other endpoints.  In order to prevent PSM from being tied to a particular
+ * to other endpoints.  In order to prevent PSM2 from being tied to a particular
  * parallel model (such as SPMD), control over the parallel layout of endpoints
- * is retained by the user.  Opening endpoints (@ref psm_ep_open) and
- * connecting endpoints to enable communication (@ref psm_ep_connect) are two
+ * is retained by the user.  Opening endpoints (@ref psm2_ep_open) and
+ * connecting endpoints to enable communication (@ref psm2_ep_connect) are two
  * decoupled mechanisms.  Users that do not dynamically change the number of
  * endpoints beyond parallel startup will probably lump both mechanisms
  * together at startup.  Users that wish to manipulate the location and amount
@@ -124,24 +124,24 @@ extern "C" {
  *
  * As a side effect, this greater flexibility forces the user to cope with a
  * two-stage initialization process.  In the first stage of opening an endpoint
- * (@ref psm_ep_open), a user obtains an opaque handle to the endpoint and a
- * globally distributable endpoint identifier (@ref psm_epid_t).  Prior to the
- * second stage of connecting endpoints (@ref psm_ep_connect), a user must
+ * (@ref psm2_ep_open), a user obtains an opaque handle to the endpoint and a
+ * globally distributable endpoint identifier (@ref psm2_epid_t).  Prior to the
+ * second stage of connecting endpoints (@ref psm2_ep_connect), a user must
  * distribute all relevent endpoint identifiers through an out-of-band
  * mechanism.  Once the endpoint identifiers are successfully distributed to
  * all processes that wish to communicate, the user
  * connects all endpoint identifiers to the locally opened endpoint
- * (@ref psm_ep_connect).  In connecting the endpoints, the user obtains an
- * opaque endpoint address (@ref psm_epaddr_t), which is required for all PSM
+ * (@ref psm2_ep_connect).  In connecting the endpoints, the user obtains an
+ * opaque endpoint address (@ref psm2_epaddr_t), which is required for all PSM
  * communication primitives.
  *
  *
- * @section components PSM Components
+ * @section components PSM2 Components
  *
- * PSM exposes a single endpoint initialization model, but enables various
+ * PSM2 exposes a single endpoint initialization model, but enables various
  * levels of communication functionality and semantics through @e components.
- * The first major component available in PSM is PSM Matched Queues
- * (@ref psm_mq), and the second is PSM Active Message (@ref psm_am).
+ * The first major component available in PSM2 is PSM2 Matched Queues
+ * (@ref psm2_mq), and the second is PSM2 Active Message (@ref psm2_am).
  *
  * Matched Queues (MQ) present a queue-based communication model with the
  * distinction that queue consumers use a 3-tuple of metadata to match incoming
@@ -153,7 +153,7 @@ extern "C" {
  * handler code. This can be used to implement many one-sided and two-sided
  * communications paradigms.
  *
- * With future releases of the PSM interface, more components will
+ * With future releases of the PSM2 interface, more components will
  * be exposed to accomodate users that implement parallel communication
  * models that deviate from the Matched Queue semantics.  For example, PSM
  * plans to expose a connection management component to make it easier to
@@ -161,31 +161,31 @@ extern "C" {
  * managers.
  *
  *
- * @section progress PSM Communication Progress Guarantees
+ * @section progress PSM2 Communication Progress Guarantees
  *
- * PSM internally ensures progress of both intra-node and inter-node messages,
+ * PSM2 internally ensures progress of both intra-node and inter-node messages,
  * but not autonomously.  This means that while performance does not depend
  * greatly on how the user decides to schedule communication progress,
- * explicit progress calls are required for correctness.  The @ref psm_poll
- * function is available to make progress over all PSM components in a generic
+ * explicit progress calls are required for correctness.  The @ref psm2_poll
+ * function is available to make progress over all PSM2 components in a generic
  * manner.  For more information on making progress over many communication
  * operations in the MQ component, see the @ref mq_progress documentation.
  *
  *
- * @section completion PSM Completion semantics
+ * @section completion PSM2 Completion semantics
  *
- * PSM implements the MQ component, which documents its own
+ * PSM2 implements the MQ component, which documents its own
  * message completion semantics (@ref mq_completion).
  *
  *
- * @section error_handling PSM Error handling
+ * @section error_handling PSM2 Error handling
  *
- * PSM exposes a list of user and runtime errors enumerated in @ref psm_error.
+ * PSM2 exposes a list of user and runtime errors enumerated in @ref psm2_error.
  * While most errors are fatal in that the user is not expected to be able to
- * recover from them, PSM still allows some level of control.  By
- * default, PSM returns all errors to the user but as a convenience, allows
- * users to either defer errors internally to PSM or to have PSM return all
- * errors to the user (callers to PSM functions).  PSM attempts to deallocate
+ * recover from them, PSM2 still allows some level of control.  By
+ * default, PSM2 returns all errors to the user but as a convenience, allows
+ * users to either defer errors internally to PSM2 or to have PSM2 return all
+ * errors to the user (callers to PSM2 functions).  PSM2 attempts to deallocate
  * its resources as a best effort, but exits are always non-collective with
  * respect to endpoints opened in other processes.  The user is expected to be
  * able to handle non-collective exits from any endpoint and in turn cleanly
@@ -200,84 +200,58 @@ extern "C" {
  * parameter.
  *
  * @li @b Global error handling captures errors for functions where a
- * particular endpoint cannot be identified or for @ref psm_ep_open, where
+ * particular endpoint cannot be identified or for @ref psm2_ep_open, where
  * errors (if any) occur before the endpoint is opened.
  *
  * Error handling is controlled by registering error handlers (@ref
- * psm_error_register_handler).  The global error handler can
- * be set at any time (even before @ref psm_init), whereas a per-endpoint error
+ * psm2_error_register_handler).  The global error handler can
+ * be set at any time (even before @ref psm2_init), whereas a per-endpoint error
  * handler can be set as soon as a new endpoint is succesfully created.  If a
  * per-endpoint handle is not registered, the per-endpoint handler inherits
  * from the global error handler at time of open.
  *
- * PSM predefines two different mechanisms for handling errors:
+ * PSM2 predefines two different mechanisms for handling errors:
  *
- * @li PSM-internal error handler (@ref PSM_ERRHANDLER_PSM_HANDLER)
- * @li No-op PSM error handler where errors are returned
- *     (@ref PSM_ERRHANDLER_NO_HANDLER)
+ * @li PSM-internal error handler (@ref PSM2_ERRHANDLER_PSM2_HANDLER)
+ * @li No-op PSM2 error handler where errors are returned
+ *     (@ref PSM2_ERRHANDLER_NO_HANDLER)
  *
  * The default PSM-internal error handler effectively frees the user from
- * explicitly handling the return values of ever PSM function but may not
+ * explicitly handling the return values of ever PSM2 function but may not
  * return to the user in a function determined to have caused a fatal error.
  *
- * The No-op PSM error handler bypasses all error handling functionality and
+ * The No-op PSM2 error handler bypasses all error handling functionality and
  * always returns the error to the user.  The user can then use @ref
- * psm_error_get_string to obtain a generic string from an error code (compared
+ * psm2_error_get_string to obtain a generic string from an error code (compared
  * to a more detailed error message available through registering of error
  * handlers).
  *
  * For even more control, users can register their own error handlers to have
  * access to more precise error strings and selectively control when an when
- * not to return to callers of PSM functions.  All error handlers shown defer
- * error handling to PSM for errors that are not recognized using @ref
- * psm_error_defer.  Deferring an error from a custom error handler is
+ * not to return to callers of PSM2 functions.  All error handlers shown defer
+ * error handling to PSM2 for errors that are not recognized using @ref
+ * psm2_error_defer.  Deferring an error from a custom error handler is
  * equivalent to relying on the default error handler.
  *
  * @section env_var Environment variables
  *
- * Some PSM behaviour can be controlled via environment variables.
+ * Some PSM2 behaviour can be controlled via environment variables.
  *
- * @li @b PSM_DEVICES. PSM implements three devices for communication which
- * are, in order,  @c self, @c shm and @c hfi.  For PSM jobs that do not
- * require shared-memory communications, @b PSM_DEVICES can be specified as @c
+ * @li @b PSM2_DEVICES. PSM2 implements three devices for communication which
+ * are, in order,  @c self, @c shm and @c hfi.  For PSM2 jobs that do not
+ * require shared-memory communications, @b PSM2_DEVICES can be specified as @c
  * self, @c hfi.  Similarly, for shared-memory only jobs, the @c hfi device
  * can be disabled.  It is up to the user to ensure that the endpoint ids
- * passed in @ref psm_ep_connect do not require a device that has been
+ * passed in @ref psm2_ep_connect do not require a device that has been
  * explicitly disabled by the user.  In some instances, enabling only the
  * devices that are required may improve performance.
  *
- * @li @b PSM_TRACEMASK. Depending on the value of the tracemask, various parts
- * of PSM will output debugging information.  With a default value of @c 0x1,
+ * @li @b PSM2_TRACEMASK. Depending on the value of the tracemask, various parts
+ * of PSM2 will output debugging information.  With a default value of @c 0x1,
  * informative messages will be printed (this value should be considered a
  * minimum).  At @c 0x101, startup and finalization messages are added to the
  * output.  At @c 0x1c3, every communication event is logged and should hence
  * be used for extreme debugging only.
- */
-
-/*! @page changes
- *
- * @b v1.07 @b 24-February-2012:
- *   @li Add PSM AM interface
- *
- * @b v1.06 @b 10-March-2008:
- *   @li Internal updates, for InfiniPath 2.2 release.
- *
- * @b v1.05 @b 10-February-2006:
- *   @li Add support for psm_map_nid_hostname and
- *       psm_ep_open_opts_get_defaults.
- *
- * @b v1.04 @b 9-February-2006:
- *   @li Internal updates, requiring minor version bump.
- *
- * @b v1.03 @b 30-August-2006:
- *   @li Changed the default PSM behaviour to return errors instead of handling
- *       them internally.
- *
- * @b v1.02 @b 23-August-2006:
- *   @li Internal updates, requiring minor version bump.
- *
- * @b v1.01 @b 17-August-2006:
- *   @li Added a network_pkey parameter to struct psm_ep_open_opts.
  */
 
 /** @brief Local endpoint handle (opaque)
@@ -288,233 +262,233 @@ extern "C" {
  * not intended to globally identify the opened endpoint in any way.
  *
  * All open endpoint handles can be globally identified using the endpoint id
- * integral type (@ref psm_epid_t) and all communication must use an endpoint
- * address (@ref psm_epaddr_t) that can be obtained by connecting a local
+ * integral type (@ref psm2_epid_t) and all communication must use an endpoint
+ * address (@ref psm2_epaddr_t) that can be obtained by connecting a local
  * endpoint to one or more endpoint identifiers.
  *
  * @remark The local endpoint handle is opaque to the user.  */
-typedef struct psm_ep *psm_ep_t;
+typedef struct psm2_ep *psm2_ep_t;
 
 /** @brief MQ handle (opaque)
  * @ingroup mq
  *
  * Handle returned to the user when a new Matched queue is created (@ref
- * psm_mq_init).  */
-typedef struct psm_mq *psm_mq_t;
+ * ps2m_mq_init).  */
+typedef struct psm2_mq *psm2_mq_t;
 
-/*! @defgroup init PSM Initialization and Maintenance
+/*! @defgroup init PSM2 Initialization and Maintenance
  * @{
  */
-#define PSM_VERNO       0x0200	/*!< Header-defined Version number */
-#define PSM_VERNO_MAJOR 0x02	/*!< Header-defined Major Version Number */
-#define PSM_VERNO_MINOR 0x00	/*!< Header-defined Minor Version Number */
-#define PSM_VERNO_COMPAT_MAJOR 0x01	/*!<PSM1 Major Version Number> */
+#define PSM2_VERNO       0x0201	/*!< Header-defined Version number */
+#define PSM2_VERNO_MAJOR 0x02	/*!< Header-defined Major Version Number */
+#define PSM2_VERNO_MINOR 0x01	/*!< Header-defined Minor Version Number */
+#define PSM2_VERNO_COMPAT_MAJOR 0x01	/*!<PSM1 Major Version Number> */
 
-/*! @brief PSM Error type
+/*! @brief PSM2 Error type
  */
-enum psm_error {
+enum psm2_error {
 	/*! Interface-wide "ok", guaranteed to be 0. */
-	PSM_OK = 0,
-	/*! No events progressed on @ref psm_poll (not fatal) */
-	PSM_OK_NO_PROGRESS = 1,
+	PSM2_OK = 0,
+	/*! No events progressed on @ref psm2_poll (not fatal) */
+	PSM2_OK_NO_PROGRESS = 1,
 	/*! Error in a function parameter */
-	PSM_PARAM_ERR = 3,
-	/*! PSM ran out of memory */
-	PSM_NO_MEMORY = 4,
-	/*! PSM has not been initialized by @ref psm_init */
-	PSM_INIT_NOT_INIT = 5,
-	/*! API version passed in @ref psm_init is incompatible */
-	PSM_INIT_BAD_API_VERSION = 6,
-	/*! PSM Could not set affinity */
-	PSM_NO_AFFINITY = 7,
-	/*! PSM Unresolved internal error */
-	PSM_INTERNAL_ERR = 8,
-	/*! PSM could not set up shared memory segment */
-	PSM_SHMEM_SEGMENT_ERR = 9,
-	/*! PSM option is a read-only option */
-	PSM_OPT_READONLY = 10,
-	/*! PSM operation timed out */
-	PSM_TIMEOUT = 11,
+	PSM2_PARAM_ERR = 3,
+	/*! PSM2 ran out of memory */
+	PSM2_NO_MEMORY = 4,
+	/*! PSM2 has not been initialized by @ref psm2_init */
+	PSM2_INIT_NOT_INIT = 5,
+	/*! API version passed in @ref psm2_init is incompatible */
+	PSM2_INIT_BAD_API_VERSION = 6,
+	/*! PSM2 Could not set affinity */
+	PSM2_NO_AFFINITY = 7,
+	/*! PSM2 Unresolved internal error */
+	PSM2_INTERNAL_ERR = 8,
+	/*! PSM2 could not set up shared memory segment */
+	PSM2_SHMEM_SEGMENT_ERR = 9,
+	/*! PSM2 option is a read-only option */
+	PSM2_OPT_READONLY = 10,
+	/*! PSM2 operation timed out */
+	PSM2_TIMEOUT = 11,
 	/*! Too many endpoints */
-	PSM_TOO_MANY_ENDPOINTS = 12,
+	PSM2_TOO_MANY_ENDPOINTS = 12,
 
-	/*! PSM is finalized */
-	PSM_IS_FINALIZED = 13,
+	/*! PSM2 is finalized */
+	PSM2_IS_FINALIZED = 13,
 
 	/*! Endpoint was closed */
-	PSM_EP_WAS_CLOSED = 20,
-	/*! PSM Could not find an OPA Unit */
-	PSM_EP_NO_DEVICE = 21,
+	PSM2_EP_WAS_CLOSED = 20,
+	/*! PSM2 Could not find an OPA Unit */
+	PSM2_EP_NO_DEVICE = 21,
 	/*! User passed a bad unit or port number */
-	PSM_EP_UNIT_NOT_FOUND = 22,
+	PSM2_EP_UNIT_NOT_FOUND = 22,
 	/*! Failure in initializing endpoint */
-	PSM_EP_DEVICE_FAILURE = 23,
+	PSM2_EP_DEVICE_FAILURE = 23,
 	/*! Error closing the endpoing error */
-	PSM_EP_CLOSE_TIMEOUT = 24,
+	PSM2_EP_CLOSE_TIMEOUT = 24,
 	/*! No free ports could be obtained */
-	PSM_EP_NO_PORTS_AVAIL = 25,
+	PSM2_EP_NO_PORTS_AVAIL = 25,
 	/*! Could not detect network connectivity */
-	PSM_EP_NO_NETWORK = 26,
+	PSM2_EP_NO_NETWORK = 26,
 	/*! Invalid Unique job-wide UUID Key */
-	PSM_EP_INVALID_UUID_KEY = 27,
+	PSM2_EP_INVALID_UUID_KEY = 27,
 	/*! Internal out of resources */
-	PSM_EP_NO_RESOURCES = 28,
+	PSM2_EP_NO_RESOURCES = 28,
 
 	/*! Endpoint connect status unknown (because of other failures or if
 	 * connect attempt timed out) */
-	PSM_EPID_UNKNOWN = 40,
-	/*! Endpoint could not be reached by any PSM component */
-	PSM_EPID_UNREACHABLE = 41,
+	PSM2_EPID_UNKNOWN = 40,
+	/*! Endpoint could not be reached by any PSM2 component */
+	PSM2_EPID_UNREACHABLE = 41,
 	/*! At least one of the connecting nodes was incompatible in endianess */
-	PSM_EPID_INVALID_NODE = 43,
+	PSM2_EPID_INVALID_NODE = 43,
 	/*! At least one of the connecting nodes provided an invalid MTU */
-	PSM_EPID_INVALID_MTU = 44,
+	PSM2_EPID_INVALID_MTU = 44,
 	/*! At least one of the connecting nodes provided a bad key */
-	PSM_EPID_INVALID_UUID_KEY = 45,
+	PSM2_EPID_INVALID_UUID_KEY = 45,
 	/*! At least one of the connecting nodes is running an incompatible
-	 * PSM protocol version */
-	PSM_EPID_INVALID_VERSION = 46,
+	 * PSM2 protocol version */
+	PSM2_EPID_INVALID_VERSION = 46,
 	/*! At least one node provided garbled information */
-	PSM_EPID_INVALID_CONNECT = 47,
+	PSM2_EPID_INVALID_CONNECT = 47,
 	/*! EPID was already connected */
-	PSM_EPID_ALREADY_CONNECTED = 48,
+	PSM2_EPID_ALREADY_CONNECTED = 48,
 	/*! EPID is duplicated, network connectivity problem */
-	PSM_EPID_NETWORK_ERROR = 49,
+	PSM2_EPID_NETWORK_ERROR = 49,
 	/*! EPID incompatible partition keys */
-	PSM_EPID_INVALID_PKEY = 50,
+	PSM2_EPID_INVALID_PKEY = 50,
 	/*! Unable to resolve path for endpoint */
-	PSM_EPID_PATH_RESOLUTION = 51,
+	PSM2_EPID_PATH_RESOLUTION = 51,
 
 	/*! MQ Non-blocking request is incomplete */
-	PSM_MQ_NO_COMPLETIONS = 60,
+	PSM2_MQ_NO_COMPLETIONS = 60,
 	/*! MQ Message has been truncated at the receiver */
-	PSM_MQ_TRUNCATION = 61,
+	PSM2_MQ_TRUNCATION = 61,
 
 	/*! AM reply error */
-	PSM_AM_INVALID_REPLY = 70,
+	PSM2_AM_INVALID_REPLY = 70,
 
-	PSM_ERROR_LAST = 80
+	PSM2_ERROR_LAST = 80
 };
 
 /* Backwards header compatibility for a confusing error return name */
-#define PSM_MQ_INCOMPLETE PSM_MQ_NO_COMPLETIONS
+#define PSM2_MQ_INCOMPLETE PSM2_MQ_NO_COMPLETIONS
 
-/*! @see psm_error */
-typedef enum psm_error psm_error_t;
+/*! @see psm2_error */
+typedef enum psm2_error psm2_error_t;
 
-/*! @brief PSM Error type
+/*! @brief PSM2 Error type
  */
-enum psm_component {
-	/*! PSM core library */
-	PSM_COMPONENT_CORE = 0,
+enum psm2_component {
+	/*! PSM2 core library */
+	PSM2_COMPONENT_CORE = 0,
 	/*! MQ component */
-	PSM_COMPONENT_MQ = 1,
+	PSM2_COMPONENT_MQ = 1,
 	/*! AM component */
-	PSM_COMPONENT_AM = 2,
+	PSM2_COMPONENT_AM = 2,
 	/*! IB component */
-	PSM_COMPONENT_IB = 3
+	PSM2_COMPONENT_IB = 3
 };
 
-/*! @see psm_component */
-typedef enum psm_component psm_component_t;
+/*! @see psm2_component */
+typedef enum psm2_component psm2_component_t;
 
-/*! @brief PSM Path resolution mechanism
+/*! @brief PSM2 Path resolution mechanism
  */
-enum psm_path_res {
-	/*! PSM no path resolution */
-	PSM_PATH_RES_NONE = 0,
+enum psm2_path_res {
+	/*! PSM2 no path resolution */
+	PSM2_PATH_RES_NONE = 0,
 	/*! Use OFED Plus for path resolution */
-	PSM_PATH_RES_OPP = 1,
+	PSM2_PATH_RES_OPP = 1,
 	/*! Use OFED UMAD for path resolution */
-	PSM_PATH_RES_UMAD = 2
+	PSM2_PATH_RES_UMAD = 2
 };
 
-/*! @see psm_path_resolution */
-typedef enum psm_path_res psm_path_res_t;
+/*! @see psm2_path_resolution */
+typedef enum psm2_path_res psm2_path_res_t;
 
-/** @brief Initialize PSM interface
+/** @brief Initialize PSM2 interface
  *
- * Call to initialize the PSM library for a desired API revision number.
+ * Call to initialize the PSM2 library for a desired API revision number.
  *
  * @param[in,out] api_verno_major As input a pointer to an integer that holds
- *                                @ref PSM_VERNO_MAJOR. As output, the pointer
+ *                                @ref PSM2_VERNO_MAJOR. As output, the pointer
  *                                is updated with the major revision number of
  *                                the loaded library.
  * @param[in,out] api_verno_minor As intput, a pointer to an integer that holds
- *                                @ref PSM_VERNO_MINOR.  As output, the pointer
+ *                                @ref PSM2_VERNO_MINOR.  As output, the pointer
  *                                is updated with the minor revision number of
  *                                the loaded library.
  *
- * @pre The user has not called any other PSM library call except @ref
- *      psm_error_register_handler to register a global error handler.
+ * @pre The user has not called any other PSM2 library call except @ref
+ *      psm2_error_register_handler to register a global error handler.
  *
- * @warning PSM initialization is a precondition for all functions used in the
- *          PSM library.
+ * @warning PSM2 initialization is a precondition for all functions used in the
+ *          PSM2 library.
  *
- * @returns PSM_OK The PSM interface could be opened and the desired API
+ * @returns PSM2_OK The PSM2 interface could be opened and the desired API
  *                 revision can be provided.
- * @returns PSM_INIT_BAD_API_VERSION The PSM library cannot compatibility for
+ * @returns PSM2_INIT_BAD_API_VERSION The PSM2 library cannot compatibility for
  *                                   the desired API version.
  *
  * @verbatim
  * // In this example, we want to handle our own errors before doing init,
  * // since we don't want a fatal error if OPA is not found.
- * // Note that @ref psm_error_register_handler (and @ref psm_uuid_generate)
- * // are the only function that can be called before @ref psm_init
+ * // Note that @ref psm2_error_register_handler (and @ref psm2_uuid_generate)
+ * // are the only function that can be called before @ref psm2_init
  *
  * int try_to_initialize_psm() {
- *     int verno_major = PSM_VERNO_MAJOR;
- *     int verno_minor = PSM_VERNO_MINOR;
+ *     int verno_major = PSM2_VERNO_MAJOR;
+ *     int verno_minor = PSM2_VERNO_MINOR;
  *
- *     int err = psm_error_register_handler(NULL,  // Global handler
- *                                  PSM_ERRHANDLER_NO_HANDLER); // return errors
+ *     int err = psm2_error_register_handler(NULL,  // Global handler
+ *                                  PSM2_ERRHANDLER_NO_HANDLER); // return errors
  *     if (err) {
  *        fprintf(stderr, "Couldn't register global handler: %s\n",
- *		    psm_error_get_string(err));
+ *		          psm2_error_get_string(err));
  *        return -1;
  *     }
  *
- *     err = psm_init(&verno_major, &verno_minor);
- *     if (err || verno_major > PSM_VERNO_MAJOR) {
+ *     err = psm2_init(&verno_major, &verno_minor);
+ *     if (err || verno_major > PSM2_VERNO_MAJOR) {
  *        if (err)
- *	      fprintf(stderr, "PSM initialization failure: %s\n",
- *	                               psm_error_get_string(err));
+ *	      fprintf(stderr, "PSM2 initialization failure: %s\n",
+ *	              psm2_error_get_string(err));
  *	  else
- *	      fprintf(stderr, "PSM loaded an unexpected/unsupported "
+ *	      fprintf(stderr, "PSM2 loaded an unexpected/unsupported "
  *	                      "version (%d.%d)\n", verno_major, verno_minor);
  *	  return -1;
  *     }
  *
- *     // We were able to initialize PSM but will defer all further error
+ *     // We were able to initialize PSM2 but will defer all further error
  *     // handling since most of the errors beyond this point will be fatal.
- *     int err = psm_error_register_handler(NULL,  // Global handler
- *                                  PSM_ERRHANDLER_PSM_HANDLER); //
+ *     int err = psm2_error_register_handler(NULL,  // Global handler
+ *                                           PSM2_ERRHANDLER_PSM2_HANDLER);
  *     if (err) {
  *        fprintf(stderr, "Couldn't register global errhandler: %s\n",
- *		    psm_error_get_string(err));
+ *		          psm2_error_get_string(err));
  *        return -1;
  *     }
  *     return 1;
  * }
  * @endverbatim
  */
-psm_error_t psm_init(int *api_verno_major, int *api_verno_minor);
+psm2_error_t psm2_init(int *api_verno_major, int *api_verno_minor);
 
-/** @brief Finalize PSM interface
+/** @brief Finalize PSM2 interface
  *
- * Single call to finalize PSM and close all unclosed endpoints
+ * Single call to finalize PSM2 and close all unclosed endpoints
  *
- * @post The user guarantees not to make any further PSM calls, including @ref
- * psm_init.
+ * @post The user guarantees not to make any further PSM2 calls, including @ref
+ * psm2_init.
  *
- * @returns PSM_OK Always returns @c PSM_OK */
-psm_error_t psm_finalize(void);
+ * @returns PSM2_OK Always returns @c PSM2_OK */
+psm2_error_t psm2_finalize(void);
 
 /** @brief Error handling opaque token
  *
  * A token is required for users that register their own handlers and wish to
  * defer further error handling to PSM. */
-typedef struct psm_error_token *psm_error_token_t;
+typedef struct psm2_error_token *psm2_error_token_t;
 
 /** @brief Error handling function
  *
@@ -526,38 +500,38 @@ typedef struct psm_error_token *psm_error_token_t;
  * @param[in] ep Handle associated to the endpoint over which the error occured
  *               or @c NULL if the error is being handled by the global error
  *               handler.
- * @param[in] error PSM error identifier
+ * @param[in] error PSM2 error identifier
  * @param[in] error_string A descriptive error string of maximum length @ref
- *                         PSM_ERRSTRING_MAXLEN.
- * @param[in] token Opaque PSM token associated with the particular event that
+ *                         PSM2_ERRSTRING_MAXLEN.
+ * @param[in] token Opaque PSM2 token associated with the particular event that
  *		    generated the error.  The token can be used to extract the
- *		    error string and can be passed to @ref psm_error_defer to
+ *		    error string and can be passed to @ref psm2_error_defer to
  *		    defer any remaining or unhandled error handling to PSM.
  *
  * @post If the error handler returns, the error returned is propagated to the
  *       caller.  */
-typedef psm_error_t(*psm_ep_errhandler_t) (psm_ep_t ep,
-					   const psm_error_t error,
+typedef psm2_error_t(*psm2_ep_errhandler_t) (psm2_ep_t ep,
+					   const psm2_error_t error,
 					   const char *error_string,
-					   psm_error_token_t token);
+					   psm2_error_token_t token);
 
 /* Obsolete names, only here for backwards compatibility */
-#define PSM_ERRHANDLER_DEFAULT	((psm_ep_errhandler_t)-1)
-#define PSM_ERRHANDLER_NOP	((psm_ep_errhandler_t)-2)
+#define PSM2_ERRHANDLER_DEFAULT	((psm2_ep_errhandler_t)-1)
+#define PSM2_ERRHANDLER_NOP	((psm2_ep_errhandler_t)-2)
 
-#define PSM_ERRHANDLER_PSM_HANDLER  ((psm_ep_errhandler_t)-1)
-/**< PSM error handler as explained in @ref error_handling */
+#define PSM2_ERRHANDLER_PSM_HANDLER  ((psm2_ep_errhandler_t)-1)
+/**< PSM2 error handler as explained in @ref error_handling */
 
-#define PSM_ERRHANDLER_NO_HANDLER   ((psm_ep_errhandler_t)-2)
-/**< Bypasses the default PSM error handler and returns all errors to the user
+#define PSM2_ERRHANDLER_NO_HANDLER   ((psm2_ep_errhandler_t)-2)
+/**< Bypasses the default PSM2 error handler and returns all errors to the user
  * (this is the default) */
 
-#define PSM_ERRSTRING_MAXLEN	512 /**< Maximum error string length. */
+#define PSM2_ERRSTRING_MAXLEN	512 /**< Maximum error string length. */
 
-/** @brief PSM error handler registration
+/** @brief PSM2 error handler registration
  *
  * Function to register error handlers on a global basis and on a per-endpoint
- * basis.  PSM_ERRHANDLER_PSM_HANDLER and PSM_ERRHANDLER_NO_HANDLER are special
+ * basis.  PSM2_ERRHANDLER_PSM2_HANDLER and PSM2_ERRHANDLER_NO_HANDLER are special
  * pre-defined handlers to respectively enable use of the default PSM-internal
  * handler or the no-handler that disables registered error handling and
  * returns all errors to the caller (both are documented in @ref
@@ -567,20 +541,20 @@ typedef psm_error_t(*psm_ep_errhandler_t) (psm_ep_t ep,
  *               registered.  With ep set to @c NULL, the behavior of the
  *               global error handler can be controlled.
  * @param[in] errhandler Handler to register.  Can be a user-specific error
- *                       handling function or PSM_ERRHANDLER_PSM_HANDLER or
- *                       PSM_ERRHANDLER_NO_HANDLER.
+ *                       handling function or PSM2_ERRHANDLER_PSM2_HANDLER or
+ *                       PSM2_ERRHANDLER_NO_HANDLER.
  *
  * @remark When ep is set to @c NULL, this is the only function that can be
- * called before @ref psm_init
+ * called before @ref psm2_init
  */
-psm_error_t
-psm_error_register_handler(psm_ep_t ep, const psm_ep_errhandler_t errhandler);
+psm2_error_t
+psm2_error_register_handler(psm2_ep_t ep, const psm2_ep_errhandler_t errhandler);
 
-/** @brief PSM deferred error handler
+/** @brief PSM2 deferred error handler
  *
- * Function to handle fatal PSM errors if no error handler is installed or if
+ * Function to handle fatal PSM2 errors if no error handler is installed or if
  * the user wishes to defer further error handling to PSM.  Depending on the
- * type of error, PSM may or may not return from the function call.
+ * type of error, PSM2 may or may not return from the function call.
  *
  * @param[in] err_token Error token initially passed to error handler
  *
@@ -589,32 +563,32 @@ psm_error_register_handler(psm_ep_t ep, const psm_ep_errhandler_t errhandler);
  *
  * @post The function may or may not return depending on the error
  */
-psm_error_t psm_error_defer(psm_error_token_t err_token);
+psm2_error_t psm2_error_defer(psm2_error_token_t err_token);
 
 /** @brief Get generic error string from error
  *
- * Function to return the default error string associated to a PSM error.
+ * Function to return the default error string associated to a PSM2 error.
  *
  * While a more detailed and precise error string is usually available within
  * error handlers, this function is available to obtain an error string out of
  * an error handler context or when a no-op error handler is registered.
  *
- * @param[in] error PSM error
+ * @param[in] error PSM2 error
  */
-const char *psm_error_get_string(psm_error_t error);
+const char *psm2_error_get_string(psm2_error_t error);
 
 /** @brief Option key/pair structure
  *
  * Currently only used in MQ.
  */
-struct psm_optkey {
+struct psm2_optkey {
 	uint32_t key;	/**< Option key */
 	void *value;	/**< Option value */
 };
 
 /*! @} */
 
-/*! @defgroup ep PSM Device Endpoint Management
+/*! @defgroup ep PSM2 Device Endpoint Management
  * @{
  */
 
@@ -623,88 +597,88 @@ struct psm_optkey {
  * Integral type of size 8 bytes that can be used by the user to globally
  * identify a successfully opened endpoint.  Although the contents of the
  * endpoint id integral type remains opaque to the user, unique network id and
- * OPA port number can be extracted using @ref psm_epid_nid and @ref
- * psm_epid_context.
+ * OPA port number can be extracted using @ref psm2_epid_nid and @ref
+ * psm2_epid_context.
  */
-typedef uint64_t psm_epid_t;
+typedef uint64_t psm2_epid_t;
 
 /** @brief Endpoint Address (opaque)
  *
  * Remote endpoint addresses are created when the user binds an endpoint ID
- * to a particular endpoint handle using @ref psm_ep_connect.  A given endpoint
+ * to a particular endpoint handle using @ref psm2_ep_connect.  A given endpoint
  * address is only guaranteed to be valid over a single endpoint.
  */
-typedef struct psm_epaddr *psm_epaddr_t;
+typedef struct psm2_epaddr *psm2_epaddr_t;
 
-/** @brief PSM Unique UID
+/** @brief PSM2 Unique UID
  *
- * PSM type equivalent to the DCE-1 uuid_t, used to uniquely identify an
- * endpoint within a particular job.  Since PSM does not participate in job
+ * PSM2 type equivalent to the DCE-1 uuid_t, used to uniquely identify an
+ * endpoint within a particular job.  Since PSM2 does not participate in job
  * allocation and management, users are expected to generate a unique ID to
  * associate endpoints to a particular parallel or collective job.
- * @see psm_uuid_generate
+ * @see psm2_uuid_generate
  */
-typedef uint8_t psm_uuid_t[16];
+typedef uint8_t psm2_uuid_t[16];
 
 /** @brief Get Endpoint identifier's Unique Network ID */
-uint64_t psm_epid_nid(psm_epid_t epid);
+uint64_t psm2_epid_nid(psm2_epid_t epid);
 
 /** @brief Get Endpoint identifier's OPA context number */
-uint64_t psm_epid_context(psm_epid_t epid);
+uint64_t psm2_epid_context(psm2_epid_t epid);
 
 /** @brief Get Endpoint identifier's OPA port (deprecated, use
- * @ref psm_epid_context instead) */
-uint64_t psm_epid_port(psm_epid_t epid);
+ * @ref psm2_epid_context instead) */
+uint64_t psm2_epid_port(psm2_epid_t epid);
 
 /** @brief List the number of available OPA units
  *
  * Function used to determine the amount of locally available OPA units.
- * For @c N units, valid unit numbers in @ref psm_ep_open are @c 0 to @c N-1.
+ * For @c N units, valid unit numbers in @ref psm2_ep_open are @c 0 to @c N-1.
  *
- * @returns PSM_OK unless the user has not called @ref psm_init
+ * @returns PSM2_OK unless the user has not called @ref psm2_init
  */
-psm_error_t psm_ep_num_devunits(uint32_t *num_units);
+psm2_error_t psm2_ep_num_devunits(uint32_t *num_units);
 
-/** @brief Utility to generate UUIDs for @ref psm_ep_open
+/** @brief Utility to generate UUIDs for @ref psm2_ep_open
  *
  * This function is available as a utility for generating unique job-wide ids.
- * See discussion in @ref psm_ep_open for further information.
+ * See discussion in @ref psm2_ep_open for further information.
  *
- * @remark This function does not require PSM to be initialized.
+ * @remark This function does not require PSM2 to be initialized.
  */
-void psm_uuid_generate(psm_uuid_t uuid_out);
+void psm2_uuid_generate(psm2_uuid_t uuid_out);
 
-/* Affinity modes for the affinity member of struct psm_ep_open_opts */
-#define PSM_EP_OPEN_AFFINITY_SKIP     0	/**< Disable setting affinity */
-#define PSM_EP_OPEN_AFFINITY_SET      1	/**< Enable setting affinity unless
+/* Affinity modes for the affinity member of struct psm2_ep_open_opts */
+#define PSM2_EP_OPEN_AFFINITY_SKIP     0	/**< Disable setting affinity */
+#define PSM2_EP_OPEN_AFFINITY_SET      1	/**< Enable setting affinity unless
 					  already set */
-#define PSM_EP_OPEN_AFFINITY_FORCE    2	/**< Enable setting affinity regardless
+#define PSM2_EP_OPEN_AFFINITY_FORCE    2	/**< Enable setting affinity regardless
 					  of current affinity setting */
 
 /* Default values for some constants */
-#define PSM_EP_OPEN_PKEY_DEFAULT    0xffffffffffffffffULL
+#define PSM2_EP_OPEN_PKEY_DEFAULT    0xffffffffffffffffULL
 				    /**< Default protection key */
 
 /** @brief Endpoint Open Options
  *
- * These options are available for opening a PSM endpoint.  Each is
+ * These options are available for opening a PSM2 endpoint.  Each is
  * individually documented and setting each option to -1 or passing NULL as the
- * options parameter in @ref psm_ep_open instructs PSM to use
+ * options parameter in @ref psm2_ep_open instructs PSM2 to use
  * implementation-defined defaults.
  *
- * Each option is documented in @ref psm_ep_open
+ * Each option is documented in @ref psm2_ep_open
  */
-struct psm_ep_open_opts {
+struct psm2_ep_open_opts {
 	int64_t timeout;	/**< timeout in nanoseconds to open device */
 	int unit;		/**< OPA Unit ID to open on */
-	int affinity;		/**< How PSM should set affinity */
+	int affinity;		/**< How PSM2 should set affinity */
 	int shm_mbytes;	/**< Megabytes used for intra-node, deprecated */
 	int sendbufs_num;	/**< Preallocated send buffers */
 	uint64_t network_pkey;	/**< Network Protection Key (v1.01) */
 	int port;		/**< IB port to use (1 to N) */
 	int outsl;		/**< IB SL to use when sending pkts */
 	uint64_t service_id;	/* IB Service ID to use for endpoint */
-	psm_path_res_t path_res_type;	/* Path resolution type */
+	psm2_path_res_t path_res_type;	/* Path resolution type */
 	int senddesc_num;	/* Preallocated send descriptors */
 	int imm_size;		/* Immediate data size for endpoint */
 };
@@ -712,14 +686,14 @@ struct psm_ep_open_opts {
 /** @brief OPA endpoint creation
  *
  * Function used to create a new local communication endpoint on an OPA
- * adapter.  The returned endpoint handle is required in all PSM communication
- * operations, as PSM can manage communication over multiple endpoints.  An
+ * adapter.  The returned endpoint handle is required in all PSM2 communication
+ * operations, as PSM2 can manage communication over multiple endpoints.  An
  * opened endpoint has no global context until the user connects the endpoint
- * to other global endpoints by way of @ref psm_ep_connect.  All local endpoint
- * handles are globally identified by endpoint IDs (@ref psm_epid_t) which are
+ * to other global endpoints by way of @ref psm2_ep_connect.  All local endpoint
+ * handles are globally identified by endpoint IDs (@ref psm2_epid_t) which are
  * also returned when an endpoint is opened.  It is assumed that the user can
  * provide an out-of-band mechanism to distribute the endpoint IDs in order to
- * establish connections between endpoints (@ref psm_ep_connect for more
+ * establish connections between endpoints (@ref psm2_ep_connect for more
  * information).
  *
  * @param[in] unique_job_key Endpoint key, to uniquely identify the endpoint in
@@ -728,11 +702,11 @@ struct psm_ep_open_opts {
  *                           enough to prevent duplicate keys over the same set
  *                           of endpoints (see comments below).
  *
- * @param[in] opts Open options of type @ref psm_ep_open_opts
- *                 (see @ref psm_ep_open_opts_get_defaults).
+ * @param[in] opts Open options of type @ref psm2_ep_open_opts
+ *                 (see @ref psm2_ep_open_opts_get_defaults).
  *
  * @param[out] ep User-supplied storage to return a pointer to the newly
- *                created endpoint.  The returned pointer of type @ref psm_ep_t
+ *                created endpoint.  The returned pointer of type @ref psm2_ep_t
  *                is a local handle and cannot be used to globally identify the
  *                endpoint.
  * @param[out] epid User-supplied storage to return the endpoint ID associated
@@ -740,11 +714,11 @@ struct psm_ep_open_opts {
  *                  handle.  The endpoint ID is an integral type suitable for
  *                  uniquely identifying the local endpoint.
  *
- * PSM does not internally verify the consistency of the uuid, it is up to the
+ * PSM2 does not internally verify the consistency of the uuid, it is up to the
  * user to ensure that the uid is unique enough not to collide with other
  * currently-running jobs.  Users can employ three mechanisms to obtain a uuid.
  *
- * 1. Use the supplied @ref psm_uuid_generate utility
+ * 1. Use the supplied @ref psm2_uuid_generate utility
  *
  * 2. Use an OS or library-specific uuid generation utility, that complies with
  *    OSF DCE 1.1, such as @c uuid_generate on Linux or @c uuid_create on
@@ -759,14 +733,14 @@ struct psm_ep_open_opts {
  *   @li @c timeout establishes the amount of nanoseconds to wait before
  *                  failing to open a port (with -1, defaults to 15 secs).
  *   @li @c unit sets the OPA unit number to use to open a port (with
- *               -1, PSM determines the best unit to open the port).  If @c
+ *               -1, PSM2 determines the best unit to open the port).  If @c
  *               HFI_UNIT is set in the environment, this setting is ignored.
- *   @li @c affinity enables or disables PSM setting processor affinity.  The
+ *   @li @c affinity enables or disables PSM2 setting processor affinity.  The
  *                   option can be controlled to either disable (@ref
- *                   PSM_EP_OPEN_AFFINITY_SKIP) or enable the affinity setting
+ *                   PSM2_EP_OPEN_AFFINITY_SKIP) or enable the affinity setting
  *                   only if it is already unset (@ref
- *                   PSM_EP_OPEN_AFFINITY_SET) or regardless of affinity begin
- *                   set or not (@ref PSM_EP_OPEN_AFFINITY_FORCE).
+ *                   PSM2_EP_OPEN_AFFINITY_SET) or regardless of affinity begin
+ *                   set or not (@ref PSM2_EP_OPEN_AFFINITY_FORCE).
  *                   If @c HFI_NO_CPUAFFINITY is set in the environment, this
  *                   setting is ignored.
  *   @li @c shm_mbytes sets a maximum amount of megabytes that can be allocated
@@ -776,11 +750,11 @@ struct psm_ep_open_opts {
  *                       pre-allocated for communication (with -1, defaults to
  *                       512 buffers of MTU size).
  *   @li @c network_pkey sets the protection key to employ for point-to-point
- *                       PSM communication.  Unless a specific value is used,
+ *                       PSM2 communication.  Unless a specific value is used,
  *                       this parameter should be set to
- *                       PSM_EP_OPEN_PKEY_DEFAULT.
+ *                       PSM2_EP_OPEN_PKEY_DEFAULT.
  *
- * @warning Currently, PSM limits the user to calling @ref psm_ep_open only
+ * @warning Currently, PSM2 limits the user to calling @ref psm2_ep_open only
  * once per process and subsequent calls will fail.  Multiple endpoints per
  * process will be enabled in a future release.
  *
@@ -792,16 +766,16 @@ struct psm_ep_open_opts {
  * // example, the UUID is set as a string in an environment variable
  * // propagated to all endpoints in the job.
  *
- * int try_to_open_psm_endpoint(psm_ep_t *ep, // output endpoint handle
- *                              psm_epid_t *epid, // output endpoint identifier
+ * int try_to_open_psm2_endpoint(psm2_ep_t *ep, // output endpoint handle
+ *                              psm2_epid_t *epid, // output endpoint identifier
  *                              int unit)  // unit of our choice
  * {
- *    psm_ep_open_opts epopts;
- *    psm_uuid_t job_uuid;
+ *    psm2_ep_open_opts epopts;
+ *    psm2_uuid_t job_uuid;
  *    char *c;
  *
- *    // Let PSM assign its default values to the endpoint options.
- *    psm_ep_open_opts_get_defaults(&epopts);
+ *    // Let PSM2 assign its default values to the endpoint options.
+ *    psm2_ep_open_opts_get_defaults(&epopts);
  *
  *    // We want a stricter timeout and a specific unit
  *    epopts.timeout = 15*1e9;  // 15 second timeout
@@ -809,12 +783,12 @@ struct psm_ep_open_opts {
  *                              // choose the unit for us.
  *    epopts.port = port;	// We want a specific unit, <= 0 would let PSM
  *                              // choose the port for us.
- *    // We've already set affinity, don't let PSM do so if it wants to.
- *    if (epopts.affinity == PSM_EP_OPEN_AFFINITY_SET)
- *       epopts.affinity = PSM_EP_OPEN_AFFINITY_SKIP;
+ *    // We've already set affinity, don't let PSM2 do so if it wants to.
+ *    if (epopts.affinity == PSM2_EP_OPEN_AFFINITY_SET)
+ *       epopts.affinity = PSM2_EP_OPEN_AFFINITY_SKIP;
  *
  *    // ENDPOINT_UUID is set to the same value in the environment of all the
- *    // processes that wish to communicate over PSM and was generated by
+ *    // processes that wish to communicate over PSM2 and was generated by
  *    // the process spawning utility
  *    c = getenv("ENDPOINT_UUID");
  *    if (c && *c)
@@ -825,31 +799,31 @@ struct psm_ep_open_opts {
  *    }
  *
  *    // Assume we don't want to handle errors here.
- *    psm_ep_open(job_uuid, &epopts, ep, epid);
+ *    psm2_ep_open(job_uuid, &epopts, ep, epid);
  *    return 1;
  * }
  * @endverbatim
  */
-psm_error_t
-psm_ep_open(const psm_uuid_t unique_job_key,
-	    const struct psm_ep_open_opts *opts, psm_ep_t *ep,
-	    psm_epid_t *epid);
+psm2_error_t
+psm2_ep_open(const psm2_uuid_t unique_job_key,
+	    const struct psm2_ep_open_opts *opts, psm2_ep_t *ep,
+	    psm2_epid_t *epid);
 
 /** @brief Endpoint open default options.
  *
  * Function used to initialize the set of endpoint options to their default
- * values for use in @ref psm_ep_open.
+ * values for use in @ref psm2_ep_open.
  *
  * @param[out] opts Endpoint Open options.
  *
  * @warning For portable operation, users should always call this function
- * prior to calling @ref psm_ep_open.
+ * prior to calling @ref psm2_ep_open.
  *
- * @return PSM_OK If result could be updated
- * @return PSM_INIT_NOT_INIT If psm has not been initialized.
+ * @return PSM2_OK If result could be updated
+ * @return PSM2_INIT_NOT_INIT If psm has not been initialized.
  */
-psm_error_t
-psm_ep_open_opts_get_defaults(struct psm_ep_open_opts *opts);
+psm2_error_t
+psm2_ep_open_opts_get_defaults(struct psm2_ep_open_opts *opts);
 
 /** @brief Endpoint shared memory query
  *
@@ -862,46 +836,46 @@ psm_ep_open_opts_get_defaults(struct psm_ep_open_opts *opts);
  * @param[out] result Result is non-zero if the remote endpoint shares memory with the local
  * endpoint @c ep, or zero otherwise.
  *
- * @return PSM_OK If result could be updated
- * @return PSM_EPID_UNKNOWN If the epid is not recognized
+ * @return PSM2_OK If result could be updated
+ * @return PSM2_EPID_UNKNOWN If the epid is not recognized
  */
-psm_error_t
-psm_ep_epid_share_memory(psm_ep_t ep, psm_epid_t epid, int *result);
+psm2_error_t
+psm2_ep_epid_share_memory(psm2_ep_t ep, psm2_epid_t epid, int *result);
 
 /** @brief Close endpoint
- * @param[in] ep PSM endpoint handle
- * @param[in] mode One of @ref PSM_EP_CLOSE_GRACEFUL or @ref PSM_EP_CLOSE_FORCE
+ * @param[in] ep PSM2 endpoint handle
+ * @param[in] mode One of @ref PSM2_EP_CLOSE_GRACEFUL or @ref PSM2_EP_CLOSE_FORCE
  * @param[in] timeout How long to wait in nanoseconds if mode is
- *			PSM_EP_CLOSE_GRACEFUL, 0 waits forever.  If @c mode is
- *			@ref PSM_EP_CLOSE_FORCE, this parameter is ignored.
+ *			PSM2_EP_CLOSE_GRACEFUL, 0 waits forever.  If @c mode is
+ *			@ref PSM2_EP_CLOSE_FORCE, this parameter is ignored.
  *
  * The following errors are returned, others are handled by the per-endpoint
  * error handler:
  *
- * @return PSM_OK  Endpoint was successfully closed without force or
+ * @return PSM2_OK  Endpoint was successfully closed without force or
  *                 successfully closed with force within the supplied timeout.
- * @return PSM_EP_CLOSE_TIMEOUT Endpoint could not be successfully closed
+ * @return PSM2_EP_CLOSE_TIMEOUT Endpoint could not be successfully closed
  *                              within timeout.
  */
-psm_error_t psm_ep_close(psm_ep_t ep, int mode, int64_t timeout);
+psm2_error_t psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout);
 
-#define PSM_EP_CLOSE_GRACEFUL	0   /**< Graceful mode in @ref psm_ep_close */
-#define PSM_EP_CLOSE_FORCE	1   /**< Forceful mode in @ref psm_ep_close */
+#define PSM2_EP_CLOSE_GRACEFUL	0   /**< Graceful mode in @ref psm2_ep_close */
+#define PSM2_EP_CLOSE_FORCE	1   /**< Forceful mode in @ref psm2_ep_close */
 
 /** @brief Provide mappings for network id to hostname
  *
- * Since PSM does not assume or rely on the availability of an external
+ * Since PSM2 does not assume or rely on the availability of an external
  * networkid-to-hostname mapping service, users can provide one or more of
- * these mappings.  The @ref psm_map_nid_hostname function allows a list of
+ * these mappings.  The @ref psm2_map_nid_hostname function allows a list of
  * network ids to be associated to hostnames.
  *
- * This function is not mandatory for correct operation but may allow PSM to
+ * This function is not mandatory for correct operation but may allow PSM2 to
  * provide better diagnostics when remote endpoints are unavailable and can
  * otherwise only be identified by their network id.
  *
  * @param[in] num Number elements in @c nid and @c hostnames arrays
- * @param[in] nids User-provided array of network ids (i.e. InfiniBand LIDs),
- *                 should be obtained by calling @ref psm_epid_nid on each
+ * @param[in] nids User-provided array of network ids (i.e. OPA LIDs),
+ *                 should be obtained by calling @ref psm2_epid_nid on each
  *                 epid.
  * @param[in] hostnames User-provided array of hostnames (array of
  *                      NUL-terimated strings) where each hostname index
@@ -915,8 +889,8 @@ psm_error_t psm_ep_close(psm_ep_t ep, int mode, int64_t timeout);
  *       function.
  *
  */
-psm_error_t
-psm_map_nid_hostname(int num, const uint64_t *nids, const char **hostnames);
+psm2_error_t
+psm2_map_nid_hostname(int num, const uint64_t *nids, const char **hostnames);
 
 /** @brief Connect one or more remote endpoints to a local endpoint
  *
@@ -927,7 +901,7 @@ psm_map_nid_hostname(int num, const uint64_t *nids, const char **hostnames);
  * Similarly, a given endpoint address does not imply that a pairwise
  * communication context exists between the local endpoint and remote endpoint.
  *
- * @param[in] ep PSM endpoint handle
+ * @param[in] ep PSM2 endpoint handle
  *
  * @param[in] num_of_epid The amount of endpoints to connect to, which
  *                        also establishes the amount of elements contained in
@@ -950,23 +924,23 @@ psm_map_nid_hostname(int num, const uint64_t *nids, const char **hostnames);
  *
  * @param[out] array_of_errors User-allocated array of at least @c num_of_epid
  *                             elements. If the function does not return
- *                             PSM_OK, this array can be consulted for each
+ *                             PSM2_OK, this array can be consulted for each
  *                             endpoint not masked off by @c array_of_epid_mask
  *                             to know why the endpoint could not be connected.
  *                             Endpoints that could not be connected because of
  *                             an unrelated failure will be marked as @ref
- *                             PSM_EPID_UNKNOWN.  If the function returns
- *                             PSM_OK, the errors for all endpoints will also
- *                             contain PSM_OK.
+ *                             PSM2_EPID_UNKNOWN.  If the function returns
+ *                             PSM2_OK, the errors for all endpoints will also
+ *                             contain PSM2_OK.
  *
  * @param[out] array_of_epaddr User-allocated array of at least @c num_of_epid
- *                             elements of type psm_epaddr_t.  Each
+ *                             elements of type psm2_epaddr_t.  Each
  *                             successfully connected endpoint is updated with
  *                             an endpoint address handle that corresponds to
  *                             the endpoint id at the same index in @c
  *                             array_of_epid.  Handles are only updated if the
  *                             endpoint could be connected and if its error in
- *                             array_of_errors is PSM_OK.
+ *                             array_of_errors is PSM2_OK.
  *
  * @param[in] timeout Timeout in nanoseconds after which connection attempts
  *                    will be abandoned.  Setting this value to 0 disables
@@ -983,37 +957,37 @@ psm_map_nid_hostname(int num, const uint64_t *nids, const char **hostnames);
  * @post If unsuccessful, the user can query the return status of each
  *       individual remote endpoint in @c array_of_errors.
  *
- * @post The user can call into @ref psm_ep_connect many times with the same
+ * @post The user can call into @ref psm2_ep_connect many times with the same
  *       endpoint ID and the function is guaranteed to return the same output
  *       parameters.
  *
- * @post PSM does not keep any reference to the arrays passed into the
+ * @post PSM2 does not keep any reference to the arrays passed into the
  *       function and the caller is free to deallocate them.
  *
  * The error value with the highest importance is returned by
  * the function if some portion of the communication failed.  Users should
  * always refer to individual errors in @c array_of_errors whenever the
- * function cannot return PSM_OK.
+ * function cannot return PSM2_OK.
  *
- * @returns PSM_OK  The entire set of endpoint IDs were successfully connected
+ * @returns PSM2_OK  The entire set of endpoint IDs were successfully connected
  *                  and endpoint addresses are available for all endpoint IDs.
  *
  * @verbatim
- * int connect_endpoints(psm_ep_t ep, int numep,
- *                       const psm_epid_t *array_of_epid,
- *                       psm_epaddr_t **array_of_epaddr_out)
+ * int connect_endpoints(psm2_ep_t ep, int numep,
+ *                       const psm2_epid_t *array_of_epid,
+ *                       psm2_epaddr_t **array_of_epaddr_out)
  * {
- *     psm_error_t *errors = (psm_error_t *) calloc(numep, sizeof(psm_error_t));
+ *     psm2_error_t *errors = (psm2_error_t *) calloc(numep, sizeof(psm2_error_t));
  *     if (errors == NULL)
  *         return -1;
  *
- *     psm_epaddr_t *all_epaddrs =
- *              (psm_epaddr_t *) calloc(numep, sizeof(psm_epaddr_t));
+ *     psm2_epaddr_t *all_epaddrs =
+ *              (psm2_epaddr_t *) calloc(numep, sizeof(psm2_epaddr_t));
  *
  *     if (all_epaddrs == NULL)
  *         return -1;
  *
- *     psm_ep_connect(ep, numep, array_of_epid,
+ *     psm2_ep_connect(ep, numep, array_of_epid,
  *                    NULL, // We want to connect all epids, no mask needed
  *                    errors,
  *                    all_epaddrs,
@@ -1023,18 +997,18 @@ psm_map_nid_hostname(int num, const uint64_t *nids, const char **hostnames);
  *     return 1;
  * }
  * @endverbatim */
-psm_error_t
-psm_ep_connect(psm_ep_t ep, int num_of_epid, const psm_epid_t *array_of_epid,
-		   const int *array_of_epid_mask, psm_error_t *array_of_errors,
-		   psm_epaddr_t *array_of_epaddr, int64_t timeout);
+psm2_error_t
+psm2_ep_connect(psm2_ep_t ep, int num_of_epid, const psm2_epid_t *array_of_epid,
+		   const int *array_of_epid_mask, psm2_error_t *array_of_errors,
+		   psm2_epaddr_t *array_of_epaddr, int64_t timeout);
 
 /** @brief Ensure endpoint communication progress
  *
- * Function to ensure progress for all PSM components instantiated on an
+ * Function to ensure progress for all PSM2 components instantiated on an
  * endpoint (currently, this only includes the MQ component).  The function
  * never blocks and is typically required in two cases:
  *
- * @li Allowing all PSM components instantiated over a given endpoint to make
+ * @li Allowing all PSM2 components instantiated over a given endpoint to make
  *     communication progress. Refer to @ref mq_progress for a detailed
  *     discussion on MQ-level progress issues.
  *
@@ -1043,163 +1017,163 @@ psm_ep_connect(psm_ep_t ep, int num_of_epid, const psm_epid_t *array_of_epid,
  *     which's new value depends on ongoing communication).
  *
  * The poll function doesn't block, but the user can rely on the @ref
- * PSM_OK_NO_PROGRESS return value to control polling behaviour in terms of
+ * PSM2_OK_NO_PROGRESS return value to control polling behaviour in terms of
  * frequency (poll until an event happens) or execution environment (poll for a
  * while but yield to other threads of CPUs are oversubscribed).
  *
- * @returns PSM_OK             Some communication events were progressed
- * @returns PSM_OK_NO_PROGRESS Polling did not yield any communication progress
+ * @returns PSM2_OK             Some communication events were progressed
+ * @returns PSM2_OK_NO_PROGRESS Polling did not yield any communication progress
  *
  */
-psm_error_t psm_poll(psm_ep_t ep);
+psm2_error_t psm2_poll(psm2_ep_t ep);
 
 /** @brief Set a user-determined ep address label.
  *
- * @param[in] epaddr Endpoint address, obtained from @ref psm_ep_connect
+ * @param[in] epaddr Endpoint address, obtained from @ref psm2_ep_connect
  * @param[in] epaddr_label_string User-allocated string to print when
  *                   identifying endpoint in error handling or other verbose
  *                   printing.  The NULL-terminated string must be allocated by
- *                   the user since PSM only keeps a pointer to the label.  If
+ *                   the user since PSM2 only keeps a pointer to the label.  If
  *                   users do not explicitly set a label for each endpoint,
  *                   endpoints will identify themselves as hostname:port.
  */
-void psm_epaddr_setlabel(psm_epaddr_t epaddr,
+void psm2_epaddr_setlabel(psm2_epaddr_t epaddr,
 			 const char *epaddr_label_string);
 
 /** @brief Set a user-determined ep address context.
  *
- * @param[in] epaddr Endpoint address, obtained from @ref psm_ep_connect
+ * @param[in] epaddr Endpoint address, obtained from @ref psm2_ep_connect
  * @param[in] ctxt   Opaque user defined state to associate with an endpoint
  *                   address. This state can be retrieved via
- *                   @ref psm_epaddr_getctxt.
+ *                   @ref psm2_epaddr_getctxt.
  */
 void
-psm_epaddr_setctxt(psm_epaddr_t epaddr, void *ctxt);
+psm2_epaddr_setctxt(psm2_epaddr_t epaddr, void *ctxt);
 
 /** @brief Get the user-determined ep address context. Users can associate an
- *  opaque context with each endpoint via @ref psm_epaddr_setctxt.
+ *  opaque context with each endpoint via @ref psm2_epaddr_setctxt.
  *
- * @param[in] epaddr Endpoint address, obtained from @ref psm_ep_connect.
+ * @param[in] epaddr Endpoint address, obtained from @ref psm2_ep_connect.
  */
-void *psm_epaddr_getctxt(psm_epaddr_t epaddr);
+void *psm2_epaddr_getctxt(psm2_epaddr_t epaddr);
 
 /* Below are all component specific options. The component object for each of
  * the options is also specified.
  */
 
-/* PSM_COMPONENT_CORE options */
-/* PSM debug level */
-#define PSM_CORE_OPT_DEBUG     0x101
-  /**< [@b uint32_t ] Set/Get the PSM debug level. This option can be set
-   * before initializing the PSM library.
+/* PSM2_COMPONENT_CORE options */
+/* PSM2 debug level */
+#define PSM2_CORE_OPT_DEBUG     0x101
+  /**< [@b uint32_t ] Set/Get the PSM2 debug level. This option can be set
+   * before initializing the PSM2 library.
    *
    * component object: (null)
-   * option value: PSM Debug mask to set or currently active debug level.
+   * option value: PSM2 Debug mask to set or currently active debug level.
    */
 
-/* PSM endpoint address context */
-#define PSM_CORE_OPT_EP_CTXT   0x102
-  /**< [@b uint32_t ] Set/Get the context associated with a PSM endpoint
-   * address (psm_epaddr_t).
+/* PSM2 endpoint address context */
+#define PSM2_CORE_OPT_EP_CTXT   0x102
+  /**< [@b uint32_t ] Set/Get the context associated with a PSM2 endpoint
+   * address (psm2_epaddr_t).
    *
-   * component object: PSM endpoint (@ref psm_epaddr_t) address.
-   * option value: Context associated with PSM endpoint address.
+   * component object: PSM2 endpoint (@ref psm2_epaddr_t) address.
+   * option value: Context associated with PSM2 endpoint address.
    */
 
-/* PSM_COMPONENT_IB options */
+/* PSM2_COMPONENT_IB options */
 /* Default service level to use to communicate with remote endpoints */
-#define PSM_IB_OPT_DF_SL 0x201
-  /**< [@b uint32_t ] Default Infiniband SL to use for all remote communication.
+#define PSM2_IB_OPT_DF_SL 0x201
+  /**< [@b uint32_t ] Default OPA SL to use for all remote communication.
    * If unset defaults to Service Level 0.
    *
-   * component object: Opened PSM endpoint id (@ref psm_ep_t).
+   * component object: Opened PSM2 endpoint id (@ref psm2_ep_t).
    * option value: Default IB SL to use for endpoint. (0 <= SL < 15)
    */
 
 /* Set IB service level to use for communication to an endpoint */
-#define PSM_IB_OPT_EP_SL 0x202
-  /**< [@b uint32_t ] Infiniband SL to use for communication to specified
+#define PSM2_IB_OPT_EP_SL 0x202
+  /**< [@b uint32_t ] OPA SL to use for communication to specified
    * remote endpoint.
    *
-   * component object: PSM endpoint (@ ref psm_epaddr_t) address.
+   * component object: PSM2 endpoint (@ ref psm2_epaddr_t) address.
    * option value: SL used to communicate with remote endpoint. (0 <= SL < 15)
    */
 
-/* PSM_COMPONENT_MQ options (deprecates psm_mq_set|getopt) */
-/* MQ options that can be set in psm_mq_init and psm_{set,get}_opt */
-#define PSM_MQ_OPT_RNDV_IB_SZ       0x301
-#define PSM_MQ_RNDV_HFI_SZ          PSM_MQ_OPT_RNDV_IB_SZ
-#define PSM_MQ_RNDV_IPATH_SZ        PSM_MQ_OPT_RNDV_IB_SZ
+/* PSM2_COMPONENT_MQ options (deprecates psm2_mq_set|getopt) */
+/* MQ options that can be set in psm2_mq_init and psm2_{set,get}_opt */
+#define PSM2_MQ_OPT_RNDV_IB_SZ       0x301
+#define PSM2_MQ_RNDV_HFI_SZ          PSM2_MQ_OPT_RNDV_IB_SZ
+#define PSM2_MQ_RNDV_IPATH_SZ        PSM2_MQ_OPT_RNDV_IB_SZ
   /**< [@b uint32_t ] Size at which to start enabling rendezvous
    * messaging for OPA messages (if unset, defaults to values
    * between 56000 and 72000 depending on the system configuration)
    *
-   * component object: PSM Matched Queue (@ref psm_mq_t).
+   * component object: PSM2 Matched Queue (@ref psm2_mq_t).
    * option value: Size at which to switch to rendezvous protocol.
    */
 
-#define PSM_MQ_OPT_RNDV_SHM_SZ      0x302
-#define PSM_MQ_RNDV_SHM_SZ          PSM_MQ_OPT_RNDV_SHM_SZ
+#define PSM2_MQ_OPT_RNDV_SHM_SZ      0x302
+#define PSM2_MQ_RNDV_SHM_SZ          PSM2_MQ_OPT_RNDV_SHM_SZ
   /**< [@b uint32_t ] Size at which to start enabling
    * rendezvous messaging for shared memory (intra-node) messages (If
    * unset, defaults to 64000 bytes).
    *
-   * component object: PSM Matched Queue (@ref psm_mq_t).
+   * component object: PSM2 Matched Queue (@ref psm2_mq_t).
    * option value: Size at which to switch to rendezvous protocol.
    */
 
-#define PSM_MQ_OPT_SYSBUF_MYBYTES   0x303
-#define PSM_MQ_MAX_SYSBUF_MBYTES    PSM_MQ_OPT_SYSBUF_MYBYTES
+#define PSM2_MQ_OPT_SYSBUF_MYBYTES   0x303
+#define PSM2_MQ_MAX_SYSBUF_MBYTES    PSM2_MQ_OPT_SYSBUF_MYBYTES
   /**< [@b uint32_t ] Maximum amount of bytes to allocate for unexpected
    * messages.
    *
-   * component object: PSM Matched Queue (@ref psm_mq_t).
+   * component object: PSM2 Matched Queue (@ref psm2_mq_t).
    * option value: Deprecated; this option has no effect.
    */
 
-/* PSM_COMPONENT_AM options */
-#define PSM_AM_OPT_FRAG_SZ          0x401
-#define PSM_AM_MAX_FRAG_SZ          PSM_AM_OPT_FRAG_SZ
+/* PSM2_COMPONENT_AM options */
+#define PSM2_AM_OPT_FRAG_SZ          0x401
+#define PSM2_AM_MAX_FRAG_SZ          PSM2_AM_OPT_FRAG_SZ
 /*!< [@b uint32_t ] Maximum active message fragment size that can be sent
  * for a given endpoint or across all endpoints. This value can only be
  * queried.
  *
- * component object: PSM endpoint (@ref psm_epaddr_t) address. If NULL then
+ * component object: PSM2 endpoint (@ref psm2_epaddr_t) address. If NULL then
  *                   option value is the smalles fragment size across all
  *                   active endpoints.
  * option value: Maximum active message fragment size in bytes.
  */
 
-#define PSM_AM_OPT_NARGS 0x402
-#define PSM_AM_MAX_NARGS PSM_AM_OPT_NARGS
+#define PSM2_AM_OPT_NARGS 0x402
+#define PSM2_AM_MAX_NARGS PSM2_AM_OPT_NARGS
 
 /*!< [@b uint32_t ] Maximum number of message arguments that can be sent
  * for a given endpoint or across all endpoints. This value can only be
  * queried.
  *
- * component object: PSM endpoint (@ref psm_epaddr_t) address. If NULL then
+ * component object: PSM2 endpoint (@ref psm2_epaddr_t) address. If NULL then
  *                   option value is the smalles fragment size across all
  *                   active endpoints.
  * option value: Maximum number of active message arguments.
  */
 
-#define PSM_AM_OPT_HANDLERS 0x403
-#define PSM_AM_MAX_HANDLERS PSM_AM_OPT_HANDLERS
+#define PSM2_AM_OPT_HANDLERS 0x403
+#define PSM2_AM_MAX_HANDLERS PSM2_AM_OPT_HANDLERS
 /*!< [@b uint32_t ] Maximum number of message handlers that can be registered
  * for a given endpoint or across all endpoints. This value can only be
  * queried.
  *
- * component object: PSM endpoint (@ref psm_epaddr_t) address. If NULL then
+ * component object: PSM2 endpoint (@ref psm2_epaddr_t) address. If NULL then
  *                   option value is the smalles fragment size across all
  *                   active endpoints.
  * option value: Maximum number of active message handlers.
  */
 
-/** @brief Set an option for a PSM component
+/** @brief Set an option for a PSM2 component
  *
- * Function to set the value of a PSM component option
+ * Function to set the value of a PSM2 component option
  *
- * @param[in] component Type of PSM component for which to set the option
+ * @param[in] component Type of PSM2 component for which to set the option
  * @param[in] component_obj Opaque component specify object to apply the set
  *                          operation on. These are passed uninterpreted to the
  *                          appropriate component for interpretation.
@@ -1212,20 +1186,20 @@ void *psm_epaddr_getctxt(psm_epaddr_t epaddr);
  *                   correct size and format.
  * @param[in] optlen Size of the memory region pointed to by optval.
  *
- * @returns PSM_OK if option could be set.
- * @returns PSM_PARAM_ERR if the component or optname are not valid.
- * @returns PSM_OPT_READONLY if the option to be set is a read-only option.
+ * @returns PSM2_OK if option could be set.
+ * @returns PSM2_PARAM_ERR if the component or optname are not valid.
+ * @returns PSM2_OPT_READONLY if the option to be set is a read-only option.
  *
  */
-psm_error_t
-psm_setopt(psm_component_t component, const void *component_obj,
+psm2_error_t
+psm2_setopt(psm2_component_t component, const void *component_obj,
 	   int optname, const void *optval, uint64_t optlen);
 
-/** @brief Get an option for a PSM component
+/** @brief Get an option for a PSM2 component
  *
- * Function to get the value of a PSM component option
+ * Function to get the value of a PSM2 component option
  *
- * @param[in] component Type of PSM component for which to get the option
+ * @param[in] component Type of PSM2 component for which to get the option
  * @param[in] component_obj Opaque component specify object to apply the get
  *                          operation on. These are passed uninterpreted to the
  *                          appropriate component for interpretation.
@@ -1239,72 +1213,72 @@ psm_setopt(psm_component_t component, const void *component_obj,
  *                      the size of the memory region pointed to by optval and
  *                      modified to return the actual size of optval.
  *
- * @returns PSM_OK if option value could be retrieved successfully.
- * @returns PSM_PARAM_ERR if the component or optname are not valid.
- * @returns PSM_NO_MEMORY if the memory region optval is of insufficient size.
+ * @returns PSM2_OK if option value could be retrieved successfully.
+ * @returns PSM2_PARAM_ERR if the component or optname are not valid.
+ * @returns PSM2_NO_MEMORY if the memory region optval is of insufficient size.
  *                         optlen contains the required memory region size for
  *                         optname value.
  *
  */
-psm_error_t
-psm_getopt(psm_component_t component, const void *component_obj,
+psm2_error_t
+psm2_getopt(psm2_component_t component, const void *component_obj,
 	   int optname, void *optval, uint64_t *optlen);
 
 /** @brief Datatype for end-point information */
-typedef struct psm_epinfo {
-	psm_ep_t ep;		/**< The ep for this end-point*/
-	psm_epid_t epid;	/**< The epid for this end-point */
-	psm_uuid_t uuid;	/**< The UUID for this end-point */
+typedef struct psm2_epinfo {
+	psm2_ep_t ep;		/**< The ep for this end-point*/
+	psm2_epid_t epid;	/**< The epid for this end-point */
+	psm2_uuid_t uuid;	/**< The UUID for this end-point */
 	uint16_t jkey;		/**< The job key for this end-point */
 	char uuid_str[64];	/**< String representation of the UUID for this end-point */
-} psm_epinfo_t;
+} psm2_epinfo_t;
 
 /** @brief Datatype for end-point connection */
-typedef struct psm_epconn {
-	psm_epaddr_t addr;	/**< The epaddr for this connection */
-	psm_ep_t ep;		/**< The ep for this connection */
-	psm_mq_t mq;		/**< The mq for this connection */
-} psm_epconn_t;
+typedef struct psm2_epconn {
+	psm2_epaddr_t addr;	/**< The epaddr for this connection */
+	psm2_ep_t ep;		/**< The ep for this connection */
+	psm2_mq_t mq;		/**< The mq for this connection */
+} psm2_epconn_t;
 
-/** @brief Query PSM for end-point information.
+/** @brief Query PSM2 for end-point information.
  *
- * Function to query PSM for end-point information. This allows retrieval of
+ * Function to query PSM2 for end-point information. This allows retrieval of
  * end-point information in cases where the caller does not have access to the
- * results of psm_ep_open().  In single-rail mode PSM will use a single
- * end-point. In multi-rail mode, PSM will use an end-point per rail.
+ * results of psm2_ep_open().  In single-rail mode PSM2 will use a single
+ * end-point. In multi-rail mode, PSM2 will use an end-point per rail.
  *
  * @param[in,out] num_of_epinfo On input, sizes the available number of entries
  *                              in array_of_epinfo.  On output, specifies the
  *                              returned number of entries in array_of_epinfo.
  * @param[out] array_of_epinfo Returns end-point information structures.
  *
- * @pre PSM is initialized and the end-point has been opened.
+ * @pre PSM2 is initialized and the end-point has been opened.
  *
- * @returns PSM_OK indicates success.
- * @returns PSM_PARAM_ERR if input num_if_epinfo is less than or equal to zero.
- * @returns PSM_EP_WAS_CLOSED if PSM end-point is closed or does not exist.
+ * @returns PSM2_OK indicates success.
+ * @returns PSM2_PARAM_ERR if input num_if_epinfo is less than or equal to zero.
+ * @returns PSM2_EP_WAS_CLOSED if PSM2 end-point is closed or does not exist.
  */
-psm_error_t psm_ep_query(int *num_of_epinfo, psm_epinfo_t *array_of_epinfo);
+psm2_error_t psm2_ep_query(int *num_of_epinfo, psm2_epinfo_t *array_of_epinfo);
 
-/** @brief Query PSM for end-point connections.
+/** @brief Query PSM2 for end-point connections.
  *
- * Function to query PSM for end-point connections. This allows retrieval of
+ * Function to query PSM2 for end-point connections. This allows retrieval of
  * end-point connnections in cases where the caller does not have access to the
- * results of psm_ep_connect().  The epid values can be found using
- * psm_ep_query() so that each PSM process can determine its own epid. These
- * values can then be distributed across the PSM process so that each PSM
- * process knows the epid for all other PSM processes.
+ * results of psm2_ep_connect().  The epid values can be found using
+ * psm2_ep_query() so that each PSM2 process can determine its own epid. These
+ * values can then be distributed across the PSM2 process so that each PSM
+ * process knows the epid for all other PSM2 processes.
  *
- * @param[in] epid The epid of a PSM process.
- * @param[out] epconn The connection information for that PSM process.
+ * @param[in] epid The epid of a PSM2 process.
+ * @param[out] epconn The connection information for that PSM2 process.
  *
- * @pre PSM is initialized and the end-point has been connected to this epid.
+ * @pre PSM2 is initialized and the end-point has been connected to this epid.
  *
- * @returns PSM_OK indicates success.
- * @returns PSM_EP_WAS_CLOSED if PSM end-point is closed or does not exist.
- * @returns PSM_EPID_UNKNOWN if the epid value is not known to PSM.
+ * @returns PSM2_OK indicates success.
+ * @returns PSM2_EP_WAS_CLOSED if PSM2 end-point is closed or does not exist.
+ * @returns PSM2_EPID_UNKNOWN if the epid value is not known to PSM.
  */
-psm_error_t psm_ep_epid_lookup(psm_epid_t epid, psm_epconn_t *epconn);
+psm2_error_t psm2_ep_epid_lookup(psm2_epid_t epid, psm2_epconn_t *epconn);
 
 /*! @} */
 

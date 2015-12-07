@@ -69,6 +69,7 @@
 
 #include "valgrind/valgrind.h"
 #include "valgrind/memcheck.h"
+#include "psm_log.h"
 
 #ifdef PSM_VALGRIND
 #define PSM_VALGRIND_REDZONE_SZ	     8
@@ -104,7 +105,7 @@
 #undef _PSMI_IN_USER_H
 
 #define PSMI_VERNO_MAKE(major, minor) ((((major)&0xff)<<8)|((minor)&0xff))
-#define PSMI_VERNO  PSMI_VERNO_MAKE(PSM_VERNO_MAJOR, PSM_VERNO_MINOR)
+#define PSMI_VERNO  PSMI_VERNO_MAKE(PSM2_VERNO_MAJOR, PSM2_VERNO_MINOR)
 #define PSMI_VERNO_GET_MAJOR(verno) (((verno)>>8) & 0xff)
 #define PSMI_VERNO_GET_MINOR(verno) (((verno)>>0) & 0xff)
 
@@ -112,8 +113,8 @@ int psmi_verno_client();
 int psmi_verno_isinteroperable(uint16_t verno);
 int psmi_isinitialized();
 
-psm_error_t psmi_poll_internal(psm_ep_t ep, int poll_amsh);
-psm_error_t psmi_mq_wait_internal(psm_mq_req_t *ireq);
+psm2_error_t psmi_poll_internal(psm2_ep_t ep, int poll_amsh);
+psm2_error_t psmi_mq_wait_internal(psm2_mq_req_t *ireq);
 
 /*
  * Default setting for Receive thread
@@ -147,7 +148,7 @@ psm_error_t psmi_mq_wait_internal(psm_mq_req_t *ireq);
 psmi_spinlock_t psmi_progress_lock;
 #define PSMI_PLOCK_INIT()   psmi_spin_init(&psmi_progress_lock)
 #define PSMI_PLOCK_TRY()    psmi_spin_trylock(&psmi_progress_lock)
-#define PSMI_PLOCK()	      psmi_spin_lock(&psmi_progress_lock)
+#define PSMI_PLOCK()	    psmi_spin_lock(&psmi_progress_lock)
 #define PSMI_PUNLOCK()      psmi_spin_unlock(&psmi_progress_lock)
 #define PSMI_PLOCK_ASSERT()
 #define PSMI_PUNLOCK_ASSERT()

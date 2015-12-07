@@ -68,8 +68,8 @@
 struct ptl_rcvthread;
 
 static void *ips_ptl_pollintr(void *recvthreadc);
-static psm_error_t rcvthread_initstats(ptl_t *ptl);
-static psm_error_t rcvthread_initsched(struct ptl_rcvthread *rcvc);
+static psm2_error_t rcvthread_initstats(ptl_t *ptl);
+static psm2_error_t rcvthread_initsched(struct ptl_rcvthread *rcvc);
 
 struct ptl_rcvthread {
 	const psmi_context_t *context;
@@ -99,15 +99,15 @@ struct ptl_rcvthread {
  * The receive thread knows about the ptl interface, so it can muck with it
  * directly.
  */
-psm_error_t ips_ptl_rcvthread_init(ptl_t *ptl, struct ips_recvhdrq *recvq)
+psm2_error_t ips_ptl_rcvthread_init(ptl_t *ptl, struct ips_recvhdrq *recvq)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	struct ptl_rcvthread *rcvc;
 
 	ptl->rcvthread =
 	    psmi_calloc(ptl->ep, UNDEFINED, 1, sizeof(struct ptl_rcvthread));
 	if (ptl->rcvthread == NULL) {
-		err = PSM_NO_MEMORY;
+		err = PSM2_NO_MEMORY;
 		goto fail;
 	}
 	rcvc = ptl->rcvthread;
@@ -124,7 +124,7 @@ psm_error_t ips_ptl_rcvthread_init(ptl_t *ptl, struct ips_recvhdrq *recvq)
 
 		/* Create a pipe so we can synchronously terminate the thread */
 		if (pipe(rcvc->pipefd) != 0) {
-			err = psmi_handle_error(ptl->ep, PSM_EP_DEVICE_FAILURE,
+			err = psmi_handle_error(ptl->ep, PSM2_EP_DEVICE_FAILURE,
 						"Cannot create a pipe for receive thread: %s\n",
 						strerror(errno));
 			goto fail;
@@ -134,7 +134,7 @@ psm_error_t ips_ptl_rcvthread_init(ptl_t *ptl, struct ips_recvhdrq *recvq)
 				   ips_ptl_pollintr, ptl->rcvthread)) {
 			close(rcvc->pipefd[0]);
 			close(rcvc->pipefd[1]);
-			err = psmi_handle_error(ptl->ep, PSM_EP_DEVICE_FAILURE,
+			err = psmi_handle_error(ptl->ep, PSM2_EP_DEVICE_FAILURE,
 						"Cannot start receive thread: %s\n",
 						strerror(errno));
 			goto fail;
@@ -149,12 +149,12 @@ fail:
 	return err;
 }
 
-psm_error_t ips_ptl_rcvthread_fini(ptl_t *ptl)
+psm2_error_t ips_ptl_rcvthread_fini(ptl_t *ptl)
 {
 	struct ptl_rcvthread *rcvc = (struct ptl_rcvthread *)ptl->rcvthread;
 	uint64_t t_now;
 	double t_cancel_us;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	PSMI_PLOCK_ASSERT();
 
@@ -199,7 +199,7 @@ fail:
 	return err;
 }
 
-psm_error_t rcvthread_initsched(struct ptl_rcvthread *rcvc)
+psm2_error_t rcvthread_initsched(struct ptl_rcvthread *rcvc)
 {
 	union psmi_envvar_val env_to;
 	char buf[192];
@@ -213,7 +213,7 @@ psm_error_t rcvthread_initsched(struct ptl_rcvthread *rcvc)
 		 RCVTHREAD_TO_MAX_FREQ, RCVTHREAD_TO_SHIFT);
 	buf[sizeof(buf) - 1] = '\0';
 
-	if (!psmi_getenv("PSM_RCVTHREAD_FREQ",
+	if (!psmi_getenv("PSM2_RCVTHREAD_FREQ",
 			 "Thread timeouts (per sec) <min_freq[:max_freq[:shift_freq]]>",
 			 PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_STR,
 			 (union psmi_envvar_val)rcv_freq, &env_to)) {
@@ -263,7 +263,7 @@ psm_error_t rcvthread_initsched(struct ptl_rcvthread *rcvc)
 			   rcvc->timeout_period_min, rcvc->timeout_period_max,
 			   rcvc->timeout_shift);
 	}
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 static
@@ -311,20 +311,22 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 	psmi_context_t *context = (psmi_context_t *) rcvc->context;
 	int fd_dev = context->fd;
 	int fd_pipe = rcvc->pipefd[0];
-	psm_ep_t ep = context->ep;
+	psm2_ep_t ep = context->ep;
 	struct pollfd pfd[2];
 	int ret;
 	int next_timeout = rcvc->last_timeout;
 	uint64_t t_cyc;
-	psm_error_t err;
+	psm2_error_t err;
 
+
+	PSM2_LOG_MSG("entering");
 	/* No reason to have many of these, keep this as a backup in case the
 	 * recvhdrq init function is misused */
 	psmi_assert_always((recvq->runtime_flags & PSMI_RUNTIME_RCVTHREAD));
 
 	/* Switch driver to a mode where it can interrupt on urgent packets */
 	if (psmi_context_interrupt_set((psmi_context_t *)
-				       rcvc->context, 1) == PSM_EP_NO_RESOURCES) {
+				       rcvc->context, 1) == PSM2_EP_NO_RESOURCES) {
 		_HFI_PRDBG
 		    ("hfi_poll_type feature not present in driver, turning "
 		     "off internal progress thread\n");
@@ -343,13 +345,12 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 
 		ret = poll(pfd, 2, next_timeout);
 		t_cyc = get_cycles();
-
 		if_pf(ret < 0) {
 			if (errno == EINTR)
 				_HFI_DBG("got signal, keep polling\n");
 			else
 				psmi_handle_error(PSMI_EP_NORETURN,
-						  PSM_INTERNAL_ERR,
+						  PSM2_INTERNAL_ERR,
 						  "Receive thread poll() error: %s",
 						  strerror(errno));
 		}
@@ -372,7 +373,7 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 				if (!ips_recvhdrq_trylock(recvq))
 					continue;
 				err = ips_recvhdrq_progress(recvq);
-				if (err == PSM_OK)
+				if (err == PSM2_OK)
 					rcvc->pollok++;
 				else
 					rcvc->pollcyc += get_cycles() - t_cyc;
@@ -387,7 +388,7 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 							 0 ? PSMI_TRUE :
 							 PSMI_FALSE);
 
-				if (err == PSM_OK) {
+				if (err == PSM2_OK) {
 					rcvc->pollok++;
 					/*
 					   if (rcvc->pollok % 1000 == 0 && rcvc->pollok >= 1000)
@@ -406,6 +407,7 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 	}
 	}
 
+	PSM2_LOG_MSG("leaving");
 	return NULL;
 }
 
@@ -427,7 +429,7 @@ static uint64_t rcvthread_stats_pollcyc(void *context)
 	return (uint64_t) ((double)cycles_to_nanosecs(rcvc->pollcyc) / 1.0e6);
 }
 
-static psm_error_t rcvthread_initstats(ptl_t *ptl)
+static psm2_error_t rcvthread_initstats(ptl_t *ptl)
 {
 	struct ptl_rcvthread *rcvc = (struct ptl_rcvthread *)ptl->rcvthread;
 	struct psmi_stats_entry entries[] = {

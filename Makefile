@@ -57,22 +57,22 @@ BASEVERSION := 0.1
 SUBDIRS:= ptl_self ptl_ips ptl_am libuuid opa
 export build_dir := .
 
-PSM_VERNO_MAJOR := $(shell sed -n 's/^\#define.*PSM_VERNO_MAJOR.*0x0\?\([1-9a-f]\?[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h)
-PSM_VERNO_MINOR := $(shell sed -n 's/^\#define.*PSM_VERNO_MINOR.*0x\([0-9]\?[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h)
-PSM_LIB_MAJOR   := $(shell printf "%d" ${PSM_VERNO_MAJOR})
-PSM_LIB_MINOR   := $(shell printf "%d" `sed -n 's/^\#define.*PSM_VERNO_MINOR.*\(0x[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h`)
+PSM2_VERNO_MAJOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_MAJOR.*0x0\?\([1-9a-f]\?[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h)
+PSM2_VERNO_MINOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_MINOR.*0x\([0-9]\?[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h)
+PSM2_LIB_MAJOR   := $(shell printf "%d" ${PSM2_VERNO_MAJOR})
+PSM2_LIB_MINOR   := $(shell printf "%d" `sed -n 's/^\#define.*PSM2_VERNO_MINOR.*\(0x[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h`)
 
 OPA_LIB_MAJOR := 4
 OPA_LIB_MINOR := 0
 
-export PSM_VERNO_MAJOR
-export PSM_LIB_MAJOR
-export PSM_VERNO_MINOR
-export PSM_LIB_MINOR
+export PSM2_VERNO_MAJOR
+export PSM2_LIB_MAJOR
+export PSM2_VERNO_MINOR
+export PSM2_LIB_MINOR
 export OPA_LIB_MAJOR
 export OPA_LIB_MINOR
-export CCARCH := gcc
-export FCARCH := gfortran
+export CCARCH ?= gcc
+export FCARCH ?= gfortran
 
 top_srcdir := .
 include $(top_srcdir)/buildflags.mak
@@ -97,11 +97,13 @@ export DESTDIR
 export INSTALL_LIB_TARG
 
 TARGLIB := libpsm2
-COMPATMAJOR := $(shell sed -n 's/^\#define.*PSM_VERNO_COMPAT_MAJOR.*0x0\?\([1-9a-f]\?[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h)
+COMPATMAJOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_COMPAT_MAJOR.*0x0\?\([1-9a-f]\?[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h)
 COMPATLIB := libpsm_infinipath
 
-MAJOR := $(PSM_LIB_MAJOR)
-MINOR := $(PSM_LIB_MINOR)
+MAJOR := $(PSM2_LIB_MAJOR)
+MINOR := $(PSM2_LIB_MINOR)
+
+nthreads := $(shell echo $$(( `nproc` * 2 )) )
 
 # The desired version number comes from the most recent tag starting with "v"
 VERSION := $(shell if [ -e .git ] ; then  git  describe --tags --abbrev=0 --match='v*' | sed -e 's/^v//' -e 's/-/_/'; else echo "version" ; fi)
@@ -123,18 +125,22 @@ ifndef UDEVDIR
 	UDEVDIR = /lib/udev
 endif
 
+export UDEVDIR
+
 all: symlinks
 	for subdir in $(SUBDIRS); do \
-		$(MAKE) -C $$subdir $@ ;\
+		$(MAKE) -j $(nthreads) -C $$subdir $@ ;\
 	done
-	$(MAKE) ${TARGLIB}.so ${COMPATLIB}.so.${COMPATMAJOR}
+	$(MAKE) -j $(nthreads) ${TARGLIB}.so
+	$(MAKE) -j $(nthreads) -C compat all
 
 clean:
 	rm -f _revision.c
 	for subdir in $(SUBDIRS) ; do \
-		$(MAKE) -C $$subdir $@ ;\
+		$(MAKE) -j $(nthreads) -C $$subdir $@ ;\
 	done
-	rm -f *.o *.d ${TARGLIB}* ${COMPATLIB}*
+	$(MAKE) -j $(nthreads) -C compat clean
+	rm -f *.o *.d *.gcda *.gcno ${TARGLIB}*
 
 distclean: cleanlinks clean
 	rm -f ${RPM_NAME}.spec
@@ -150,25 +156,19 @@ cleanlinks:
 
 install: all
 	for subdir in $(SUBDIRS); do \
-		$(MAKE) -C $$subdir $@ ;\
+		$(MAKE) -j $(nthreads) -C $$subdir $@ ;\
 	done
+	$(MAKE) -j $(nthreads) -C compat install
 	install -D ${TARGLIB}.so.${MAJOR}.${MINOR} \
 		${DESTDIR}${INSTALL_LIB_TARG}/${TARGLIB}.so.${MAJOR}.${MINOR}
 	(cd ${DESTDIR}${INSTALL_LIB_TARG} ; \
-		ln -sf ${TARGLIB}.so.${MAJOR}.${MINOR} ${COMPATLIB}.so.${COMPATMAJOR} ; \
-		ln -sf ${TARGLIB}.so.${MAJOR}.${MINOR} ${COMPATLIB}.so ; \
 		ln -sf ${TARGLIB}.so.${MAJOR}.${MINOR} ${TARGLIB}.so.${MAJOR} ; \
 		ln -sf ${TARGLIB}.so.${MAJOR} ${TARGLIB}.so)
 	install -m 0644 -D psm2.h ${DESTDIR}/usr/include/psm2.h
 	install -m 0644 -D psm2_mq.h ${DESTDIR}/usr/include/psm2_mq.h
 	install -m 0644 -D psm2_am.h ${DESTDIR}/usr/include/psm2_am.h
-	(cd ${DESTDIR}/usr/include ; \
-		ln -sf psm2.h psm.h ; \
-		ln -sf psm2_mq.h psm_mq.h ; \
-		ln -sf psm2_am.h psm_am.h)
-	install -m 0644 -D 40-psm-compat.rules ${DESTDIR}$(UDEVDIR)/rules.d/40-psm-compat.rules
-
-install-noship: all
+	install -m 0644 -D 40-psm.rules ${DESTDIR}$(UDEVDIR)/rules.d/40-psm.rules
+	# The following files and dirs were part of the noship rpm:
 	mkdir -p ${DESTDIR}/usr/include/hfi1diag
 	mkdir -p ${DESTDIR}/usr/include/hfi1diag/linux-x86_64
 	mkdir -p ${DESTDIR}/usr/include/hfi1diag/ptl_ips
@@ -188,6 +188,7 @@ specfile:
 		sed -e 's/@TARGLIB@/'${TARGLIB}'/g' \
 			-e 's/@COMPATLIB@/'${COMPATLIB}'/g' \
 			-e 's/@COMPATMAJOR@/'${COMPATMAJOR}'/g' \
+			-e 's\@UDEVDIR@\'${UDEVDIR}'\g' \
 			-e 's/@MAJOR@/'${MAJOR}'/g' \
 			-e 's/@MINOR@/'${MINOR}'/g' \
 			-e 's/@RELEASE@/'${RELEASE}'/g' > \
@@ -209,13 +210,11 @@ dist: distclean specfile
 	for x in $$(/usr/bin/find .						\
 			-name ".git"                           -prune -o	\
 			-name "cscope*"                        -prune -o	\
-			-name "*.spec.in"                      -prune -o	\
 			-name "${RPM_NAME}-${VERSION_RELEASE}" -prune -o	\
 			-name "*.orig"                         -prune -o	\
 			-name "*~"                             -prune -o	\
 			-name "#*"                             -prune -o	\
 			-name ".gitignore"                     -prune -o	\
-			-name "contrib"                        -prune -o	\
 			-name "doc"                            -prune -o	\
 			-name ".hgignore"                      -prune -o	\
 			-name "libcm"                          -prune -o	\
@@ -223,6 +222,7 @@ dist: distclean specfile
 			-name "psm.supp"                       -prune -o	\
 			-name "README.OLD"                     -prune -o	\
 			-name "test"                           -prune -o	\
+			-name "tools"                          -prune -o	\
 			-print); do \
 		dir=$$(dirname $$x); \
 		mkdir -p ${RPM_NAME}-${VERSION_RELEASE}/$$dir; \
@@ -234,7 +234,7 @@ dist: distclean specfile
 	rm -rf ${RPM_NAME}-${VERSION_RELEASE}
 
 ofeddist:
-	$(MAKE) dist
+	$(MAKE) -j $(nthreads) dist
 
 # rebuild the cscope database, skipping sccs files, done once for
 # top level
@@ -275,8 +275,10 @@ ${TARGLIB}-objs := ptl_am/am_reqrep_shmem.o	\
 		   ptl_ips/ips_proto_connect.o  \
 		   ptl_ips/ips_proto_expected.o \
 		   ptl_ips/ips_tid.o		\
-		   ptl_ips/ips_crc32.o 		\
+		   ptl_ips/ips_tidcache.o       \
+		   ptl_ips/ips_rbtree.o         \
 		   ptl_ips/ips_tidflow.o        \
+		   ptl_ips/ips_crc32.o 		\
 		   ptl_ips/ips_proto_dump.o	\
 		   ptl_ips/ips_proto_mq.o       \
 		   ptl_ips/ips_proto_am.o       \
@@ -297,9 +299,6 @@ ${TARGLIB}.so: ${lib_build_dir}/${TARGLIB}.so.${MAJOR}
 ${TARGLIB}.so.${MAJOR}: ${lib_build_dir}/${TARGLIB}.so.${MAJOR}.${MINOR}
 	ln -fs ${TARGLIB}.so.${MAJOR}.${MINOR} $@
 
-${COMPATLIB}.so.${COMPATMAJOR}: ${lib_build_dir}/${TARGLIB}.so.${MAJOR}.${MINOR}
-	ln -f ${COMPATLINKTYPE} ${TARGLIB}.so.${MAJOR}.${MINOR} $@
-
 # when we build the shared library, generate a revision and date
 # string in it, for easier id'ing when people may have copied the
 # file around.  Generate it such that the ident command can find it
@@ -309,9 +308,6 @@ ${TARGLIB}.so.${MAJOR}.${MINOR}: ${${TARGLIB}-objs}
 	$(CC) -c $(BASECFLAGS) $(INCLUDES) _revision.c -o _revision.o
 	$(CC) $(LDFLAGS) -o $@ -Wl,-soname=${TARGLIB}.so.${MAJOR} -shared \
 		${${TARGLIB}-objs} _revision.o -Lopa $(LDLIBS)
-	@leaks=`nm $@ | grep ' [DT] ' | \
-	 grep -v -e ' [DT] \(hfi_\|__hfi\|_edata\|_fini\|_init\|opa_\|ips_\|psmi\|__psmi\?_\|_\rest.pr\|_save.pr\|cma\)'`; \
-	 if test -n "$$leaks"; then echo "Build failed, leaking symbols:"; echo "$$leaks"; exit 1; fi
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(INCLUDES) -MMD -c $< -o $@

@@ -425,9 +425,6 @@ struct _hfi_ctrl *hfi_userinit(int32_t, struct hfi1_user_info *);
 /* overall code shorter and easier to debug */
 void hfi_touch_mmap(void *, size_t) __attribute__ ((noinline));
 
-int32_t hfi_update_tid_err(void);	/* handle update tid errors out of line */
-int32_t hfi_free_tid_err(void);	/* handle free tid errors out of line */
-
 /* set the BTH pkey to check for this process. */
 /* This is for receive checks, not for sends.  It isn't necessary
    to set the default key, that's always allowed by the hardware.
@@ -482,9 +479,6 @@ int hfi_set_pkey(struct _hfi_ctrl *ctrl, uint16_t pkey);
 
 /* reset halted send context, error if context is not halted. */
 int hfi_reset_context(struct _hfi_ctrl *ctrl);
-
-static int32_t __inline__ hfi_free_tid(struct _hfi_ctrl *, uint32_t, uint64_t)
-				   __attribute__ ((always_inline));
 
 /* Statistics maintained by the driver */
 const char *hfi_get_next_name(char **names);
@@ -780,49 +774,73 @@ static __inline__ void hfi_hdrset_seq(__le32 *rbuf, uint32_t val)
 
 /* update tidcnt expected TID entries from the array pointed to by tidinfo. */
 /* Returns 0 on success, else an errno.  See full description at declaration */
-static int32_t __inline__ hfi_update_tid(struct _hfi_ctrl *ctrl,
+static __inline__ int32_t hfi_update_tid(struct _hfi_ctrl *ctrl,
 					 uint64_t vaddr, uint32_t *length,
-					 uint64_t tidlist, uint32_t *tidcnt,
-					 uint64_t tidmap)
+					 uint64_t tidlist, uint32_t *tidcnt)
 {
 	struct hfi1_cmd cmd;
 	struct hfi1_tid_info tidinfo;
+	int err;
 
-	tidinfo.vaddr = vaddr;	/* base address for this send to map */
-	tidinfo.tidlist = tidlist;	/* driver copies tids back directly to this */
-	tidinfo.tidcnt = 0;	/* clear to zero */
+	tidinfo.vaddr = vaddr;		/* base address for this send to map */
 	tidinfo.length = *length;	/* length of vaddr */
-	tidinfo.tidmap = tidmap;	/* driver copies directly to this */
+
+	tidinfo.tidlist = tidlist;	/* driver copies tids back directly */
+	tidinfo.tidcnt = 0;		/* clear to zero */
 
 	cmd.type = HFI1_CMD_TID_UPDATE;
 	cmd.len = sizeof(tidinfo);
 	cmd.addr = (__u64) &tidinfo;
 
-	if (hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd)) == -1)
-		return hfi_update_tid_err();
+	err = hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd));
 
-	*tidcnt = tidinfo.tidcnt;
-	*length = tidinfo.length;
+	if (err != -1) {
+		*length = tidinfo.length;
+		*tidcnt = tidinfo.tidcnt;
+	}
 
-	return 0;
+	return err;
 }
 
-static int32_t __inline__ hfi_free_tid(struct _hfi_ctrl *ctrl,
-				       uint32_t tidcnt, uint64_t tidmap)
+static __inline__ int32_t hfi_free_tid(struct _hfi_ctrl *ctrl,
+					 uint64_t tidlist, uint32_t tidcnt)
 {
 	struct hfi1_cmd cmd;
 	struct hfi1_tid_info tidinfo;
+	int err;
 
+	tidinfo.tidlist = tidlist;	/* input to driver */
 	tidinfo.tidcnt = tidcnt;
-	tidinfo.tidmap = tidmap;	/* driver copies from this */
 
 	cmd.type = HFI1_CMD_TID_FREE;
 	cmd.len = sizeof(tidinfo);
 	cmd.addr = (__u64) &tidinfo;
 
-	if (hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd)) == -1)
-		return hfi_free_tid_err();
-	return 0;
+	err = hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd));
+
+	return err;
+}
+
+static __inline__ int32_t hfi_get_invalidation(struct _hfi_ctrl *ctrl,
+					 uint64_t tidlist, uint32_t *tidcnt)
+{
+	struct hfi1_cmd cmd;
+	struct hfi1_tid_info tidinfo;
+	int err;
+
+	tidinfo.tidlist = tidlist;	/* driver copies tids back directly */
+	tidinfo.tidcnt = 0;		/* clear to zero */
+
+	cmd.type = HFI1_CMD_TID_INVAL_READ;
+	cmd.len = sizeof(tidinfo);
+	cmd.addr = (__u64) &tidinfo;
+
+	err = hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd));
+
+	if (err != -1)
+		*tidcnt = tidinfo.tidcnt;
+
+	return err;
 }
 
 extern uint32_t __hfi_pico_per_cycle;	/* only for use in these functions */

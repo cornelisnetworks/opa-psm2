@@ -62,17 +62,17 @@
 #include "psm_am_internal.h"
 
 struct ptl {
-	psm_ep_t ep;
-	psm_epid_t epid;
-	psm_epaddr_t epaddr;
+	psm2_ep_t ep;
+	psm2_epid_t epid;
+	psm2_epaddr_t epaddr;
 	ptl_ctl_t *ctl;
 } __attribute__((aligned(16)));
 
 static
-psm_error_t
-ptl_handle_rtsmatch(psm_mq_req_t recv_req, int was_posted)
+psm2_error_t
+ptl_handle_rtsmatch(psm2_mq_req_t recv_req, int was_posted)
 {
-	psm_mq_req_t send_req = (psm_mq_req_t) recv_req->ptl_req_ptr;
+	psm2_mq_req_t send_req = (psm2_mq_req_t) recv_req->ptl_req_ptr;
 
 	if (recv_req->recv_msglen > 0) {
 		PSM_VALGRIND_DEFINE_MQ_RECV(recv_req->buf, recv_req->buf_len,
@@ -100,14 +100,14 @@ ptl_handle_rtsmatch(psm_mq_req_t recv_req, int was_posted)
 
 	_HFI_VDBG("[self][complete][b=%p][sreq=%p][rreq=%p]\n",
 		  recv_req->buf, send_req, recv_req);
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 static
-psm_error_t self_mq_send_testwait(psm_mq_req_t *ireq)
+psm2_error_t self_mq_send_testwait(psm2_mq_req_t *ireq)
 {
 	uint8_t *ubuf;
-	psm_mq_req_t req = *ireq;
+	psm2_mq_req_t req = *ireq;
 
 	PSMI_PLOCK_ASSERT();
 
@@ -121,31 +121,31 @@ psm_error_t self_mq_send_testwait(psm_mq_req_t *ireq)
 	if (ubuf != NULL && req->send_msglen > 0) {
 		req->buf = psmi_sysbuf_alloc(req->send_msglen);
 		if (req->buf == NULL)
-			return PSM_NO_MEMORY;
+			return PSM2_NO_MEMORY;
 		psmi_mq_mtucpy(req->buf, ubuf, req->send_msglen);
 	}
 
 	/* Mark it complete but don't free the req, it's freed when the receiver
 	 * does the match */
 	req->state = MQ_STATE_COMPLETE;
-	*ireq = PSM_MQ_REQINVALID;
-	return PSM_OK;
+	*ireq = PSM2_MQ_REQINVALID;
+	return PSM2_OK;
 }
 
 /* Self is different.  We do everything as rendezvous. */
 static
-psm_error_t
-self_mq_isend(psm_mq_t mq, psm_epaddr_t epaddr, uint32_t flags,
-	      psm_mq_tag_t *tag, const void *ubuf, uint32_t len, void *context,
-	      psm_mq_req_t *req_o)
+psm2_error_t
+self_mq_isend(psm2_mq_t mq, psm2_epaddr_t epaddr, uint32_t flags,
+	      psm2_mq_tag_t *tag, const void *ubuf, uint32_t len, void *context,
+	      psm2_mq_req_t *req_o)
 {
-	psm_mq_req_t send_req;
-	psm_mq_req_t recv_req;
+	psm2_mq_req_t send_req;
+	psm2_mq_req_t recv_req;
 	int rc;
 
 	send_req = psmi_mq_req_alloc(mq, MQE_TYPE_SEND);
 	if_pf(send_req == NULL)
-	    return PSM_NO_MEMORY;
+	    return PSM2_NO_MEMORY;
 
 	rc = psmi_mq_handle_rts(mq, epaddr, tag,
 				len, NULL, 0, 1,
@@ -166,27 +166,27 @@ self_mq_isend(psm_mq_t mq, psm_epaddr_t epaddr, uint32_t flags,
 		  ubuf, len, tag->tag[0], tag->tag[1], tag->tag[2],
 		  rc == MQ_RET_MATCH_OK ? "YES" : "NO", send_req);
 	*req_o = send_req;
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 static
-psm_error_t
-self_mq_send(psm_mq_t mq, psm_epaddr_t epaddr, uint32_t flags,
-	     psm_mq_tag_t *tag, const void *ubuf, uint32_t len)
+psm2_error_t
+self_mq_send(psm2_mq_t mq, psm2_epaddr_t epaddr, uint32_t flags,
+	     psm2_mq_tag_t *tag, const void *ubuf, uint32_t len)
 {
-	psm_error_t err;
-	psm_mq_req_t req;
+	psm2_error_t err;
+	psm2_mq_req_t req;
 	err = self_mq_isend(mq, epaddr, flags, tag, ubuf, len, NULL, &req);
 	psmi_mq_wait_internal(&req);
 	return err;
 }
 
 /* Fill in AM capabilities parameters */
-static psm_error_t
-self_am_get_parameters(psm_ep_t ep, struct psm_am_parameters *parameters)
+static psm2_error_t
+self_am_get_parameters(psm2_ep_t ep, struct psm2_am_parameters *parameters)
 {
 	if (parameters == NULL) {
-		return PSM_PARAM_ERR;
+		return PSM2_PARAM_ERR;
 	}
 
 	/* Self is just a loop-back and has no restrictions. */
@@ -195,19 +195,19 @@ self_am_get_parameters(psm_ep_t ep, struct psm_am_parameters *parameters)
 	parameters->max_request_short = INT_MAX;
 	parameters->max_reply_short = INT_MAX;
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 static
-psm_error_t
-self_am_short_request(psm_epaddr_t epaddr,
-		      psm_handler_t handler, psm_amarg_t *args, int nargs,
+psm2_error_t
+self_am_short_request(psm2_epaddr_t epaddr,
+		      psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 		      void *src, size_t len, int flags,
-		      psm_am_completion_fn_t completion_fn,
+		      psm2_am_completion_fn_t completion_fn,
 		      void *completion_ctxt)
 {
-	psm_am_handler_fn_t hfn;
-	psm_ep_t ep = epaddr->ptlctl->ptl->ep;
+	psm2_am_handler_fn_t hfn;
+	psm2_ep_t ep = epaddr->ptlctl->ptl->ep;
 	struct psmi_am_token tok;
 
 	tok.epaddr_from = epaddr;
@@ -219,19 +219,19 @@ self_am_short_request(psm_epaddr_t epaddr,
 		completion_fn(completion_ctxt);
 	}
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 static
-psm_error_t
-self_am_short_reply(psm_am_token_t token,
-		    psm_handler_t handler, psm_amarg_t *args, int nargs,
+psm2_error_t
+self_am_short_reply(psm2_am_token_t token,
+		    psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 		    void *src, size_t len, int flags,
-		    psm_am_completion_fn_t completion_fn, void *completion_ctxt)
+		    psm2_am_completion_fn_t completion_fn, void *completion_ctxt)
 {
-	psm_am_handler_fn_t hfn;
+	psm2_am_handler_fn_t hfn;
 	struct psmi_am_token *tok = token;
-	psm_ep_t ep = tok->epaddr_from->ptlctl->ptl->ep;
+	psm2_ep_t ep = tok->epaddr_from->ptlctl->ptl->ep;
 
 	hfn = psm_am_get_handler_function(ep, handler);
 	hfn(token, args, nargs, src, len);
@@ -240,21 +240,21 @@ self_am_short_reply(psm_am_token_t token,
 		completion_fn(completion_ctxt);
 	}
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 static
-psm_error_t
+psm2_error_t
 self_connect(ptl_t *ptl,
 	     int numep,
-	     const psm_epid_t array_of_epid[],
+	     const psm2_epid_t array_of_epid[],
 	     const int array_of_epid_mask[],
-	     psm_error_t array_of_errors[],
-	     psm_epaddr_t array_of_epaddr[], uint64_t timeout_ns)
+	     psm2_error_t array_of_errors[],
+	     psm2_epaddr_t array_of_epaddr[], uint64_t timeout_ns)
 {
 	psmi_assert_always(ptl->epaddr != NULL);
-	psm_epaddr_t epaddr;
-	psm_error_t err = PSM_OK;
+	psm2_epaddr_t epaddr;
+	psm2_error_t err = PSM2_OK;
 	int i;
 
 	PSMI_PLOCK_ASSERT();
@@ -269,16 +269,16 @@ self_connect(ptl_t *ptl,
 			array_of_epaddr[i] = ptl->epaddr;
 			array_of_epaddr[i]->ptlctl = ptl->ctl;
 			array_of_epaddr[i]->epid = ptl->epid;
-			if (psmi_epid_set_hostname(psm_epid_nid(ptl->epid),
+			if (psmi_epid_set_hostname(psm2_epid_nid(ptl->epid),
 						   psmi_gethostname(), 0)) {
-				err = PSM_NO_MEMORY;
+				err = PSM2_NO_MEMORY;
 				goto fail;
 			}
 			psmi_epid_add(ptl->ep, ptl->epid, ptl->epaddr);
-			array_of_errors[i] = PSM_OK;
+			array_of_errors[i] = PSM2_OK;
 		} else {
 			array_of_epaddr[i] = NULL;
-			array_of_errors[i] = PSM_EPID_UNREACHABLE;
+			array_of_errors[i] = PSM2_EPID_UNREACHABLE;
 		}
 	}
 
@@ -288,9 +288,9 @@ fail:
 
 #if 0
 static
-psm_error_t
+psm2_error_t
 self_disconnect(ptl_t *ptl, int numep,
-		const psm_epaddr_t array_of_epaddr[],
+		const psm2_epaddr_t array_of_epaddr[],
 		int array_of_epaddr_mask[], int force, uint64_t timeout_ns)
 {
 	int i;
@@ -303,7 +303,7 @@ self_disconnect(ptl_t *ptl, int numep,
 		else
 			array_of_epaddr_mask[i] = 0;
 	}
-	return PSM_OK;
+	return PSM2_OK;
 }
 #endif
 
@@ -314,7 +314,7 @@ size_t self_ptl_sizeof(void)
 }
 
 static
-psm_error_t self_ptl_init(const psm_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
+psm2_error_t self_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 {
 	psmi_assert_always(ep != NULL);
 	psmi_assert_always(ep->epaddr != NULL);
@@ -344,31 +344,31 @@ psm_error_t self_ptl_init(const psm_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 	ctl->epaddr_stats_init = NULL;
 	ctl->epaddr_stats_get = NULL;
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
-static psm_error_t self_ptl_fini(ptl_t *ptl, int force, uint64_t timeout_ns)
+static psm2_error_t self_ptl_fini(ptl_t *ptl, int force, uint64_t timeout_ns)
 {
-	return PSM_OK;		/* nothing to do */
+	return PSM2_OK;		/* nothing to do */
 }
 
 static
-psm_error_t
+psm2_error_t
 self_ptl_setopt(const void *component_obj, int optname,
 		const void *optval, uint64_t optlen)
 {
 	/* No options for SELF PTL at the moment */
-	return psmi_handle_error(NULL, PSM_PARAM_ERR,
+	return psmi_handle_error(NULL, PSM2_PARAM_ERR,
 				 "Unknown SELF ptl option %u.", optname);
 }
 
 static
-psm_error_t
+psm2_error_t
 self_ptl_getopt(const void *component_obj, int optname,
 		void *optval, uint64_t *optlen)
 {
 	/* No options for SELF PTL at the moment */
-	return psmi_handle_error(NULL, PSM_PARAM_ERR,
+	return psmi_handle_error(NULL, PSM2_PARAM_ERR,
 				 "Unknown SELF ptl option %u.", optname);
 }
 

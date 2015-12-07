@@ -53,7 +53,7 @@
 Summary: Intel PSM Libraries
 Name: hfi1-psm
 Version: 0.7
-Release: 97
+Release: 175
 License: GPL
 Group: System Environment/Libraries
 URL: http://www.intel.com/
@@ -82,15 +82,6 @@ Requires: libuuid-devel
 Conflicts: opa-devel
 Obsoletes: hfi-psm-devel
 
-%package devel-noship
-Summary: Internal no-ship development files for Intel PSM
-Group: System Environment/Development
-Requires: %{name} = %{version}-%{release}
-Requires(post): /sbin/ldconfig
-Requires(postun): /sbin/ldconfig
-Requires: hfi1-psm-devel
-Obsoletes: hfi-devel-noship
-
 %package compat
 Summary: Development files for Intel PSM
 Group: System Environment/Development
@@ -98,15 +89,6 @@ Requires: %{name} = %{version}-%{release}
 Requires(post): /sbin/ldconfig
 Requires(postun): /sbin/ldconfig
 Obsoletes: hfi-psm-compat
-
-%package compat-devel
-Summary: Development files for unmodified PSM1 mpi
-Group: System Environment/Development
-Requires: %{name}-compat = %{version}-%{release}
-Requires: %{name}-devel = %{version}-%{release}
-Requires(post): /sbin/ldconfig
-Requires(postun): /sbin/ldconfig
-Obsoletes: hfi-psm-compat-devel
 
 %description
 The PSM Messaging API, or PSM API, is Intel's low-level
@@ -118,14 +100,8 @@ interfaces in parallel environments.
 %description devel
 Development files for the libpsm2 library
 
-%description devel-noship
-Internal no-ship development files for the libpsm2 library
-
 %description compat
 Support for MPIs linked with PSM versions < 2
-
-%description compat-devel
-Support for compiling unmodified PSM1 MPIs
 
 %prep
 %setup -q -n hfi1-psm-%{version}-%{release}
@@ -138,7 +114,6 @@ rm -rf $RPM_BUILD_ROOT
 mkdir -p $RPM_BUILD_ROOT
 export DESTDIR=$RPM_BUILD_ROOT
 %{__make} DESTDIR=$RPM_BUILD_ROOT install
-%{__make} DESTDIR=$RPM_BUILD_ROOT install-noship
 
 %clean
 rm -rf $RPM_BUILD_ROOT
@@ -150,8 +125,9 @@ rm -rf $RPM_BUILD_ROOT
 
 %files
 %defattr(-,root,root,-)
-/usr/lib64/libpsm2.so.2.0
+/usr/lib64/libpsm2.so.2.1
 /usr/lib64/libpsm2.so.2
+/usr/lib/udev/rules.d/40-psm.rules
 
 %files devel
 %defattr(-,root,root,-)
@@ -159,9 +135,7 @@ rm -rf $RPM_BUILD_ROOT
 /usr/include/psm2.h
 /usr/include/psm2_mq.h
 /usr/include/psm2_am.h
-
-%files devel-noship
-%defattr(-,root,root,-)
+# The following files were part of the devel-noship and moved to devel:
 /usr/include/hfi1diag/ptl_ips/ipserror.h
 /usr/include/hfi1diag/linux-x86_64/bit_ops.h
 /usr/include/hfi1diag/linux-x86_64/sysdep.h
@@ -175,16 +149,197 @@ rm -rf $RPM_BUILD_ROOT
 
 %files compat
 %defattr(-,root,root,-)
-/usr/lib64/libpsm_infinipath.so.1
-/etc/udev/rules.d/40-psm-compat.rules
-
-%files compat-devel
-%defattr(-,root,root,-)
-/usr/lib64/libpsm_infinipath.so
-/usr/include/psm.h
-/usr/include/psm_mq.h
-/usr/include/psm_am.h
+/usr/lib64/psm2-compat/libpsm_infinipath.so.1
+/usr/lib/udev/rules.d/40-psm-compat.rules
+/etc/modprobe.d/hfi1-psm-compat.conf
+/usr/sbin/hfi1-psm-compat.cmds
 %changelog
+* Fri Oct 9 2015 <russell.w.mcguire@intel.com>
+- Exported 3 symbols to fix hfi1_pkt_test link
+
+* Fri Oct 9 2015 <paul.j.reger@intel.com>
+- Added PSM2 library major/minor version numbers and build date to trace output.
+
+* Fri Oct 9 2015 <paul.j.reger@intel.com>
+- Eliminated annoying error: bc: command not found
+
+* Wed Oct 7 2015 <russell.w.mcguire@intel.com>
+- Rename PSM_LOG_MSG to PSM2_LOG_MSG
+
+* Wed Oct 7 2015 <henry.r.estela@intel.com>
+- Add UDEVDIR to udev compat rule. 40-psm-compat.rules now installs to the same place prescribed in the spec file.
+
+* Wed Oct 7 2015 <russell.w.mcguire@intel.com>
+- Expose hfi_ various symbols for hfidiag builds
+
+* Wed Oct 7 2015 <henry.r.estela@intel.com>
+- Clean up compat symbols. Added version script to only export psm_* symbols. Removed extra make flags by creating a lightweight buildflags.mak for compat. Compat shouldn't need extra psm2 buld features such as avx, debug, etc.
+
+* Wed Oct 7 2015 <henry.r.estela@intel.com>
+- Rework compat package to not conflict with infinipath-psm Created new compat directory to hold psm1 compat related files. There is a new modprobe.d file that will run a script when ib_qib is added and when it is removed. This will handle the case when hfi1 is loaded before ib_qib.
+
+* Wed Oct 7 2015 <russell.w.mcguire@intel.com>
+- Renamed all publicly exposed psm_ symbols to psm2_
+
+* Wed Oct 7 2015 <npayyavu@sperf-29.sc.intel.com>
+- Fix for bug relating to incorrect error reporting for uncorrectable errors
+
+* Wed Oct 7 2015 <paul.j.reger@intel.com>
+- Revert "A new PSM timer operation to reduce latency"
+
+* Wed Oct 7 2015 <paul.j.reger@intel.com>
+- Revert "Improve short message (8B < X <=8K) bandwidth and lower latency."
+
+* Wed Oct 7 2015 <paul.j.reger@intel.com>
+- Revert "Fix for PSM blocking send returning early, causing segfault"
+
+* Tue Oct 6 2015 <henry.r.estela@intel.com>
+- Add udev path substitution to specfile. The spefcile needs to use the same path that the Makefile installs the udev rules to. '\' was used instead of '/' as an escape character for sed. '/' can't be used because it will confuse sed because '/'s are used in file paths and sed will think they are also escape characters.
+
+* Mon Oct 5 2015 <levi.e.dettwyler@intel.com>
+- Revert "Fixed timeout behavior in psm_ep_close()"
+
+* Mon Oct 5 2015 <kyle.liddell@intel.com>
+- Fix for PSM blocking send returning early, causing segfault
+
+* Fri Oct 2 2015 <nathan.b.white@intel.com>
+- Merge branch 'upstream_master'
+
+* Thu Oct 1 2015 <paul.j.reger@intel.com>
+- Added guard for possible NULL FILE pointer.
+
+* Wed Sep 30 2015 <levi.e.dettwyler@intel.com>
+- Fixed timeout behavior in psm_ep_close()
+
+* Wed Sep 30 2015 <kyle.liddell@intel.com>
+- Latency improvements - remove unnecessary packet header checks
+
+* Wed Sep 30 2015 <paul.j.reger@intel.com>
+- Improves error message from psm for failure to open a specific unit/port.
+
+* Tue Sep 29 2015 <kyle.liddell@intel.com>
+- Latency improvements - reduce frequency of receive header queue updates
+
+* Thu Sep 24 2015 <levi.e.dettwyler@intel.com>
+- Fix a compile error introduced by c44a5bd7
+
+* Thu Sep 24 2015 <levi.e.dettwyler@intel.com>
+- Fixed workaround for compiler error about ignoring write return value
+
+* Thu Sep 24 2015 <levi.e.dettwyler@intel.com>
+- Fixed an error code leak in ips_proto_mq_isend
+
+* Fri Sep 18 2015 <paul.j.reger@intel.com>
+- Removes the tmi tar file.
+
+* Fri Sep 18 2015 <paul.j.reger@intel.com>
+- Allows psm to recover from cable pull events that last shorter than 30 seconds.
+
+* Wed Sep 16 2015 <cq.tang@intel.com>
+- Improve short message (8B < X <=8K) bandwidth and lower latency.
+
+* Tue Sep 15 2015 <paul.j.reger@intel.com>
+- Only adds AVX instructions in psm library when the PSM_AVX env var is set.
+
+* Tue Sep 15 2015 <cq.tang@intel.com>
+- A new PSM timer operation to reduce latency
+
+* Mon Sep 14 2015 <npayyavu@sperf-38.sc.intel.com>
+- Fixed a bug related to PSM_MULTIRAIL. Seg Faults were detected
+
+* Mon Sep 14 2015 <paul.j.reger@intel.com>
+- REVERTS Change for turning _HFI_DEBUGGING off in release builds.
+
+* Thu Sep 10 2015 <paul.j.reger@intel.com>
+- Turns 'self cca' off in STL1, and fixes incorrect reading of cca data from driver.
+
+* Tue Sep 8 2015 <alex.estrin@intel.com>
+- hfi1-psm: add udev rules for non-root /dev/hfi1 access.
+
+* Fri Sep 4 2015 <paul.j.reger@intel.com>
+- Corrects many issues from Klock works static analysis of psm library code.
+
+* Fri Sep 4 2015 <paul.j.reger@intel.com>
+- Adds support for building psm library with icc compiler using CCARCH environment variable.
+
+* Thu Sep 3 2015 <cq.tang@intel.com>
+- Fix mpi_stress testing segfault.
+
+* Thu Sep 3 2015 <cq.tang@intel.com>
+- Fix PSM registration error during mpi_stress test
+
+* Thu Sep 3 2015 <npayyavu@sperf-30.sc.intel.com>
+- PSM is no longer hijacking signals and releasing them when the library is unloaded. A destructor has been added for this purpose. JIRA ID: SL-583
+
+* Thu Sep 3 2015 <henry.r.estela@intel.com>
+- Add .gitignore ignore o, d, and _revision.c , and so files from compilation.
+
+* Wed Sep 2 2015 <npayyavu@sperf-27.sc.intel.com>
+- ignal Handling
+
+* Wed Sep 2 2015 <cq.tang@intel.com>
+- remove MTU from epid and compress epid structure
+
+* Tue Sep 1 2015 <paul.j.reger@intel.com>
+- Turns _HFI_DEBUGGING off in release builds.
+
+* Tue Sep 1 2015 <cq.tang@intel.com>
+- Improve PSM tid packets wire protocol.
+
+* Thu Aug 27 2015 <cq.tang@intel.com>
+- Find the best PIO block copying code at compile time and runtime.
+
+* Fri Aug 14 2015 <levi.e.dettwyler@intel.com>
+- Adding gcov support to build process
+
+* Fri Aug 14 2015 <cq.tang@intel.com>
+- PSM tid registration caching
+
+* Thu Aug 13 2015 <kyle.liddell@intel.com>
+- Properly detect if epid is on same host, fix error handler
+
+* Thu Aug 13 2015 <npayyavu@sperf-26.sc.intel.com>
+- Changed signal handling to also call old signal handlers.
+
+* Wed Aug 12 2015 <kyle.liddell@intel.com>
+- Keep PSM MQ initialized and safe to use until psm_ep_close()
+
+* Mon Aug 10 2015 <kyle.liddell@intel.com>
+- Fix ptl_am connect failure and lower system resource consumption
+
+* Mon Aug 10 2015 <levi.e.dettwyler@intel.com>
+- Removed "testing" entry from table of contents; not a real section
+
+* Wed Aug 5 2015 <levi.e.dettwyler@intel.com>
+- Moving test and libcm content to dedicated repo wfr-psm-test.git
+
+* Fri Jul 31 2015 <levi.e.dettwyler@intel.com>
+- Added HFI_MIN_PORT definition
+
+* Thu Jul 30 2015 <paul.j.reger@intel.com>
+- Adds backtrace to PSM_LOG functionality.
+
+* Wed Jul 29 2015 <paul.j.reger@intel.com>
+- Moved the files that were previously in the devel-noship rpm into the devel rpm.
+
+* Tue Jul 28 2015 <levi.e.dettwyler@intel.com>
+- Adding PSM CI scripts used for internal nightly builds
+
+* Tue Jul 28 2015 <paul.j.reger@intel.com>
+- Removed the noship rpm from the set of rpm's that psm builds.
+
+* Mon Jul 27 2015 <levi.e.dettwyler@intel.com>
+- Fixed a bug where timeout in psm_ep_close is ignored
+
+* Mon Jul 27 2015 <paul.j.reger@intel.com>
+- Updates for PSM_LOG capabilities, clean up and finalizes implementation
+
+* Fri Jul 24 2015 <kyle.liddell@intel.com>
+- Add a memset() after a posix_memalign() that was originally a calloc()
+
+* Thu Jul 23 2015 <paul.j.reger@intel.com>
+- Updates for PSM_LOG capabilities, adds analysis tool
+
 * Thu Jul 23 2015 <paul.j.reger@intel.com>
 - Removes README.OLD and test subdirectory from distribution as it is not needed.
 

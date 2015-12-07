@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
 #include "ips_proto.h"
@@ -100,7 +100,7 @@ struct ips_recvhdrq_callbacks {
 	int (*callback_error) (struct ips_recvhdrq_event *);
 };
 
-psm_error_t
+psm2_error_t
 ips_recvhdrq_init(const psmi_context_t *context,
 		  const struct ips_epstate *epstate,
 		  const struct ips_proto *proto,
@@ -112,9 +112,9 @@ ips_recvhdrq_init(const psmi_context_t *context,
 		  struct ips_recvhdrq *recvq,
 		  struct ips_recvhdrq_state *recvq_state);
 
-psm_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq);
+psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq);
 
-psm_error_t ips_recvhdrq_fini(struct ips_recvhdrq *recvq);
+psm2_error_t ips_recvhdrq_fini(struct ips_recvhdrq *recvq);
 
 /*
  * Structure containing state for recvhdrq reading. This is logically
@@ -131,6 +131,8 @@ struct ips_recvhdrq_state {
 	uint32_t hdrq_rhf_seq;	/* last seq */
 	uint32_t head_update_interval;	/* Header update interval */
 	uint32_t num_hdrq_done;	/* Num header queue done */
+	uint32_t egrq_update_interval; /* Eager buffer update interval */
+	uint32_t num_egrq_done; /* num eager buffer done */
 	uint32_t hdr_countdown;	/* for false-egr-full tracing */
 };
 

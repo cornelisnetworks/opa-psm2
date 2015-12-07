@@ -67,7 +67,6 @@ Contains the following sections:
 - INSTALLING USING MAKEFILE
 - INSTALLING USING RPM
 - RELATED SOFTWARE TO PSM
-- TESTING PSM 2 LIBRARY
 
 INTRODUCTION
 ------------
@@ -149,7 +148,6 @@ tree in your home directory:
 
 RPMS/x86_64/hfi1-psm-0.7-95.x86_64.rpm
 RPMS/x86_64/hfi1-psm-devel-0.7-95.x86_64.rpm
-RPMS/x86_64/hfi1-psm-devel-noship-0.7-95.x86_64.rpm
 RPMS/x86_64/hfi1-psm-compat-0.7-95.x86_64.rpm
 RPMS/x86_64/hfi1-psm-compat-devel-0.7-95.x86_64.rpm
 RPMS/x86_64/hfi1-psm-debuginfo-0.7-95.x86_64.rpm

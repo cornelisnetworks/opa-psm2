@@ -56,7 +56,7 @@
 #ifndef _IPS_STATS_H
 #define _IPS_STATS_H
 
-struct psm_epaddr;		/* for non-PSM clients */
+struct psm2_epaddr;		/* for non-PSM clients */
 
 /* Old stats */
 typedef struct {
@@ -78,6 +78,6 @@ typedef struct {
 	uint64_t scb_alloc_yields;
 } ips_sess_stat;
 
-int ips_get_stat(struct psm_epaddr *epaddr, ips_sess_stat *stats);
+int ips_get_stat(struct psm2_epaddr *epaddr, ips_sess_stat *stats);
 
 #endif /* _IPS_STATS_H */

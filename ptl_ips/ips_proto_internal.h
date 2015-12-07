@@ -66,7 +66,7 @@
  * On receive, handled by upcalling into the connect interface.
  * On send, handled by ips_proto by having connect compose the message.
  */
-psm_error_t ips_proto_process_connect(struct ips_proto *proto,
+psm2_error_t ips_proto_process_connect(struct ips_proto *proto,
 				      uint8_t opcode,
 				      struct ips_message_header *p_hdr,
 				      void *payload, uint32_t paylen);
@@ -74,18 +74,18 @@ int ips_proto_build_connect_message(struct ips_proto *proto,
 				    ips_epaddr_t *ptladdr,
 				    uint8_t opcode, void *payload);
 
-psm_error_t ips_proto_timer_ack_callback(struct psmi_timer *, uint64_t);
-psm_error_t ips_proto_timer_send_callback(struct psmi_timer *, uint64_t);
-psm_error_t ips_proto_timer_ctrlq_callback(struct psmi_timer *, uint64_t);
-psm_error_t ips_proto_timer_pendq_callback(struct psmi_timer *, uint64_t);
-psm_error_t ips_cca_timer_callback(struct psmi_timer *current_timer,
+psm2_error_t ips_proto_timer_ack_callback(struct psmi_timer *, uint64_t);
+psm2_error_t ips_proto_timer_send_callback(struct psmi_timer *, uint64_t);
+psm2_error_t ips_proto_timer_ctrlq_callback(struct psmi_timer *, uint64_t);
+psm2_error_t ips_proto_timer_pendq_callback(struct psmi_timer *, uint64_t);
+psm2_error_t ips_cca_timer_callback(struct psmi_timer *current_timer,
 				   uint64_t current);
 
-psm_error_t ips_cca_adjust_rate(ips_path_rec_t *path_rec, int cct_increment);
+psm2_error_t ips_cca_adjust_rate(ips_path_rec_t *path_rec, int cct_increment);
 void ips_proto_rv_scbavail_callback(struct ips_scbctrl *scbc, void *context);
 
-psm_error_t ips_proto_recv_init(struct ips_proto *proto);
-psm_error_t ips_proto_recv_fini(struct ips_proto *proto);
+psm2_error_t ips_proto_recv_init(struct ips_proto *proto);
+psm2_error_t ips_proto_recv_fini(struct ips_proto *proto);
 
 int ips_proto_process_err_chk(struct ips_recvhdrq_event *rcv_ev);
 int ips_proto_process_err_chk_gen(struct ips_recvhdrq_event *rcv_ev);

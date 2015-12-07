@@ -85,11 +85,11 @@
    Remaining arguments up to the max (1 << IPS_AM_HDR_NARGS_BITS) are placed in
    the data payload. */
 #define IPS_AM_HDR_NARGS  \
-	(sizeof(((struct ips_message_header *)0)->data) / sizeof(psm_amarg_t))
+	(sizeof(((struct ips_message_header *)0)->data) / sizeof(psm2_amarg_t))
 
 /* The actual size of the message header is determined by three paramters:
  * IPS_HEADER_QUEUE_IWORDS (fixed at 5 by hardware)
- *    InfiniBand words contain LRH and BTH
+ *    OPA words contain LRH and BTH
  * IPS_HEADER_QUEUE_HWORDS (fixed at 2 by ips protocol)
  *    IPS hardware words contain ips-protocol-specific data
  * IPS_HEADER_QUEUE_UWORDS (fixed at 7 by ips protocol)
@@ -110,7 +110,6 @@ struct ips_message_header {
 	};
 
 	union {
-		/* for active messages (AM) packet only */
 		struct {
 			struct {
 				__u32 ack_seq_num:31;
@@ -123,8 +122,7 @@ struct ips_message_header {
 					__u32 amhdr_nargs:IPS_AM_HDR_NARGS_BITS;
 					__u32 amhdr_hidx:IPS_AM_HDR_HIDX_BITS;
 				};
-				__u32 cksum;	/* optional checksum */
-				__u32 misclen;	/* for misc length */
+				__u32 mdata;	/* for misc data */
 			};
 
 			/* Inline arguments and/or message payload  */
@@ -143,10 +141,12 @@ struct ips_message_header {
 
 		/* for expected tid packet only */
 		struct {
-			ptl_arg_t exp_start_end;
-			ptl_arg_t exp_sdescid;
-			__u32     exp_rdescid_genc;
-			__u32     exp_offset;
+			ptl_arg_t exp_sdescid;  /* sender descriptor id */
+			__u16	  exp_rdescid_genc; /* tidrecvc gen count */
+			__u8	  exp_ustart[3]; /* unaligned start bytes */
+			__u8	  exp_uend[3];   /* unaligned end bytes */
+			__u32     exp_cksum;	/* optional checksum */
+			__u32     exp_offset;	/* packet offset */
 		};
 	};
 };

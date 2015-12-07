@@ -67,6 +67,7 @@
 #include <fcntl.h>
 #include <ucontext.h>
 #include "opa_user.h"
+#include "../psm_log.h"
 
 unsigned hfi_debug = 1;
 char *__hfi_mylabel = NULL;
@@ -74,6 +75,13 @@ FILE *__hfi_dbgout;
 static void init_hfi_mylabel(void) __attribute__ ((constructor));
 static void init_hfi_backtrace(void) __attribute__ ((constructor));
 static void init_hfi_dbgfile(void) __attribute__ ((constructor));
+static void fini_hfi_backtrace(void) __attribute__ ((destructor));
+static struct sigaction SIGSEGV_old_act;
+static struct sigaction SIGBUS_old_act;
+static struct sigaction SIGILL_old_act;
+static struct sigaction SIGABRT_old_act;
+static struct sigaction SIGINT_old_act;
+static struct sigaction SIGTERM_old_act;
 
 static void init_hfi_mylabel(void)
 {
@@ -108,7 +116,9 @@ static void hfi_sighdlr(int sig, siginfo_t *p1, void *ucv)
 	static char buf[150], hname[64], fname[128];
 	static int i, j, fd, id;
 	extern char *__progname;
+	PSM_LOG_DECLARE_BT_BUFFER();
 
+	PSM_LOG_BT(100,__FUNCTION__);
 	/* If this is a SIGINT do not display backtrace. Just invoke exit
 	   handlers */
 	if ((sig == SIGINT) || (sig == SIGTERM))
@@ -132,8 +142,8 @@ static void hfi_sighdlr(int sig, siginfo_t *p1, void *ucv)
 #warning No stack pointer or instruction pointer for this arch
 #endif
 	}
-	id += snprintf(buf + id, sizeof(buf) - id, ".  Backtrace:\n");
-	(void)write(2, buf, id);
+	id += snprintf(buf + id, sizeof(buf) - id, ". Backtrace:\n");
+	fprintf(stderr, "%.*s", id, buf);
 
 	i = backtrace(backaddr, sizeof(backaddr) / sizeof(backaddr[0]));
 	if (i > 2)		/* skip ourselves and backtrace */
@@ -154,11 +164,29 @@ static void hfi_sighdlr(int sig, siginfo_t *p1, void *ucv)
 	snprintf(fname, sizeof(fname), "%s.80s-%u,%.32s.btr", __progname,
 		 getpid(), hname);
 	if ((fd = open(fname, O_CREAT | O_WRONLY, 0644)) >= 0) {
-		(void)write(fd, buf, id);
+		FILE *fp = fdopen(fd, "w");
+		if (fp)
+			fprintf(fp, "%.*s", id, buf);
 		backtrace_symbols_fd(backaddr + j, i, fd);
-		(void)fsync(fd);
-		(void)close(fd);
+		if (fp)
+			fclose(fp);
 	}
+	switch (sig){
+        case SIGSEGV:
+                (*SIGSEGV_old_act.sa_sigaction)(sig,p1,ucv);
+                break;
+        case SIGBUS:
+                (*SIGBUS_old_act.sa_sigaction)(sig,p1,ucv);
+                break;
+        case SIGILL:
+                (*SIGILL_old_act.sa_sigaction)(sig,p1,ucv);
+                break;
+        case SIGABRT:
+                (*SIGABRT_old_act.sa_sigaction)(sig,p1,ucv);
+                break;
+        default:
+                break;
+        }
 	exit(1);		/* not _exit(), want atexit handlers to get run */
 }
 
@@ -176,12 +204,12 @@ static void init_hfi_backtrace(void)
 	if (!getenv("HFI_NO_BACKTRACE")) {
 		/* permanent, although probably
 		   undocumented way to disable backtraces. */
-		(void)sigaction(SIGSEGV, &act, NULL);
-		(void)sigaction(SIGBUS, &act, NULL);
-		(void)sigaction(SIGILL, &act, NULL);
-		(void)sigaction(SIGABRT, &act, NULL);
-		(void)sigaction(SIGINT, &act, NULL);
-		(void)sigaction(SIGTERM, &act, NULL);
+		(void)sigaction(SIGSEGV, &act, &SIGSEGV_old_act);
+		(void)sigaction(SIGBUS, &act, &SIGBUS_old_act);
+		(void)sigaction(SIGILL, &act, &SIGILL_old_act);
+		(void)sigaction(SIGABRT, &act, &SIGABRT_old_act);
+		(void)sigaction(SIGINT, &act, &SIGINT_old_act);
+		(void)sigaction(SIGTERM, &act, &SIGTERM_old_act);
 	}
 }
 
@@ -256,4 +284,16 @@ void hfi_set_mylabel(char *label)
 char *hfi_get_mylabel()
 {
 	return __hfi_mylabel;
+}
+
+static void fini_hfi_backtrace(void)
+{
+  if(!getenv("HFI_NO_BACKTRACE"))  {
+    (void)sigaction(SIGSEGV, &SIGSEGV_old_act, NULL);
+    (void)sigaction(SIGBUS,  &SIGBUS_old_act, NULL);
+    (void)sigaction(SIGILL,  &SIGILL_old_act, NULL);
+    (void)sigaction(SIGABRT, &SIGABRT_old_act, NULL);
+    (void)sigaction(SIGINT,  &SIGINT_old_act, NULL);
+    (void)sigaction(SIGTERM, &SIGTERM_old_act, NULL);
+  }
 }

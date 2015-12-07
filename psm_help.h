@@ -55,6 +55,7 @@
 
 #ifndef _PSMI_HELP_H
 #define _PSMI_HELP_H
+#include "psm_log.h"
 
 /* XXX pathcc and gcc only */
 #define PSMI_INLINE(FN) \
@@ -76,7 +77,7 @@
 #define psmi_assert_always_loc(x, curloc)				\
 	do {								\
 	if_pf(!(x)) {							\
-		psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,	\
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,	\
 				"Assertion failure at %s: %s", curloc,	\
 				STRINGIFY(x));				\
 	} } while (0)
@@ -98,15 +99,17 @@
 
 #define PSMI_ERR_UNLESS_INITIALIZED(ep)					\
 	do {								\
-		if (!psmi_isinitialized())				\
-			return psmi_handle_error(ep, PSM_INIT_NOT_INIT,	\
-				"PSM has not been initialized");	\
+		if (!psmi_isinitialized()) {				\
+			PSM2_LOG_MSG("leaving");				\
+			return psmi_handle_error(ep, PSM2_INIT_NOT_INIT,	\
+				"PSM2 has not been initialized");	\
+	  }								\
 	} while (0)
 
 #define PSMI_CHECKMEM(err, mem)			\
 	do {					\
 		if ((mem) == NULL) {		\
-			(err) = PSM_NO_MEMORY;	\
+			(err) = PSM2_NO_MEMORY;	\
 			goto fail;		\
 		}				\
 	} while (0)
@@ -114,12 +117,12 @@
 #define PSMI_CACHEALIGN	__attribute__((aligned(64)))
 
 /* Easy way to ignore the OK_NO_PROGRESS case */
-PSMI_ALWAYS_INLINE(psm_error_t psmi_err_only(psm_error_t err))
+PSMI_ALWAYS_INLINE(psm2_error_t psmi_err_only(psm2_error_t err))
 {
-	if (err > PSM_OK_NO_PROGRESS)
+	if (err > PSM2_OK_NO_PROGRESS)
 		return err;
 	else
-		return PSM_OK;
+		return PSM2_OK;
 }
 
 #ifdef min
@@ -150,14 +153,14 @@ PSMI_ALWAYS_INLINE(psm_error_t psmi_err_only(psm_error_t err))
 
 #define PSMI_MAKE_DRIVER_VERSION(major, minor) ((major)<<16 | ((minor) & 0xffff))
 
-#define PSMI_STRICT_SIZE_DECL(member, sz) static const size_t __psm_ss_ ## member = sz
+#define PSMI_STRICT_SIZE_DECL(member, sz) static const size_t __psm2_ss_ ## member = sz
 #define PSMI_STRICT_SIZE_VERIFY(member, sz)				\
 	do {								\
-		if (__psm_ss_ ## member != (sz)) {			\
+		if (__psm2_ss_ ## member != (sz)) {			\
 			char errmsg[64];				\
 			snprintf(errmsg, 32, "Internal error: %s "	\
 					"size doesn't match expected %d bytes",	\
-					STRINGIFY(member), (int) __psm_ss_ ## member);	\
+					STRINGIFY(member), (int) __psm2_ss_ ## member);	\
 			exit(-1);					\
 		}							\
 	} while (0)

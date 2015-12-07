@@ -66,14 +66,14 @@
 /*
  * Endpoint management
  */
-psm_ep_t psmi_opened_endpoint = NULL;
+psm2_ep_t psmi_opened_endpoint = NULL;
 int psmi_opened_endpoint_count = 0;
 
-static psm_error_t psmi_ep_open_device(const psm_ep_t ep,
-				       const struct psm_ep_open_opts *opts,
-				       const psm_uuid_t unique_job_key,
+static psm2_error_t psmi_ep_open_device(const psm2_ep_t ep,
+				       const struct psm2_ep_open_opts *opts,
+				       const psm2_uuid_t unique_job_key,
 				       struct psmi_context *context,
-				       psm_epid_t *epid);
+				       psm2_epid_t *epid);
 
 /*
  * Device managment
@@ -90,14 +90,16 @@ static psm_error_t psmi_ep_open_device(const psm_ep_t ep,
  */
 
 #define PSMI_DEVICES_DEFAULT "self,shm,hfi"
-static psm_error_t psmi_parse_devices(int devices[PTL_MAX_INIT],
+static psm2_error_t psmi_parse_devices(int devices[PTL_MAX_INIT],
 				      const char *devstr);
 static int psmi_device_is_enabled(const int devices[PTL_MAX_INIT], int devid);
-int psmi_ep_device_is_enabled(const psm_ep_t ep, int devid);
+int psmi_ep_device_is_enabled(const psm2_ep_t ep, int devid);
 
-psm_error_t __psm_ep_num_devunits(uint32_t *num_units_o)
+psm2_error_t __psm2_ep_num_devunits(uint32_t *num_units_o)
 {
 	static int num_units = -1;
+
+	PSM2_LOG_MSG("entering");
 
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
 
@@ -108,9 +110,10 @@ psm_error_t __psm_ep_num_devunits(uint32_t *num_units_o)
 	}
 
 	*num_units_o = (uint32_t) num_units;
-	return PSM_OK;
+	PSM2_LOG_MSG("leaving");
+	return PSM2_OK;
 }
-PSMI_API_DECL(psm_ep_num_devunits)
+PSMI_API_DECL(psm2_ep_num_devunits)
 
 static int cmpfunc(const void *p1, const void *p2)
 {
@@ -123,17 +126,17 @@ static int cmpfunc(const void *p1, const void *p2)
 	return 1;
 }
 
-static psm_error_t
+static psm2_error_t
 psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
 {
 	uint32_t num_units;
 	uint64_t gid_hi, gid_lo;
 	int i, j, ret, count = 0;
 	char *env;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	uint64_t gidh[HFI_MAX_RAILS][3];
 
-	env = getenv("PSM_MULTIRAIL");
+	env = getenv("PSM2_MULTIRAIL");
 	if (!env || atoi(env) == 0) {
 		*num_rails = 0;
 		return err;
@@ -142,7 +145,7 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
 /*
  * map is in format: unit:port,unit:port,...
  */
-	if ((env = getenv("PSM_MULTIRAIL_MAP"))) {
+	if ((env = getenv("PSM2_MULTIRAIL_MAP"))) {
 		if (sscanf(env, "%d:%d", &i, &j) == 2) {
 			char *comma = strchr(env, ',');
 			unit[count] = i;
@@ -166,11 +169,20 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
  * Check if any of the port is not usable.
  */
 		for (i = 0; i < count; i++) {
-			ret = hfi_get_port_lid(unit[i], port[i]);
-			if (ret == -1) {
+			ret = hfi_get_port_active(unit[i], port[i]);
+			if (ret <= 0) {
 				err =
 				    psmi_handle_error(NULL,
-						      PSM_EP_DEVICE_FAILURE,
+						      PSM2_EP_DEVICE_FAILURE,
+						      "Unit/port: %d:%d is not active.",
+						      unit[i], port[i]);
+				return err;
+			}
+			ret = hfi_get_port_lid(unit[i], port[i]);
+			if (ret <= 0) {
+				err =
+				    psmi_handle_error(NULL,
+						      PSM2_EP_DEVICE_FAILURE,
 						      "Couldn't get lid for unit %d:%d",
 						      unit[i], port[i]);
 				return err;
@@ -181,7 +193,7 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
 			if (ret == -1) {
 				err =
 				    psmi_handle_error(NULL,
-						      PSM_EP_DEVICE_FAILURE,
+						      PSM2_EP_DEVICE_FAILURE,
 						      "Couldn't get gid for unit %d:%d",
 						      unit[i], port[i]);
 				return err;
@@ -191,7 +203,7 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
 		return err;
 	}
 
-	if ((err = psm_ep_num_devunits(&num_units))) {
+	if ((err = psm2_ep_num_devunits(&num_units))) {
 		return err;
 	}
 	if (num_units > HFI_MAX_RAILS) {
@@ -205,9 +217,9 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
  * Get all the ports with a valid lid and gid, one per unit.
  */
 	for (i = 0; i < num_units; i++) {
-		for (j = 1; j <= HFI_MAX_PORT; j++) {
+		for (j = HFI_MIN_PORT; j <= HFI_MAX_PORT; j++) {
 			ret = hfi_get_port_lid(i, j);
-			if (ret == -1)
+			if (ret <= 0)
 				continue;
 			ret = hfi_get_port_gid(i, j, &gid_hi, &gid_lo);
 			if (ret == -1)
@@ -236,7 +248,7 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
 	return err;
 }
 
-static psm_error_t
+static psm2_error_t
 psmi_ep_devlids(uint16_t **lids, uint32_t *num_lids_o,
 		uint64_t my_gid_hi, uint64_t my_gid_lo)
 {
@@ -244,30 +256,30 @@ psmi_ep_devlids(uint16_t **lids, uint32_t *num_lids_o,
 	static uint32_t nlids;
 	uint32_t num_units;
 	int i;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
 
 	if (hfi_lids == NULL) {
-		if ((err = psm_ep_num_devunits(&num_units)))
+		if ((err = psm2_ep_num_devunits(&num_units)))
 			goto fail;
 		hfi_lids = (uint16_t *)
 		    psmi_calloc(PSMI_EP_NONE, UNDEFINED,
-				num_units * HFI_MAX_PORT, sizeof(uint16_t));
+				num_units * HFI_NUM_PORTS, sizeof(uint16_t));
 		if (hfi_lids == NULL) {
-			err = psmi_handle_error(NULL, PSM_NO_MEMORY,
+			err = psmi_handle_error(NULL, PSM2_NO_MEMORY,
 						"Couldn't allocate memory for dev_lids structure");
 			goto fail;
 		}
 
 		for (i = 0; i < num_units; i++) {
 			int j;
-			for (j = 1; j <= HFI_MAX_PORT; j++) {
+			for (j = HFI_MIN_PORT; j <= HFI_MAX_PORT; j++) {
 				int lid = hfi_get_port_lid(i, j);
 				int ret;
 				uint64_t gid_hi = 0, gid_lo = 0;
 
-				if (lid == -1)
+				if (lid <= 0)
 					continue;
 				ret = hfi_get_port_gid(i, j, &gid_hi, &gid_lo);
 				if (ret == -1)
@@ -296,7 +308,7 @@ psmi_ep_devlids(uint16_t **lids, uint32_t *num_lids_o,
 			}
 		}
 		if (nlids == 0) {
-			err = psmi_handle_error(NULL, PSM_EP_DEVICE_FAILURE,
+			err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
 						"Couldn't get lid&gid from any unit/port");
 			goto fail;
 		}
@@ -308,16 +320,16 @@ fail:
 	return err;
 }
 
-static psm_error_t
-psmi_ep_verify_pkey(psm_ep_t ep, uint16_t pkey, uint16_t *opkey)
+static psm2_error_t
+psmi_ep_verify_pkey(psm2_ep_t ep, uint16_t pkey, uint16_t *opkey)
 {
 	int i, ret;
-	psm_error_t err;
+	psm2_error_t err;
 
 	for (i = 0; i < 16; i++) {
 		ret = hfi_get_port_index2pkey(ep->unit_id, ep->portnum, i);
 		if (ret < 0) {
-			err = psmi_handle_error(NULL, PSM_EP_DEVICE_FAILURE,
+			err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
 						"Can't get a valid pkey value from pkey table\n");
 			return err;
 		} else if (ret == 0x7fff || ret == 0xffff) {
@@ -330,7 +342,7 @@ psmi_ep_verify_pkey(psm_ep_t ep, uint16_t pkey, uint16_t *opkey)
 
 	/* if pkey does not match */
 	if (i == 16) {
-		err = psmi_handle_error(NULL, PSM_EP_DEVICE_FAILURE,
+		err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
 					"Wrong pkey 0x%x, please use PSM_PKEY to specify a valid pkey\n",
 					pkey);
 		return err;
@@ -339,18 +351,23 @@ psmi_ep_verify_pkey(psm_ep_t ep, uint16_t pkey, uint16_t *opkey)
 	/* return the final pkey */
 	*opkey = pkey;
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
-uint64_t __psm_epid_nid(psm_epid_t epid)
+uint64_t __psm2_epid_nid(psm2_epid_t epid)
 {
-	return (uint64_t) PSMI_EPID_GET_LID(epid);
+	uint64_t rv;
+
+	PSM2_LOG_MSG("entering");
+	rv = (uint64_t) PSMI_EPID_GET_LID(epid);
+	PSM2_LOG_MSG("leaving");
+	return rv;
 }
-PSMI_API_DECL(psm_epid_nid)
+PSMI_API_DECL(psm2_epid_nid)
 
 /* Currently not exposed to users, we don't acknowledge the existence of
  * subcontexts */
-uint64_t psmi_epid_subcontext(psm_epid_t epid)
+uint64_t psmi_epid_subcontext(psm2_epid_t epid)
 {
 	return (uint64_t) PSMI_EPID_GET_SUBCONTEXT(epid);
 }
@@ -359,40 +376,52 @@ uint64_t psmi_epid_subcontext(psm_epid_t epid)
  * service levels and HFI types encoding within epids. This may require
  * changing to expose SLs
  */
-uint64_t psmi_epid_hfi_type(psm_epid_t epid)
+uint64_t psmi_epid_hfi_type(psm2_epid_t epid)
 {
 	return (uint64_t) PSMI_EPID_GET_HFITYPE(epid);
 }
 
-uint64_t __psm_epid_context(psm_epid_t epid)
+uint64_t __psm2_epid_context(psm2_epid_t epid)
 {
-	return (uint64_t) PSMI_EPID_GET_CONTEXT(epid);
-}
-PSMI_API_DECL(psm_epid_context)
+	uint64_t rv;
 
-uint64_t __psm_epid_port(psm_epid_t epid)
-{
-	return __psm_epid_context(epid);
+	PSM2_LOG_MSG("entering");
+	rv = (uint64_t) PSMI_EPID_GET_CONTEXT(epid);
+	PSM2_LOG_MSG("leaving");
+	return rv;
 }
-PSMI_API_DECL(psm_epid_port)
+PSMI_API_DECL(psm2_epid_context)
 
-psm_error_t __psm_ep_query(int *num_of_epinfo, psm_epinfo_t *array_of_epinfo)
+uint64_t __psm2_epid_port(psm2_epid_t epid)
 {
-	psm_error_t err = PSM_OK;
+	uint64_t rv;
+	PSM2_LOG_MSG("entering");
+	rv = __psm2_epid_context(epid);
+	PSM2_LOG_MSG("leaving");
+	return rv;
+}
+PSMI_API_DECL(psm2_epid_port)
+
+psm2_error_t __psm2_ep_query(int *num_of_epinfo, psm2_epinfo_t *array_of_epinfo)
+{
+	psm2_error_t err = PSM2_OK;
 	int i;
-	psm_ep_t ep;
+	psm2_ep_t ep;
 
+	PSM2_LOG_MSG("entering");
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
 
 	if (*num_of_epinfo <= 0) {
-		err = psmi_handle_error(NULL, PSM_PARAM_ERR,
-					"Invalid psm_ep_query parameters");
+		err = psmi_handle_error(NULL, PSM2_PARAM_ERR,
+					"Invalid psm2_ep_query parameters");
+		PSM2_LOG_MSG("leaving");
 		return err;
 	}
 
 	if (psmi_opened_endpoint == NULL) {
-		err = psmi_handle_error(NULL, PSM_EP_WAS_CLOSED,
+		err = psmi_handle_error(NULL, PSM2_EP_WAS_CLOSED,
 					"PSM Endpoint is closed or does not exist");
+		PSM2_LOG_MSG("leaving");
 		return err;
 	}
 
@@ -404,28 +433,30 @@ psm_error_t __psm_ep_query(int *num_of_epinfo, psm_epinfo_t *array_of_epinfo)
 		array_of_epinfo[i].epid = ep->epid;
 		array_of_epinfo[i].jkey = ep->jkey;
 		memcpy(array_of_epinfo[i].uuid,
-		       (void *)ep->uuid, sizeof(psm_uuid_t));
+		       (void *)ep->uuid, sizeof(psm2_uuid_t));
 		psmi_uuid_unparse(ep->uuid, array_of_epinfo[i].uuid_str);
 		ep = ep->user_ep_next;
 	}
 	*num_of_epinfo = i;
-
+	PSM2_LOG_MSG("leaving");
 	return err;
 }
-PSMI_API_DECL(psm_ep_query)
+PSMI_API_DECL(psm2_ep_query)
 
-psm_error_t __psm_ep_epid_lookup(psm_epid_t epid, psm_epconn_t *epconn)
+psm2_error_t __psm2_ep_epid_lookup(psm2_epid_t epid, psm2_epconn_t *epconn)
 {
-	psm_error_t err = PSM_OK;
-	psm_epaddr_t epaddr;
-	psm_ep_t ep;
+	psm2_error_t err = PSM2_OK;
+	psm2_epaddr_t epaddr;
+	psm2_ep_t ep;
 
+	PSM2_LOG_MSG("entering");
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
 
 	/* Need to have an opened endpoint before we can resolve epids */
 	if (psmi_opened_endpoint == NULL) {
-		err = psmi_handle_error(NULL, PSM_EP_WAS_CLOSED,
+		err = psmi_handle_error(NULL, PSM2_EP_WAS_CLOSED,
 					"PSM Endpoint is closed or does not exist");
+		PSM2_LOG_MSG("leaving");
 		return err;
 	}
 
@@ -442,94 +473,105 @@ psm_error_t __psm_ep_epid_lookup(psm_epid_t epid, psm_epconn_t *epconn)
 		epconn->addr = epaddr;
 		epconn->ep = ep;
 		epconn->mq = ep->mq;
+		PSM2_LOG_MSG("leaving");
 		return err;
 	}
 
-	err = psmi_handle_error(NULL, PSM_EPID_UNKNOWN,
+	err = psmi_handle_error(NULL, PSM2_EPID_UNKNOWN,
 				"Endpoint connection status unknown");
+	PSM2_LOG_MSG("leaving");
 	return err;
 }
-PSMI_API_DECL(psm_ep_epid_lookup);
+PSMI_API_DECL(psm2_ep_epid_lookup);
 
-psm_error_t
-__psm_ep_epid_share_memory(psm_ep_t ep, psm_epid_t epid, int *result_o)
+psm2_error_t
+__psm2_ep_epid_share_memory(psm2_ep_t ep, psm2_epid_t epid, int *result_o)
 {
 	uint32_t num_lids = 0;
 	uint16_t *lids = NULL;
 	int i;
 	uint16_t epid_lid;
 	int result = 0;
-	psm_error_t err;
+	psm2_error_t err;
 
+	PSM2_LOG_MSG("entering");
 	psmi_assert_always(ep != NULL);
 	PSMI_ERR_UNLESS_INITIALIZED(ep);
 
-	epid_lid = (uint16_t) psm_epid_nid(epid);
-	/* If we're in non-hfi mode, done bother listing lids */
-	if (!psmi_ep_device_is_enabled(ep, PTL_DEVID_IPS)) {
-		uint64_t mylid = (uint16_t) psm_epid_nid(ep->epid);
-		if (mylid == epid_lid)
-			result = 1;
+	if ((!psmi_ep_device_is_enabled(ep, PTL_DEVID_IPS)) ||
+	    (psmi_epid_hfi_type(epid) == PSMI_HFI_TYPE_DEFAULT)) {
+		/* If we are in the no hfi-mode, or the other process is,
+		 * the epid doesn't help us - so assume both we're on the same
+		 * machine and try to connect.
+		 */
+		result = 1;
 	} else {
+		epid_lid = (uint16_t) psm2_epid_nid(epid);
 		err = psmi_ep_devlids(&lids, &num_lids, ep->gid_hi, ep->gid_lo);
-		if (err)
+		if (err) {
+			PSM2_LOG_MSG("leaving");
 			return err;
+		}
 		for (i = 0; i < num_lids; i++) {
 			if (epid_lid == lids[i]) {
+				/* we share memory if the lid is the same. */
 				result = 1;
 				break;
 			}
 		}
 	}
 	*result_o = result;
-	return PSM_OK;
+	PSM2_LOG_MSG("leaving");
+	return PSM2_OK;
 }
-PSMI_API_DECL(psm_ep_epid_share_memory)
+PSMI_API_DECL(psm2_ep_epid_share_memory)
 
-psm_error_t __psm_ep_open_opts_get_defaults(struct psm_ep_open_opts *opts)
+psm2_error_t __psm2_ep_open_opts_get_defaults(struct psm2_ep_open_opts *opts)
 {
+	PSM2_LOG_MSG("entering");
+
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
 
 	/* Set in order in the structure. */
 	opts->timeout = 30000000000LL;	/* 30 sec */
 	opts->unit = HFI_UNIT_ID_ANY;
-	opts->affinity = PSM_EP_OPEN_AFFINITY_SET;
+	opts->affinity = PSM2_EP_OPEN_AFFINITY_SET;
 	opts->shm_mbytes = 0;	/* deprecated in psm2.h */
 	opts->sendbufs_num = 1024;
 	opts->network_pkey = HFI_DEFAULT_P_KEY;
 	opts->port = HFI_PORT_NUM_ANY;
 	opts->outsl = PSMI_SL_DEFAULT;
 	opts->service_id = HFI_DEFAULT_SERVICE_ID;
-	opts->path_res_type = PSM_PATH_RES_NONE;
+	opts->path_res_type = PSM2_PATH_RES_NONE;
 	opts->senddesc_num = 4096;
 	opts->imm_size = 128;
-
-	return PSM_OK;
+	PSM2_LOG_MSG("leaving");
+	return PSM2_OK;
 }
-PSMI_API_DECL(psm_ep_open_opts_get_defaults)
+PSMI_API_DECL(psm2_ep_open_opts_get_defaults)
 
-psm_error_t psmi_poll_noop(ptl_t *ptl, int replyonly);
+psm2_error_t psmi_poll_noop(ptl_t *ptl, int replyonly);
 
-psm_error_t
-__psm_ep_open_internal(psm_uuid_t const unique_job_key, int *devid_enabled,
-		       struct psm_ep_open_opts const *opts_i, psm_mq_t mq,
-		       psm_ep_t *epo, psm_epid_t *epido)
+psm2_error_t
+__psm2_ep_open_internal(psm2_uuid_t const unique_job_key, int *devid_enabled,
+		       struct psm2_ep_open_opts const *opts_i, psm2_mq_t mq,
+		       psm2_ep_t *epo, psm2_epid_t *epido)
 {
-	psm_ep_t ep = NULL;
+	psm2_ep_t ep = NULL;
 	uint32_t num_units;
 	size_t len;
-	psm_error_t err;
-	psm_epaddr_t epaddr = NULL;
+	psm2_error_t err;
+	psm2_epaddr_t epaddr = NULL;
 	char buf[128], *p, *e;
 	union psmi_envvar_val envvar_val;
 	size_t ptl_sizes;
-	struct psm_ep_open_opts opts;
+	struct psm2_ep_open_opts opts;
 	ptl_t *amsh_ptl, *ips_ptl, *self_ptl;
 	int i;
 
 	/* First get the set of default options, we overwrite with the user's
 	 * desired values afterwards */
-	if ((err = psm_ep_open_opts_get_defaults(&opts)))
+	if ((err = psm2_ep_open_opts_get_defaults(&opts)))
 		goto fail;
 
 	if (opts_i != NULL) {
@@ -554,7 +596,7 @@ __psm_ep_open_internal(psm_uuid_t const unique_job_key, int *devid_enabled,
 
 		if (opts_i->service_id)
 			opts.service_id = (uint64_t) opts_i->service_id;
-		if (opts_i->path_res_type != PSM_PATH_RES_NONE)
+		if (opts_i->path_res_type != PSM2_PATH_RES_NONE)
 			opts.path_res_type = opts_i->path_res_type;
 
 		if (opts_i->senddesc_num)
@@ -564,7 +606,7 @@ __psm_ep_open_internal(psm_uuid_t const unique_job_key, int *devid_enabled,
 	}
 
 	/* Get Service ID from environment */
-	if (!psmi_getenv("PSM_IB_SERVICE_ID",
+	if (!psmi_getenv("PSM2_IB_SERVICE_ID",
 			 "HFI Service ID for path resolution",
 			 PSMI_ENVVAR_LEVEL_USER,
 			 PSMI_ENVVAR_TYPE_ULONG_ULONG,
@@ -579,21 +621,21 @@ __psm_ep_open_internal(psm_uuid_t const unique_job_key, int *devid_enabled,
 	 * OPP  : Use OFED Plus Plus library to do path record queries.
 	 * UMAD : Use raw libibumad interface to form and process path records.
 	 */
-	if (!psmi_getenv("PSM_PATH_REC",
+	if (!psmi_getenv("PSM2_PATH_REC",
 			 "Mechanism to query HFI path record (default is no path query)",
 			 PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_STR,
 			 (union psmi_envvar_val)"none", &envvar_val)) {
 		if (!strcasecmp(envvar_val.e_str, "none"))
-			opts.path_res_type = PSM_PATH_RES_NONE;
+			opts.path_res_type = PSM2_PATH_RES_NONE;
 		else if (!strcasecmp(envvar_val.e_str, "opp"))
-			opts.path_res_type = PSM_PATH_RES_OPP;
+			opts.path_res_type = PSM2_PATH_RES_OPP;
 		else if (!strcasecmp(envvar_val.e_str, "umad"))
-			opts.path_res_type = PSM_PATH_RES_UMAD;
+			opts.path_res_type = PSM2_PATH_RES_UMAD;
 		else {
 			_HFI_ERROR("Unknown path resolution type %s. "
 				   "Disabling use of path record query.\n",
 				   envvar_val.e_str);
-			opts.path_res_type = PSM_PATH_RES_NONE;
+			opts.path_res_type = PSM2_PATH_RES_NONE;
 		}
 	}
 
@@ -624,7 +666,7 @@ __psm_ep_open_internal(psm_uuid_t const unique_job_key, int *devid_enabled,
 	 * specify it on ep open and we may require it for vFabrics.
 	 * path-query will override it.
 	 */
-	if (!psmi_getenv("PSM_PKEY",
+	if (!psmi_getenv("PSM2_PKEY",
 			 "HFI PKey to use for endpoint",
 			 PSMI_ENVVAR_LEVEL_USER,
 			 PSMI_ENVVAR_TYPE_ULONG,
@@ -642,7 +684,7 @@ __psm_ep_open_internal(psm_uuid_t const unique_job_key, int *devid_enabled,
 	}
 
 	/* Get number of default send buffers from environment */
-	if (!psmi_getenv("PSM_NUM_SEND_BUFFERS",
+	if (!psmi_getenv("PSM2_NUM_SEND_BUFFERS",
 			 "Number of send buffers to allocate [1024]",
 			 PSMI_ENVVAR_LEVEL_USER,
 			 PSMI_ENVVAR_TYPE_UINT,
@@ -653,7 +695,7 @@ __psm_ep_open_internal(psm_uuid_t const unique_job_key, int *devid_enabled,
 	/* Get immediate data size - transfers less than immediate data size do
 	 * not consume a send buffer and require just a send descriptor.
 	 */
-	if (!psmi_getenv("PSM_SEND_IMMEDIATE_SIZE",
+	if (!psmi_getenv("PSM2_SEND_IMMEDIATE_SIZE",
 			 "Immediate data send size not requiring a buffer [128]",
 			 PSMI_ENVVAR_LEVEL_USER,
 			 PSMI_ENVVAR_TYPE_UINT,
@@ -664,7 +706,7 @@ __psm_ep_open_internal(psm_uuid_t const unique_job_key, int *devid_enabled,
 	/* Get numner of send descriptors - by default this is 4 times the number
 	 * of send buffers - mainly used for short/inlined messages.
 	 */
-	if (!psmi_getenv("PSM_NUM_SEND_DESCRIPTORS",
+	if (!psmi_getenv("PSM2_NUM_SEND_DESCRIPTORS",
 			 "Number of send descriptors to allocate [4096]",
 			 PSMI_ENVVAR_LEVEL_USER,
 			 PSMI_ENVVAR_TYPE_UINT,
@@ -673,43 +715,44 @@ __psm_ep_open_internal(psm_uuid_t const unique_job_key, int *devid_enabled,
 	}
 
 	if (psmi_device_is_enabled(devid_enabled, PTL_DEVID_IPS)) {
-		if ((err = psm_ep_num_devunits(&num_units)) != PSM_OK)
+		if ((err = psm2_ep_num_devunits(&num_units)) != PSM2_OK)
 			goto fail;
 	} else
 		num_units = 0;
 
 	/* do some error checking */
 	if (opts.timeout < -1) {
-		err = psmi_handle_error(NULL, PSM_PARAM_ERR,
+		err = psmi_handle_error(NULL, PSM2_PARAM_ERR,
 					"Invalid timeout value %lld",
 					(long long)opts.timeout);
 		goto fail;
 	} else if (num_units && (opts.unit < -1 || opts.unit >= (int)num_units)) {
-		err = psmi_handle_error(NULL, PSM_PARAM_ERR,
+		err = psmi_handle_error(NULL, PSM2_PARAM_ERR,
 					"Invalid Device Unit ID %d (%d units found)",
 					opts.unit, num_units);
 		goto fail;
-	} else if (opts.port < 0 || opts.port > HFI_MAX_PORT) {
-		err = psmi_handle_error(NULL, PSM_PARAM_ERR,
+	} else if ((opts.port < HFI_MIN_PORT || opts.port > HFI_MAX_PORT) &&
+				opts.port != HFI_PORT_NUM_ANY) {
+		err = psmi_handle_error(NULL, PSM2_PARAM_ERR,
 					"Invalid Device port number %d",
 					opts.port);
 		goto fail;
 	} else if (opts.affinity < 0
-		   || opts.affinity > PSM_EP_OPEN_AFFINITY_FORCE) {
+		   || opts.affinity > PSM2_EP_OPEN_AFFINITY_FORCE) {
 		err =
-		    psmi_handle_error(NULL, PSM_PARAM_ERR,
+		    psmi_handle_error(NULL, PSM2_PARAM_ERR,
 				      "Invalid Affinity option: %d",
 				      opts.affinity);
 		goto fail;
 	} else if (opts.outsl < PSMI_SL_MIN || opts.outsl > PSMI_SL_MAX) {
-		err = psmi_handle_error(NULL, PSM_PARAM_ERR,
+		err = psmi_handle_error(NULL, PSM2_PARAM_ERR,
 					"Invalid SL number: %lld",
 					(unsigned long long)opts.outsl);
 		goto fail;
 	}
 
 	/* Set environment variable if PSM is not allowed to set affinity */
-	if (opts.affinity == PSM_EP_OPEN_AFFINITY_SKIP)
+	if (opts.affinity == PSM2_EP_OPEN_AFFINITY_SKIP)
 		setenv("HFI_NO_CPUAFFINITY", "1", 1);
 
 	/* Allocate end point structure storage */
@@ -721,16 +764,17 @@ __psm_ep_open_internal(psm_uuid_t const unique_job_key, int *devid_enabled,
 	    (psmi_device_is_enabled(devid_enabled, PTL_DEVID_AMSH) ?
 	     psmi_ptl_amsh.sizeof_ptl() : 0);
 	if (ptl_sizes == 0)
-		return PSM_EP_NO_DEVICE;
+		return PSM2_EP_NO_DEVICE;
 
-	ep = (psm_ep_t) psmi_memalign(PSMI_EP_NONE, UNDEFINED, 64,
-				      sizeof(struct psm_ep) + ptl_sizes);
-	epaddr = (psm_epaddr_t) psmi_calloc(PSMI_EP_NONE, PER_PEER_ENDPOINT,
-					    1, sizeof(struct psm_epaddr));
+	ep = (psm2_ep_t) psmi_memalign(PSMI_EP_NONE, UNDEFINED, 64,
+				      sizeof(struct psm2_ep) + ptl_sizes);
+	memset(ep, 0, sizeof(struct psm2_ep) + ptl_sizes);
+	epaddr = (psm2_epaddr_t) psmi_calloc(PSMI_EP_NONE, PER_PEER_ENDPOINT,
+					    1, sizeof(struct psm2_epaddr));
 	if (ep == NULL || epaddr == NULL) {
-		err = psmi_handle_error(NULL, PSM_NO_MEMORY,
+		err = psmi_handle_error(NULL, PSM2_NO_MEMORY,
 					"Couldn't allocate memory for %s structure",
-					ep == NULL ? "psm_ep" : "psm_epaddr");
+					ep == NULL ? "psm2_ep" : "psm2_epaddr");
 		goto fail;
 	}
 
@@ -744,7 +788,7 @@ __psm_ep_open_internal(psm_uuid_t const unique_job_key, int *devid_enabled,
 	ep->mq = mq;
 
 	/* Get ready for PTL initialization */
-	memcpy(&ep->uuid, (void *)unique_job_key, sizeof(psm_uuid_t));
+	memcpy(&ep->uuid, (void *)unique_job_key, sizeof(psm2_uuid_t));
 	ep->epaddr = epaddr;
 	ep->memmode = mq->memmode;
 	ep->hfi_num_sendbufs = opts.sendbufs_num;
@@ -758,7 +802,7 @@ __psm_ep_open_internal(psm_uuid_t const unique_job_key, int *devid_enabled,
 	ep->connections = 0;
 
 	/* See how many iterations we want to spin before yielding */
-	psmi_getenv("PSM_YIELD_SPIN_COUNT",
+	psmi_getenv("PSM2_YIELD_SPIN_COUNT",
 		    "Spin poll iterations before yield",
 		    PSMI_ENVVAR_LEVEL_HIDDEN,
 		    PSMI_ENVVAR_TYPE_UINT,
@@ -802,17 +846,17 @@ __psm_ep_open_internal(psm_uuid_t const unique_job_key, int *devid_enabled,
 		len = snprintf(p, sizeof(buf) - strlen(buf), ":%d.", atoi(e));
 	else
 		len = snprintf(p, sizeof(buf) - strlen(buf), ":%d.%d.",
-			       (uint32_t) psm_epid_context(ep->epid),
+			       (uint32_t) psm2_epid_context(ep->epid),
 			       (uint32_t) psmi_epid_subcontext(ep->epid));
 	*(p + len) = '\0';
 	ep->context_mylabel = psmi_strdup(ep, buf);
 	if (ep->context_mylabel == NULL) {
-		err = PSM_NO_MEMORY;
+		err = PSM2_NO_MEMORY;
 		goto fail;
 	}
 	/* hfi_set_mylabel(ep->context_mylabel); */
 
-	if ((err = psmi_epid_set_hostname(psm_epid_nid(ep->epid), buf, 0)))
+	if ((err = psmi_epid_set_hostname(psm2_epid_nid(ep->epid), buf, 0)))
 		goto fail;
 
 	_HFI_VDBG("start ptl device init...\n");
@@ -848,7 +892,7 @@ __psm_ep_open_internal(psm_uuid_t const unique_job_key, int *devid_enabled,
 	*epido = ep->epid;
 	*epo = ep;
 
-	return PSM_OK;
+	return PSM2_OK;
 
 fail:
 	if (ep != NULL) {
@@ -861,15 +905,15 @@ fail:
 	return err;
 }
 
-psm_error_t
-__psm_ep_open(psm_uuid_t const unique_job_key,
-	      struct psm_ep_open_opts const *opts_i, psm_ep_t *epo,
-	      psm_epid_t *epido)
+psm2_error_t
+__psm2_ep_open(psm2_uuid_t const unique_job_key,
+	      struct psm2_ep_open_opts const *opts_i, psm2_ep_t *epo,
+	      psm2_epid_t *epido)
 {
-	psm_error_t err;
-	psm_mq_t mq;
-	psm_epid_t epid;
-	psm_ep_t ep, tmp;
+	psm2_error_t err;
+	psm2_mq_t mq;
+	psm2_epid_t epid;
+	psm2_ep_t ep, tmp;
 	uint32_t units[HFI_MAX_RAILS];
 	uint16_t ports[HFI_MAX_RAILS];
 	int i, num_rails = 0;
@@ -879,11 +923,14 @@ __psm_ep_open(psm_uuid_t const unique_job_key,
 	int devid_enabled[PTL_MAX_INIT];
 	union psmi_envvar_val devs;
 
+	PSM2_LOG_MSG("entering");
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
 
 	/* Currently only one endpoint is supported. */
-	if (psmi_opened_endpoint_count > 0)
-		return PSM_TOO_MANY_ENDPOINTS;
+	if (psmi_opened_endpoint_count > 0) {
+		PSM2_LOG_MSG("leaving");
+		return PSM2_TOO_MANY_ENDPOINTS;
+	}
 
 	PSMI_PLOCK();
 
@@ -891,11 +938,11 @@ __psm_ep_open(psm_uuid_t const unique_job_key,
 	 * make sure ep->mq exists and is valid before calling ips_do_work.
 	 */
 	err = psmi_mq_malloc(&mq);
-	if (err != PSM_OK)
+	if (err != PSM2_OK)
 		goto fail;
 
 	/* See which ptl devices we want to use for this ep to be opened */
-	psmi_getenv("PSM_DEVICES",
+	psmi_getenv("PSM2_DEVICES",
 		    "Ordered list of PSM-level devices",
 		    PSMI_ENVVAR_LEVEL_USER,
 		    PSMI_ENVVAR_TYPE_STR,
@@ -906,7 +953,7 @@ __psm_ep_open(psm_uuid_t const unique_job_key,
 
 	if (psmi_device_is_enabled(devid_enabled, PTL_DEVID_IPS)) {
 		err = psmi_ep_multirail(&num_rails, units, ports);
-		if (err != PSM_OK)
+		if (err != PSM2_OK)
 			goto fail;
 
 		/* If multi-rail is used, set the first ep unit/port */
@@ -918,9 +965,9 @@ __psm_ep_open(psm_uuid_t const unique_job_key,
 		}
 	}
 
-	err = __psm_ep_open_internal(unique_job_key,
+	err = __psm2_ep_open_internal(unique_job_key,
 				     devid_enabled, opts_i, mq, &ep, &epid);
-	if (err != PSM_OK)
+	if (err != PSM2_OK)
 		goto fail;
 
 	if (psmi_opened_endpoint == NULL) {
@@ -938,7 +985,7 @@ __psm_ep_open(psm_uuid_t const unique_job_key,
 
 	/* Active Message initialization */
 	err = psmi_am_init_internal(ep);
-	if (err != PSM_OK)
+	if (err != PSM2_OK)
 		goto fail;
 
 	*epo = ep;
@@ -952,7 +999,7 @@ __psm_ep_open(psm_uuid_t const unique_job_key,
 			setenv(pname, pvalue, 1);
 
 			/* Create slave EP */
-			err = __psm_ep_open_internal(unique_job_key,
+			err = __psm2_ep_open_internal(unique_job_key,
 						     devid_enabled, opts_i, mq,
 						     &tmp, &epid);
 			if (err)
@@ -968,32 +1015,36 @@ __psm_ep_open(psm_uuid_t const unique_job_key,
 
 	/* Once we've initialized all devices, we can update the MQ with its
 	 * default values */
-	if (err == PSM_OK)
+	if (err == PSM2_OK)
 		err = psmi_mq_initialize_defaults(mq);
 
-	_HFI_VDBG("psm_ep_open() OK....\n");
+	_HFI_VDBG("psm2_ep_open() OK....\n");
 
 fail:
 	PSMI_PUNLOCK();
+	PSM2_LOG_MSG("leaving");
 	return err;
 }
-PSMI_API_DECL(psm_ep_open)
+PSMI_API_DECL(psm2_ep_open)
 
-psm_error_t __psm_ep_close(psm_ep_t ep, int mode, int64_t timeout_in)
+psm2_error_t __psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout_in)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	uint64_t t_start = get_cycles();
 	union psmi_envvar_val timeout_intval;
-	psm_ep_t tmp, mep;
+	psm2_ep_t tmp, mep;
+	psm2_mq_t mq;
 
+	PSM2_LOG_MSG("entering");
 	PSMI_ERR_UNLESS_INITIALIZED(ep);
 	psmi_assert_always(ep->mctxt_master == ep);
 
 	PSMI_PLOCK();
 
 	if (psmi_opened_endpoint == NULL) {
-		err = psmi_handle_error(NULL, PSM_EP_WAS_CLOSED,
+		err = psmi_handle_error(NULL, PSM2_EP_WAS_CLOSED,
 					"PSM Endpoint is closed or does not exist");
+		PSM2_LOG_MSG("leaving");
 		return err;
 	}
 
@@ -1002,17 +1053,18 @@ psm_error_t __psm_ep_close(psm_ep_t ep, int mode, int64_t timeout_in)
 		tmp = tmp->user_ep_next;
 	}
 	if (!tmp) {
-		err = psmi_handle_error(NULL, PSM_EP_WAS_CLOSED,
+		err = psmi_handle_error(NULL, PSM2_EP_WAS_CLOSED,
 					"PSM Endpoint is closed or does not exist");
+		PSM2_LOG_MSG("leaving");
 		return err;
 	}
 
-	psmi_getenv("PSM_CLOSE_TIMEOUT",
+	psmi_getenv("PSM2_CLOSE_TIMEOUT",
 		    "End-point close timeout over-ride.",
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
 		    (union psmi_envvar_val)0, &timeout_intval);
 
-	if (getenv("PSM_CLOSE_TIMEOUT")) {
+	if (getenv("PSM2_CLOSE_TIMEOUT")) {
 		timeout_in = timeout_intval.e_uint * SEC_ULL;
 	} else if (timeout_in > 0) {
 		/* The timeout parameter provides the minimum timeout. A heuristic
@@ -1028,11 +1080,11 @@ psm_error_t __psm_ep_close(psm_ep_t ep, int mode, int64_t timeout_in)
 	 * The "rationale" is that there is no point waiting around forever for
 	 * graceful termination. Normal (or forced) process termination should clean
 	 * up the context state correctly even if termination is not graceful. */
-	if (timeout_in <= 0 || timeout_in < PSMI_MAX_EP_CLOSE_TIMEOUT)
+	if (timeout_in <= 0 || timeout_in > PSMI_MAX_EP_CLOSE_TIMEOUT)
 		timeout_in = PSMI_MAX_EP_CLOSE_TIMEOUT;
 	_HFI_PRDBG("Closing endpoint %p with force=%s and to=%.2f seconds and "
 		   "%d connections\n",
-		   ep, mode == PSM_EP_CLOSE_FORCE ? "YES" : "NO",
+		   ep, mode == PSM2_EP_CLOSE_FORCE ? "YES" : "NO",
 		   (double)timeout_in / 1e9, (int)ep->connections);
 
 	/* XXX We currently cheat in the sense that we leave each PTL the allowed
@@ -1050,7 +1102,7 @@ psm_error_t __psm_ep_close(psm_ep_t ep, int mode, int64_t timeout_in)
 			    psmi_ptl_amsh.fini(ep->ptl_amsh.ptl, mode,
 					       timeout_in);
 
-		if ((err == PSM_OK || err == PSM_TIMEOUT) &&
+		if ((err == PSM2_OK || err == PSM2_TIMEOUT) &&
 		    psmi_ep_device_is_enabled(ep, PTL_DEVID_IPS))
 			err =
 			    psmi_ptl_ips.fini(ep->ptl_ips.ptl, mode,
@@ -1064,6 +1116,8 @@ psm_error_t __psm_ep_close(psm_ep_t ep, int mode, int64_t timeout_in)
 
 		psmi_free(ep->epaddr);
 		psmi_free(ep->context_mylabel);
+		mq = ep->mq;
+		ep->mq = NULL;
 		/*
 		 * Before freeing the master ep itself,
 		 * remove it from the global linklist.
@@ -1081,28 +1135,31 @@ psm_error_t __psm_ep_close(psm_ep_t ep, int mode, int64_t timeout_in)
 				tmp->user_ep_next = ep->user_ep_next;
 			}
 			psmi_opened_endpoint_count--;
+			if (mq)
+			        err = psmi_mq_free(mq);
 		}
 		psmi_free(ep);
 
-	} while ((err == PSM_OK || err == PSM_TIMEOUT) && tmp != ep);
+	} while ((err == PSM2_OK || err == PSM2_TIMEOUT) && tmp != ep);
 
 	PSMI_PUNLOCK();
 
 	_HFI_PRDBG("Closed endpoint in %.3f secs\n",
 		   (double)cycles_to_nanosecs(get_cycles() -
 					      t_start) / SEC_ULL);
+	PSM2_LOG_MSG("leaving");
 	return err;
 }
-PSMI_API_DECL(psm_ep_close)
+PSMI_API_DECL(psm2_ep_close)
 
 static
-psm_error_t
-psmi_ep_open_device(const psm_ep_t ep,
-		    const struct psm_ep_open_opts *opts,
-		    const psm_uuid_t unique_job_key,
-		    struct psmi_context *context, psm_epid_t *epid)
+psm2_error_t
+psmi_ep_open_device(const psm2_ep_t ep,
+		    const struct psm2_ep_open_opts *opts,
+		    const psm2_uuid_t unique_job_key,
+		    struct psmi_context *context, psm2_epid_t *epid)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	/* Skip affinity.  No affinity if:
 	 * 1. User explicitly sets no-affinity=YES in environment.
@@ -1119,7 +1176,7 @@ psmi_ep_open_device(const psm_ep_t ep,
 		if ((err =
 		     psmi_context_open(ep, opts->unit, opts->port,
 				       unique_job_key, opts->timeout,
-				       context)) != PSM_OK)
+				       context)) != PSM2_OK)
 			goto fail;
 
 		_HFI_DBG("[%d]use unit %d port %d\n", getpid(),
@@ -1131,11 +1188,11 @@ psmi_ep_open_device(const psm_ep_t ep,
 		 */
 		if ((err =
 		     psmi_ep_verify_pkey(ep, (uint16_t) opts->network_pkey,
-					 &ep->network_pkey)) != PSM_OK)
+					 &ep->network_pkey)) != PSM2_OK)
 			goto fail;
 
 		/* See if we want to activate support for receive thread */
-		psmi_getenv("PSM_RCVTHREAD",
+		psmi_getenv("PSM2_RCVTHREAD",
 			    "Recv thread flags (0 disables thread)",
 			    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
 			    (union psmi_envvar_val)(norcvthread++ ? 0 :
@@ -1148,7 +1205,7 @@ psmi_ep_open_device(const psm_ep_t ep,
 		if (rcvthread_flags) {
 			context->runtime_flags |= PSMI_RUNTIME_RCVTHREAD;
 #ifdef PSMI_PLOCK_IS_NOLOCK
-			psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 					  "#define PSMI_PLOCK_IS_NOLOCK not functional yet "
 					  "with RCVTHREAD on");
 #endif
@@ -1190,11 +1247,11 @@ psmi_ep_open_device(const psm_ep_t ep,
 
 		*epid = PSMI_EPID_PACK(((uint16_t *) unique_job_key)[0],
 				       (rank >> 3), rank, 0,
-				       PSMI_HFI_TYPE_DEFAULT, 0x7, rank);
+				       PSMI_HFI_TYPE_DEFAULT, rank);
 	} else {
 		/* Self-only, meaning only 1 proc max */
-		*epid = PSMI_EPID_PACK(0, 0, 0, 0, PSMI_HFI_TYPE_DEFAULT,
-				       0x7, 0);
+		*epid = PSMI_EPID_PACK(0, 0, 0, 0,
+				       PSMI_HFI_TYPE_DEFAULT, 0);
 	}
 
 fail:
@@ -1204,12 +1261,12 @@ fail:
 /* Get a list of PTLs we want to use.  The order is important, it affects
  * whether node-local processes use shm or ips */
 static
-psm_error_t
+psm2_error_t
 psmi_parse_devices(int devices[PTL_MAX_INIT], const char *devstring)
 {
 	char *devstr = NULL;
 	char *b_new, *e, *ee, *b;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	int len;
 	int i = 0;
 
@@ -1254,7 +1311,7 @@ psmi_parse_devices(int devices[PTL_MAX_INIT], const char *devstring)
 				strcpy(b_new, "ips,");
 				b_new += 4;
 			} else {
-				err = psmi_handle_error(NULL, PSM_PARAM_ERR,
+				err = psmi_handle_error(NULL, PSM2_PARAM_ERR,
 							"%s set in environment variable PSM_PTL_DEVICES=\"%s\" "
 							"is not one of the recognized PTL devices (%s)",
 							b, devstring,
@@ -1285,7 +1342,7 @@ int psmi_device_is_enabled(const int devid_enabled[PTL_MAX_INIT], int devid)
 	return 0;
 }
 
-int psmi_ep_device_is_enabled(const psm_ep_t ep, int devid)
+int psmi_ep_device_is_enabled(const psm2_ep_t ep, int devid)
 {
 	return psmi_device_is_enabled(ep->devid_enabled, devid);
 }

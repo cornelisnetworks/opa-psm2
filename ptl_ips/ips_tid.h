@@ -59,14 +59,18 @@
 #define _IPS_TID_H
 
 #include "psm_user.h"
+#include "ips_tidcache.h"
 
 struct ips_tid;
 
 typedef void (*ips_tid_avail_cb_fn_t) (struct ips_tid *, void *context);
 
-/* Each tid group(8 tids) needs a bit */
-#define IPS_TID_MAX_TIDS    2048
-typedef uint64_t ips_tidmap_t[IPS_TID_MAX_TIDS / 8 / 64];
+/* Max tids a context can support */
+#define IPS_TID_MAX_TIDS	2048
+/* Max tid-session buffer size */
+#define PSM_TIDLIST_BUFSIZE	2048
+/* Max tid-session window size */
+#define PSM_TID_WINSIZE		(2*1024*1024)
 
 struct ips_tid_ctrl {
 	pthread_spinlock_t tid_ctrl_lock;
@@ -76,31 +80,59 @@ struct ips_tid_ctrl {
 
 struct ips_tid {
 	const psmi_context_t *context;
-	ips_tid_avail_cb_fn_t tid_avail_cb;
+	struct ips_protoexp *protoexp;
+
 	void *tid_avail_context;
 	struct ips_tid_ctrl *tid_ctrl;
+	volatile uint64_t *invalidation_event;
 
+	ips_tid_avail_cb_fn_t tid_avail_cb;
 	uint64_t tid_num_total;
 	uint32_t tid_num_inuse;
+	uint32_t tid_cachesize;	/* items can be cached */
+	cl_qmap_t tid_cachemap; /* RB tree implementation */
+	/*
+	 * tids storage.
+	 * This is used in tid registration caching case for
+	 * tid invalidation, acquire, replace and release,
+	 * entries should be the assigned tid number.
+	 */
+	uint32_t *tid_array;
 };
 
-psm_error_t ips_tid_init(const psmi_context_t *context,
-			 struct ips_tid *tidc,
-			 ips_tid_avail_cb_fn_t cb, void *cb_context);
-psm_error_t ips_tid_fini(struct ips_tid *tidc);
+psm2_error_t ips_tid_init(const psmi_context_t *context,
+		struct ips_protoexp *protoexp,
+		ips_tid_avail_cb_fn_t cb, void *cb_context);
+psm2_error_t ips_tid_fini(struct ips_tid *tidc);
 
 /* Acquiring tids.
  * Buffer base has to be aligned on page boundary
  * Buffer length has to be multiple pages
  */
-psm_error_t ips_tid_acquire(struct ips_tid *tidc, const void *buf,	/* input buffer, aligned to page boundary */
-			    uint32_t *len,	/* buffer length, aligned to page size */
-			    uint32_t *tid_array,	/* output tidarray, */
-			    uint32_t *num_tid,	/* output of tid count */
-			    ips_tidmap_t tidmap);	/* output tidmap */
+psm2_error_t ips_tidcache_acquire(struct ips_tid *tidc,
+		const void *buf,  /* input buffer, aligned to page boundary */
+		uint32_t *length, /* buffer length, aligned to page size */
+		uint32_t *tid_array, /* output tidarray, */
+		uint32_t *tidcnt,    /* output of tid count */
+		uint32_t *pageoff);  /* output of offset in first tid */
 
-psm_error_t ips_tid_release(struct ips_tid *tidc, ips_tidmap_t tidmap,	/* input tidmap */
-			    uint32_t ntids);	/* intput number of tids to release */
+psm2_error_t ips_tidcache_release(struct ips_tid *tidc,
+		uint32_t *tid_array, /* input tidarray, */
+		uint32_t tidcnt);    /* input of tid count */
+
+psm2_error_t ips_tidcache_cleanup(struct ips_tid *tidc);
+psm2_error_t ips_tidcache_invalidation(struct ips_tid *tidc);
+
+psm2_error_t ips_tid_acquire(struct ips_tid *tidc,
+		const void *buf,  /* input buffer, aligned to page boundary */
+		uint32_t *length, /* buffer length, aligned to page size */
+		uint32_t *tid_array, /* output tidarray, */
+		uint32_t *tidcnt);   /* output of tid count */
+
+psm2_error_t ips_tid_release(struct ips_tid *tidc,
+		uint32_t *tid_array, /* input tidarray, */
+		uint32_t tidcnt);    /* input of tid count */
+
 PSMI_INLINE(int ips_tid_num_available(struct ips_tid *tidc))
 {
 	if (tidc->tid_ctrl->tid_num_avail == 0) {

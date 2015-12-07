@@ -58,14 +58,14 @@
 #include "psm_mq_internal.h"
 #include "psm_am_internal.h"
 
-int psmi_ep_device_is_enabled(const psm_ep_t ep, int devid);
+int psmi_ep_device_is_enabled(const psm2_ep_t ep, int devid);
 
 struct psmi_epid_table psmi_epid_table;
 
 /* Iterator to access the epid table.
  * 'ep' can be NULL if remote endpoints from all endpoint handles are requested
  */
-void psmi_epid_itor_init(struct psmi_eptab_iterator *itor, psm_ep_t ep)
+void psmi_epid_itor_init(struct psmi_eptab_iterator *itor, psm2_ep_t ep)
 {
 	itor->i = 0;
 	itor->ep = ep;
@@ -114,7 +114,7 @@ void psmi_epid_itor_fini(struct psmi_eptab_iterator *itor)
 	c -= a; c -= b; c ^= (b>>22); \
 }
 
-psm_error_t psmi_epid_init()
+psm2_error_t psmi_epid_init()
 {
 	pthread_mutexattr_t attr;
 	psmi_epid_table.table = NULL, psmi_epid_table.tabsize = 0;
@@ -123,10 +123,10 @@ psm_error_t psmi_epid_init()
 	pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
 	pthread_mutex_init(&psmi_epid_table.tablock, &attr);
 	pthread_mutexattr_destroy(&attr);
-	return PSM_OK;
+	return PSM2_OK;
 };
 
-psm_error_t psmi_epid_fini()
+psm2_error_t psmi_epid_fini()
 {
 	if (psmi_epid_table.table != NULL) {
 		psmi_free(psmi_epid_table.table);
@@ -134,12 +134,12 @@ psm_error_t psmi_epid_fini()
 	}
 	psmi_epid_table.tabsize = 0;
 	psmi_epid_table.tabsize_used = 0;
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 PSMI_ALWAYS_INLINE(
 uint64_t
-hash_this(const psm_ep_t ep, const psm_epid_t epid))
+hash_this(const psm2_ep_t ep, const psm2_epid_t epid))
 {
 	uint64_t ep_i = (uint64_t) (uintptr_t) ep;
 	uint64_t epid_i = (uint64_t) epid;
@@ -150,7 +150,7 @@ hash_this(const psm_ep_t ep, const psm_epid_t epid))
 
 PSMI_ALWAYS_INLINE(
 void *
-psmi_epid_lookup_inner(psm_ep_t ep, psm_epid_t epid, int remove))
+psmi_epid_lookup_inner(psm2_ep_t ep, psm2_epid_t epid, int remove))
 {
 	uint64_t key = hash_this(ep, epid);
 	struct psmi_epid_tabentry *e;
@@ -180,7 +180,7 @@ ret:
 	return entry;
 }
 
-void *psmi_epid_lookup(psm_ep_t ep, psm_epid_t epid)
+void *psmi_epid_lookup(psm2_ep_t ep, psm2_epid_t epid)
 {
 	void *entry = psmi_epid_lookup_inner(ep, epid, 0);
 	if (PSMI_EP_HOSTNAME != ep)
@@ -189,19 +189,19 @@ void *psmi_epid_lookup(psm_ep_t ep, psm_epid_t epid)
 	return entry;
 }
 
-void *psmi_epid_remove(psm_ep_t ep, psm_epid_t epid)
+void *psmi_epid_remove(psm2_ep_t ep, psm2_epid_t epid)
 {
 	if (PSMI_EP_HOSTNAME != ep)
 		_HFI_VDBG("remove of (%p,%" PRIx64 ")\n", ep, epid);
 	return psmi_epid_lookup_inner(ep, epid, 1);
 }
 
-psm_error_t psmi_epid_add(psm_ep_t ep, psm_epid_t epid, void *entry)
+psm2_error_t psmi_epid_add(psm2_ep_t ep, psm2_epid_t epid, void *entry)
 {
 	uint64_t key;
 	int idx, i, newsz;
 	struct psmi_epid_tabentry *e;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	if (PSMI_EP_HOSTNAME != ep)
 		_HFI_VDBG("add of (%p,%" PRIx64 ") with entry %p\n", ep, epid,
@@ -217,7 +217,7 @@ psm_error_t psmi_epid_add(psm_ep_t ep, psm_epid_t epid, void *entry)
 		    psmi_calloc(ep, PER_PEER_ENDPOINT,
 				newsz, sizeof(struct psmi_epid_tabentry));
 		if (newtab == NULL) {
-			err = PSM_NO_MEMORY;
+			err = PSM2_NO_MEMORY;
 			goto fail;
 		}
 		if (psmi_epid_table.table) {	/* rehash the table */
@@ -282,19 +282,19 @@ char *psmi_gethostname(void)
  * Hostname stuff.  We really only register the network portion of the epid
  * since all epids from the same nid are assumed to have the same hostname.
  */
-psm_error_t
+psm2_error_t
 psmi_epid_set_hostname(uint64_t nid, const char *hostname, int overwrite)
 {
 	size_t hlen;
 	char *h;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	if (hostname == NULL)
-		return PSM_OK;
+		return PSM2_OK;
 	/* First see if a hostname already exists */
 	if ((h = psmi_epid_lookup(PSMI_EP_HOSTNAME, nid)) != NULL) {
 		if (!overwrite)
-			return PSM_OK;
+			return PSM2_OK;
 
 		h = psmi_epid_remove(PSMI_EP_HOSTNAME, nid);
 		if (h != NULL)	/* free the previous hostname if so exists */
@@ -304,7 +304,7 @@ psmi_epid_set_hostname(uint64_t nid, const char *hostname, int overwrite)
 	hlen = min(PSMI_EP_HOSTNAME_LEN, strlen(hostname) + 1);
 	h = (char *)psmi_malloc(PSMI_EP_NONE, PER_PEER_ENDPOINT, hlen);
 	if (h == NULL)
-		return PSM_NO_MEMORY;
+		return PSM2_NO_MEMORY;
 	snprintf(h, hlen, "%s", hostname);
 	h[hlen - 1] = '\0';
 	err = psmi_epid_add(PSMI_EP_HOSTNAME, nid, h);
@@ -313,11 +313,11 @@ psmi_epid_set_hostname(uint64_t nid, const char *hostname, int overwrite)
 
 /* XXX These two functions are not thread safe, we'll use a rotating buffer
  * trick whenever we need to make them thread safe */
-const char *psmi_epaddr_get_hostname(psm_epid_t epid)
+const char *psmi_epaddr_get_hostname(psm2_epid_t epid)
 {
 	static char hostnamebufs[4][PSMI_EP_HOSTNAME_LEN];
 	static int bufno;
-	uint64_t nid = psm_epid_nid(epid);
+	uint64_t nid = psm2_epid_nid(epid);
 	char *h, *hostname;
 
 	hostname = hostnamebufs[bufno];
@@ -339,7 +339,7 @@ const char *psmi_epaddr_get_hostname(psm_epid_t epid)
 }
 
 /* This one gives the hostname with a lid */
-const char *psmi_epaddr_get_name(psm_epid_t epid)
+const char *psmi_epaddr_get_name(psm2_epid_t epid)
 {
 	static char hostnamebufs[4][PSMI_EP_HOSTNAME_LEN];
 	static int bufno;
@@ -347,7 +347,7 @@ const char *psmi_epaddr_get_name(psm_epid_t epid)
 	hostname = hostnamebufs[bufno];
 	bufno = (bufno + 1) % 4;
 
-	h = psmi_epid_lookup(PSMI_EP_HOSTNAME, psm_epid_nid(epid));
+	h = psmi_epid_lookup(PSMI_EP_HOSTNAME, psm2_epid_nid(epid));
 	if (h == NULL)
 		return psmi_epaddr_get_hostname(epid);
 	else {
@@ -370,7 +370,7 @@ uintptr_t psmi_getpagesize(void)
 		return pagesz;
 	sz = sysconf(_SC_PAGESIZE);
 	if (sz == -1) {
-		psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 				  "Can't query system page size");
 	}
 
@@ -386,7 +386,7 @@ static int psmi_getenv_verblevel = -1;
 static int psmi_getenv_is_verblevel(int printlevel)
 {
 	if (psmi_getenv_verblevel == -1) {
-		char *env = getenv("PSM_VERBOSE_ENV");
+		char *env = getenv("PSM2_VERBOSE_ENV");
 		if (env && *env) {
 			char *ep;
 			int val = (int)strtol(env, &ep, 0);
@@ -614,7 +614,7 @@ int psmi_parse_memmode(void)
 {
 	union psmi_envvar_val env_mmode;
 	int used_default =
-	    psmi_getenv("PSM_MEMORY", "Memory usage mode (normal or large)",
+	    psmi_getenv("PSM2_MEMORY", "Memory usage mode (normal or large)",
 			PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_STR,
 			(union psmi_envvar_val)"normal", &env_mmode);
 	if (used_default || !strcasecmp(env_mmode.e_str, "normal"))
@@ -648,15 +648,15 @@ const char *psmi_memmode_string(int mode)
 	}
 }
 
-psm_error_t
-psmi_parse_mpool_env(const psm_mq_t mq, int level,
+psm2_error_t
+psmi_parse_mpool_env(const psm2_mq_t mq, int level,
 		     const struct psmi_rlimit_mpool *rlim,
 		     uint32_t *valo, uint32_t *chunkszo)
 {
 	uint32_t val;
 	const char *env = rlim->env;
 	int mode = mq->memmode;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	union psmi_envvar_val env_val;
 
 	psmi_assert_always(mode >= PSMI_MEMMODE_NORMAL
@@ -668,7 +668,7 @@ psmi_parse_mpool_env(const psm_mq_t mq, int level,
 
 	val = env_val.e_uint;
 	if (val < rlim->minval || val > rlim->maxval) {
-		err = psmi_handle_error(NULL, PSM_PARAM_ERR,
+		err = psmi_handle_error(NULL, PSM2_PARAM_ERR,
 					"Env. var %s=%u is invalid (valid settings in mode PSM_MEMORY=%s"
 					" are inclusively between %u and %u)",
 					env, val, psmi_memmode_string(mode),
@@ -720,7 +720,7 @@ uint32_t psmi_get_ipv4addr()
 #define PSMI_EP_IS_PTR(ptr)	    ((ptr) != NULL && (ptr) < PSMI_EP_LOGEVENT)
 
 void
-psmi_syslog(psm_ep_t ep, int to_console, int level, const char *format, ...)
+psmi_syslog(psm2_ep_t ep, int to_console, int level, const char *format, ...)
 {
 	va_list ap;
 
@@ -728,6 +728,7 @@ psmi_syslog(psm_ep_t ep, int to_console, int level, const char *format, ...)
 	 * sure we log context information */
 	if (PSMI_EP_IS_PTR(ep) && !ep->did_syslog) {
 		char uuid_str[64];
+		int hfi = ep->context.ctrl != NULL;
 		ep->did_syslog = 1;
 
 		memset(&uuid_str, 0, sizeof(uuid_str));
@@ -735,9 +736,9 @@ psmi_syslog(psm_ep_t ep, int to_console, int level, const char *format, ...)
 		hfi_syslog("PSM", 0, LOG_WARNING,
 			   "uuid_key=%s,unit=%d,context=%d,subcontext=%d",
 			   uuid_str,
-			   ep->context.ctrl->ctxt_info.unit,
-			   ep->context.ctrl->ctxt_info.ctxt,
-			   ep->context.ctrl->ctxt_info.subctxt);
+			   hfi ? ep->context.ctrl->ctxt_info.unit : -1,
+			   hfi ? ep->context.ctrl->ctxt_info.ctxt : -1,
+			   hfi ? ep->context.ctrl->ctxt_info.subctxt : -1);
 	}
 
 	va_start(ap, format);
@@ -827,7 +828,7 @@ void psmi_faultinj_init()
 {
 	union psmi_envvar_val env_fi;
 
-	psmi_getenv("PSM_FI", "PSM Fault Injection (yes/no)",
+	psmi_getenv("PSM2_FI", "PSM Fault Injection (yes/no)",
 		    PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_YESNO,
 		    PSMI_ENVVAR_VAL_NO, &env_fi);
 
@@ -983,7 +984,7 @@ int psmi_faultinj_is_fault(struct psmi_faultinj_spec *fi)
 
 /* For memory allocation, we kind of break the PSM error handling rules.
  * If the caller gets NULL, it has to assume that the error has been handled
- * and should always return PSM_NO_MEMORY */
+ * and should always return PSM2_NO_MEMORY */
 
 /*
  * Log memory increments or decrements of type memstats_t.
@@ -1053,7 +1054,7 @@ void psmi_log_memstats(psmi_memtype_t type, int64_t nbytes)
 #ifdef malloc
 #undef malloc
 #endif
-void *psmi_malloc_internal(psm_ep_t ep, psmi_memtype_t type,
+void *psmi_malloc_internal(psm2_ep_t ep, psmi_memtype_t type,
 			   size_t sz, const char *curloc)
 {
 	size_t newsz = sz;
@@ -1066,7 +1067,7 @@ void *psmi_malloc_internal(psm_ep_t ep, psmi_memtype_t type,
 
 	newa = malloc(newsz);
 	if (newa == NULL) {
-		psmi_handle_error(PSMI_EP_NORETURN, PSM_NO_MEMORY,
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_NO_MEMORY,
 				  "Out of memory for malloc at %s", curloc);
 		return NULL;
 	}
@@ -1086,7 +1087,7 @@ void *psmi_malloc_internal(psm_ep_t ep, psmi_memtype_t type,
 #ifdef memalign
 #undef memalign
 #endif
-void *psmi_memalign_internal(psm_ep_t ep, psmi_memtype_t type,
+void *psmi_memalign_internal(psm2_ep_t ep, psmi_memtype_t type,
 			     size_t alignment, size_t sz, const char *curloc)
 {
 	size_t newsz = sz;
@@ -1100,7 +1101,7 @@ void *psmi_memalign_internal(psm_ep_t ep, psmi_memtype_t type,
 
 	ret = posix_memalign(&newa, alignment, newsz);
 	if (ret) {
-		psmi_handle_error(PSMI_EP_NORETURN, PSM_NO_MEMORY,
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_NO_MEMORY,
 				  "Out of memory for malloc at %s", curloc);
 		return NULL;
 	}
@@ -1120,7 +1121,7 @@ void *psmi_memalign_internal(psm_ep_t ep, psmi_memtype_t type,
 #ifdef calloc
 #undef calloc
 #endif
-void *psmi_calloc_internal(psm_ep_t ep, psmi_memtype_t type, size_t nelem,
+void *psmi_calloc_internal(psm2_ep_t ep, psmi_memtype_t type, size_t nelem,
 			   size_t elemsz, const char *curloc)
 {
 	void *newa = psmi_malloc_internal(ep, type, nelem * elemsz, curloc);
@@ -1133,7 +1134,7 @@ void *psmi_calloc_internal(psm_ep_t ep, psmi_memtype_t type, size_t nelem,
 #ifdef strdup
 #undef strdup
 #endif
-void *psmi_strdup_internal(psm_ep_t ep, const char *string, const char *curloc)
+void *psmi_strdup_internal(psm2_ep_t ep, const char *string, const char *curloc)
 {
 	size_t len = strlen(string) + 1;
 	void *newa = psmi_malloc_internal(ep, UNDEFINED, len, curloc);
@@ -1164,15 +1165,15 @@ void psmi_free_internal(void *ptr)
 }
 
 PSMI_ALWAYS_INLINE(
-psm_error_t
+psm2_error_t
 psmi_coreopt_ctl(const void *core_obj, int optname,
 		 void *optval, uint64_t *optlen, int get))
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	char err_string[256];
 
 	switch (optname) {
-	case PSM_CORE_OPT_DEBUG:
+	case PSM2_CORE_OPT_DEBUG:
 		/* Sanity check length */
 		if (*optlen < sizeof(unsigned)) {
 			snprintf(err_string, 256, "Option value length error");
@@ -1185,10 +1186,10 @@ psmi_coreopt_ctl(const void *core_obj, int optname,
 		} else
 			hfi_debug = *(unsigned *)optval;
 		break;
-	case PSM_CORE_OPT_EP_CTXT:
+	case PSM2_CORE_OPT_EP_CTXT:
 		{
 			/* core object is epaddr */
-			psm_epaddr_t epaddr = (psm_epaddr_t) core_obj;
+			psm2_epaddr_t epaddr = (psm2_epaddr_t) core_obj;
 
 			/* Sanity check epaddr */
 			if (!epaddr) {
@@ -1223,16 +1224,16 @@ psmi_coreopt_ctl(const void *core_obj, int optname,
 
 fail:
 	/* Unrecognized/unknown option */
-	return psmi_handle_error(NULL, PSM_PARAM_ERR, err_string);
+	return psmi_handle_error(NULL, PSM2_PARAM_ERR, err_string);
 }
 
-psm_error_t psmi_core_setopt(const void *core_obj, int optname,
+psm2_error_t psmi_core_setopt(const void *core_obj, int optname,
 			     const void *optval, uint64_t optlen)
 {
 	return psmi_coreopt_ctl(core_obj, optname, (void *)optval, &optlen, 0);
 }
 
-psm_error_t psmi_core_getopt(const void *core_obj, int optname,
+psm2_error_t psmi_core_getopt(const void *core_obj, int optname,
 			     void *optval, uint64_t *optlen)
 {
 	return psmi_coreopt_ctl(core_obj, optname, optval, optlen, 1);
@@ -1240,56 +1241,636 @@ psm_error_t psmi_core_getopt(const void *core_obj, int optname,
 
 /* PSM AM component option handling */
 PSMI_ALWAYS_INLINE(
-psm_error_t
+psm2_error_t
 psmi_amopt_ctl(const void *am_obj, int optname,
 	       void *optval, uint64_t *optlen, int get))
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
-	/* AM object is a psm_epaddr (or NULL for global minimum sz) */
-	/* psm_epaddr_t epaddr = (psm_epaddr_t) am_obj; */
+	/* AM object is a psm2_epaddr (or NULL for global minimum sz) */
+	/* psm2_epaddr_t epaddr = (psm2_epaddr_t) am_obj; */
 
 	/* All AM options are read-only. */
 	if (!get) {
 		return err =
-		    psmi_handle_error(PSMI_EP_LOGEVENT, PSM_OPT_READONLY,
+		    psmi_handle_error(PSMI_EP_LOGEVENT, PSM2_OPT_READONLY,
 				      "Attempted to set read-only option value");
 	}
 
 	/* Sanity check length -- all AM options are uint32_t. */
 	if (*optlen < sizeof(uint32_t)) {
 		*optlen = sizeof(uint32_t);
-		return err = psmi_handle_error(PSMI_EP_LOGEVENT, PSM_PARAM_ERR,
+		return err = psmi_handle_error(PSMI_EP_LOGEVENT, PSM2_PARAM_ERR,
 					       "Option value length error");
 	}
 
 	switch (optname) {
-	case PSM_AM_OPT_FRAG_SZ:
+	case PSM2_AM_OPT_FRAG_SZ:
 		*((uint32_t *) optval) = psmi_am_parameters.max_request_short;
 		break;
-	case PSM_AM_OPT_NARGS:
+	case PSM2_AM_OPT_NARGS:
 		*((uint32_t *) optval) = psmi_am_parameters.max_nargs;
 		break;
-	case PSM_AM_OPT_HANDLERS:
+	case PSM2_AM_OPT_HANDLERS:
 		*((uint32_t *) optval) = psmi_am_parameters.max_handlers;
 		break;
 	default:
 		err =
-		    psmi_handle_error(NULL, PSM_PARAM_ERR,
+		    psmi_handle_error(NULL, PSM2_PARAM_ERR,
 				      "Unknown PSM_AM option %u.", optname);
 	}
 
 	return err;
 }
 
-psm_error_t psmi_am_setopt(const void *am_obj, int optname,
+psm2_error_t psmi_am_setopt(const void *am_obj, int optname,
 			   const void *optval, uint64_t optlen)
 {
 	return psmi_amopt_ctl(am_obj, optname, (void *)optval, &optlen, 0);
 }
 
-psm_error_t psmi_am_getopt(const void *am_obj, int optname,
+psm2_error_t psmi_am_getopt(const void *am_obj, int optname,
 			   void *optval, uint64_t *optlen)
 {
 	return psmi_amopt_ctl(am_obj, optname, optval, optlen, 1);
 }
+
+#ifdef PSM_LOG
+
+#include <execinfo.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <fnmatch.h>
+#include "ptl_ips/ips_proto_header.h"
+
+/* A treeNode is used to store the list of Function Name Lists that
+   are passed to the PSM_LOG facility via environment variables.
+   See psm_log.h for more information. 
+
+   Note that treeNode is a node in a binary tree data structre. */
+typedef struct _treeNode
+{
+	const char *name;
+	int line1,line2;
+	struct _treeNode *left,*right;
+} treeNode;
+
+/* An epmTreeNode is used to track the number of protocol packets
+   that are send/recevied, for a given opcode, and source epid
+   to another epid. */
+typedef struct _epmTreeNode
+{
+	int opcode,count,txrx;
+	uint64_t fromepid,toepid;
+	struct _epmTreeNode *left,*right;
+} epmTreeNode;
+
+
+/* given a line range: [*line1 .. *line2], and another line, line
+   'join' the line range to the new line if the line immediately abutts
+   the line range.  The the new line does not abutt the existing range,
+   return 0.  Else, return 1.
+
+   For example, take the line range [ 20 .. 30 ] and the line: 19.
+   Since 19 comes immediately before 20, the line range can be joined
+   resulting in the line rage: [ 19 .. 30 ].  The function returns 1 for this
+   case.
+
+   The following other examples gives the new line range given the new line and
+   range [ 20 .. 30 ], and gives the return value:
+
+   31 [ 20 .. 31 ] 1
+   18 [ 20 .. 30 ] 0
+   32 [ 20 .. 30 ] 0
+   25 [ 20 .. 30 ] 1 */
+static int joinOverlap(int *line1,int *line2,int line)
+{
+	long long ll_line = line;
+
+	if (ll_line+1 >= *line1 && ll_line-1 <= *line2)
+	{
+		*line1 = min(*line1,line);
+		*line2 = max(*line2,line);
+		return 1;
+	}
+	return 0;
+}
+
+/* given two line ranges, determine the range that encompasses both line ranges
+   if an overlap has occurred.  Returns 0 if the two ranges do not overlap and
+   do not abutt.
+
+   Some examples, if line1=20 and line2=30
+
+   [20 30] [20 30] 2
+   [19 30] [19 30] 2
+   [19 20] [19 30] 2
+   [10 15] [20 30] 0
+   [40 50] [20 30] 0 */ 
+static int joinOverlapRange(int *line1,int *line2,int l1,int l2)
+{
+	return joinOverlap(line1,line2,l1) + joinOverlap(line1,line2,l2);
+}
+
+/* inserts a new treeNode into the FNL tree, or, merges the lines that are already
+   present in the tree. */
+static void insertNodeInTree(treeNode **root,const char *name,int line1,int line2)
+{
+	if (*root)
+	{
+		int c = strcmp(name,(*root)->name);
+		if (c < 0)
+			insertNodeInTree(&((*root)->left),name,line1,line2);
+		else if (c > 0)
+			insertNodeInTree(&((*root)->right),name,line1,line2);
+		else
+		{
+			if (joinOverlapRange(&(*root)->line1,&(*root)->line2,line1,line2))
+				return;
+			else if (line1 < (*root)->line1)
+				insertNodeInTree(&((*root)->left),name,line1,line2);
+			else if (line2 > (*root)->line2)
+				insertNodeInTree(&((*root)->right),name,line1,line2);
+			else psmi_assert_always(0); /* should never happen. */
+		}
+	}
+	else
+	{
+		*root = malloc(sizeof(treeNode));
+		(*root)->name  = strdup(name);
+		(*root)->line1 = line1;
+		(*root)->line2 = line2;
+		(*root)->left  = (*root)->right  = NULL;
+	}
+}
+
+/* Returns -1 if the data in the node is less    than the data supplied as parameter, else 
+   Returns  1 if the data in the node is greater than the data supplied as parameter, else 
+   Returns  0.
+   */
+static int compareEpmNode(epmTreeNode *node,int opcode,int txrx,uint64_t fromepid,uint64_t toepid)
+{
+#define COMPARE_ONE(X) if (node->X != X) return node->X < X ? -1 : 1
+	COMPARE_ONE(opcode);
+	COMPARE_ONE(txrx);
+	COMPARE_ONE(fromepid);
+	COMPARE_ONE(toepid);
+	return 0;
+}
+
+/* Inserts a new node in the tree corresponsing to the parameters, or, retrieves the node in the tree.
+   In either case, this code returns a pointer to the count in the node. */
+static int *insertNodeInEpmTree(epmTreeNode **root,int opcode,int txrx,uint64_t fromepid,uint64_t toepid)
+{
+	if (*root)
+	{
+		int a = compareEpmNode((*root),opcode,txrx,fromepid,toepid);
+		if (a < 0)
+			return insertNodeInEpmTree(&((*root)->left),opcode,txrx,fromepid,toepid);
+		else if (a > 0)
+			return insertNodeInEpmTree(&((*root)->right),opcode,txrx,fromepid,toepid);
+		else
+			return &((*root)->count);
+	}
+	else
+	{
+		*root = malloc(sizeof(epmTreeNode));
+		(*root)->opcode   = opcode;
+		(*root)->txrx     = txrx;
+		(*root)->count    = 0;
+		(*root)->fromepid = fromepid;
+		(*root)->toepid   = toepid;
+		(*root)->left     = (*root)->right  = NULL;
+		return &((*root)->count);
+	}
+}
+
+/* returns 0, if the node is present, non-zero if it is absent. */
+static int lookupNodeInTree(const treeNode *root,const char *name,int line)
+{
+	if (root)
+	{
+		int c = strcmp(name,root->name);
+		if (c < 0)
+			return lookupNodeInTree(root->left,name,line);
+		else if (c > 0)
+			return lookupNodeInTree(root->right,name,line);
+		else
+		{
+			if (line < root->line1)
+				return lookupNodeInTree(root->left,name,line);
+			else if (line > root->line2)
+				return lookupNodeInTree(root->right,name,line);
+			else /* line must be >= root->line1 and line must be <= root->line2. */
+				return 0;
+		}
+	}
+	else
+	{
+		return 1;
+	}
+}
+
+/* Declare a prototype for a parserFunc - referenced in the following code: */
+typedef void parserFunc(char *,int,int,void *);
+
+/* breaks down a string into 'c'-delimited substrings, and calls the parser func for each substring. */
+static void parseString(char *ps,char c,parserFunc pf,void *ctx)
+{
+	int idx,n=0;
+	char *p;
+
+	/* first, count the number of instances of c in ps, for use by the parser function: */
+	for (idx=0;ps[idx];idx++)
+		if (ps[idx] == c)
+			n++;
+	/* next, break down ps into 'c'-delimited substrings, and call parser function, pf for each substring: */ 
+	for (idx=0,p=ps;p && *p;idx++)
+	{
+		char *t = strchr(p,c);
+		if (!t)
+		{
+			break;
+		}
+		else
+		{
+			*t = 0;
+			pf(p,idx,n,ctx);
+			p = t+1;
+		}
+	}
+	/* finally, call pf on the final substring. */
+	pf(p,idx,n,ctx);
+}
+
+/* fncNameCtx is the context used while parsing FNL's (see psm_log.h for more info) from the environment: */
+typedef struct
+{
+	const char *currentFuncName;
+	int firstLineNumber;
+	treeNode **root;
+} funcNameCtx;
+
+/* This is the start of the parser code for parsing FNL's.  Here is the grammar:
+
+  An FNL is a 'Function Name List' that is defined by the following grammar:
+
+  # A LINE1 is either a single line number of a range of line numbers:
+(1)  LINE1 :: lineNumber |
+(2)           lineNumber1 '-' lineNumber2
+
+  # LINES is a list of LINE1's separated by commas:
+(3)  LINES :: LINE1 |
+(4)           LINE1 ',' LINES
+
+  # An FN is either a function name, or a function name with a list of lines:
+(5)  FN :: functionName |
+(6)        functionName ';' LINES
+
+  # A FNL is a list of FN's separated by colons:
+(7)  FNL ::  FN |
+(8)          FN ':' FNL
+
+  # Examples:
+  foo:bar    the two functions foo and bar
+  foo;1-10   lines 1 to 10 of function foo.
+  bar;1,3,5  lines 1, 3 and 5 of function bar
+
+*/
+
+/* p4() inserts a (function name and line number) pair into the FNL tree or a (function name and line number range) in the FNL tree.
+*/
+static void p4(char *s,int idx,int n,void *ctx)
+{
+	funcNameCtx *pfnc = (funcNameCtx *)ctx;
+     
+	if (n == 0) /* production (1) */
+	{
+		pfnc->firstLineNumber = atoi(s);
+		insertNodeInTree(pfnc->root,pfnc->currentFuncName,pfnc->firstLineNumber,pfnc->firstLineNumber);
+	}
+	else if (n == 1) /* production (2) */
+	{
+		if (idx == 0) /* lhs of production (2) */
+			pfnc->firstLineNumber = atoi(s);
+		else /* rhs of production (2). */
+			insertNodeInTree(pfnc->root,pfnc->currentFuncName,pfnc->firstLineNumber,atoi(s));
+	}
+}
+
+/* p3 puts an entry into the FNL tree for all of the lines of a given functionname, or, it parses the list of line number ranges and
+   uses p4 to spill each individual range (or just one line number) into the tree */
+static void p3(char *s,int idx,int n,void *ctx)
+{
+	funcNameCtx *pfnc = (funcNameCtx *)ctx;
+
+	if (n == 0 && *s == 0) /* production (5)/(7) */
+	{
+		insertNodeInTree(pfnc->root,pfnc->currentFuncName,0,INT_MAX);
+	}
+	else if (*s) /* production (2) */
+	{
+		/* breakdown the string into hyphen-delimited substrings, and further parses each substring with p4: */
+		parseString(s,'-',p4,ctx);
+	}
+}
+
+/* p2 parses the function name, and caches it into the context, and thereafter uses p3 to parse the line number range list. */
+static void p2(char *s,int idx,int n,void *ctx)
+{
+	funcNameCtx *pfnc = (funcNameCtx *)ctx;
+
+	if (n)
+	{
+		if (idx == 0)
+			pfnc->currentFuncName = s;
+		else
+		{
+			/* production (4) */
+			/* breakdown the string into comma-delimited substrings, and further parses each substring with p3: */
+			parseString(s,',',p3,ctx);
+		}
+	}
+	else
+	{
+		/* production (7)/(5). */
+		insertNodeInTree(pfnc->root,pfnc->currentFuncName=s,0,INT_MAX);
+	}
+}
+
+/* p1 parses each function name and line range list. */
+static void p1(char *s,int idx,int n,void *ctx)
+{
+	/* production (5)/(6)) */
+	/* breakdown the string into semi-colon-delimited substrings, and further parses each substring with p2: */
+	parseString(s,';',p2,ctx);
+}
+
+static void parseAndInsertInTree(const char *buf,treeNode **root)
+{
+	funcNameCtx t;
+	t.root = root;
+	char *p = alloca(strlen(buf)+1);
+	strcpy(p,buf);
+	/* productions (7)/(8) */
+	/* separates string into colon-separated strings, and then parses each substring in p1: */
+	parseString(p,':',p1,(void*)&t);
+}
+
+/* initialization code for the psmi log mechanism. */
+static inline void psmi_initialize(const char **plmf_fileName_kernel,
+				   const char **plmf_search_format_string,
+				   treeNode   **includeFunctionNamesTreeRoot,
+				   treeNode   **excludeFunctionNamesTreeRoot)
+{
+	static volatile int  plmf_initialized = 0;
+
+	if (!plmf_initialized)
+	{
+		static pthread_mutex_t plmf_init_mutex = PTHREAD_MUTEX_INITIALIZER;
+		
+		if (pthread_mutex_lock(&plmf_init_mutex))
+		{
+			perror("cannot lock mutex for psmi_log_message facility");
+			return;
+		}
+                /* CRITICAL SECTION BEGIN */
+		if (!plmf_initialized)
+		{
+			/* initializing psmi log message facility here. */
+			const char *env = getenv("PSM2_LOG_FILENAME");
+			if (env)
+				*plmf_fileName_kernel = env;
+			env = getenv("PSM2_LOG_SRCH_FORMAT_STRING");
+			if (env)
+			{
+				*plmf_search_format_string = env;
+			}
+			else
+			{
+				env = getenv("PSM2_LOG_INC_FUNCTION_NAMES");
+				if (env)
+				{
+					parseAndInsertInTree(env,includeFunctionNamesTreeRoot);
+				}
+				env = getenv("PSM2_LOG_EXC_FUNCTION_NAMES");
+				if (env)
+				{
+					parseAndInsertInTree(env,excludeFunctionNamesTreeRoot);
+				}
+			}
+			/* initialization of psmi log message facility is completed. */
+			plmf_initialized = 1;
+		}
+		/* CRITICAL SECTION END */
+		if (pthread_mutex_unlock(&plmf_init_mutex))
+		{
+			perror("cannot unlock mutex for psmi_log_message facility");
+			return;
+		}
+	}
+}
+
+/* Utility function to map the integer txrx value to the given strings for emitting to the log file. */ 
+static const char * const TxRxString(int txrx)
+{
+	switch(txrx)
+	{
+	case PSM_LOG_EPM_TX: return "Sent";
+	case PSM_LOG_EPM_RX: return "Received";
+	default:             return "Unknown";
+	}
+}
+
+/* Utility function to map an integer opcode value to the given strings for emitting to the log file. */
+static const char * const OpcodeString(int opcode)
+{
+	switch(opcode)
+	{
+	case OPCODE_LONG_RTS:          return "RTS";
+	case OPCODE_LONG_CTS:          return "CTS";
+	case OPCODE_LONG_DATA:         return "DATA";
+	case OPCODE_EXPTID:            return "EXPTID";
+	case OPCODE_EXPTID_COMPLETION: return "EXPTID_COMPLETION";
+	default:                       return "UNKNOWN";
+	}
+}
+
+/* plmf is short for 'psm log message facility. All of the PSM_LOG macros defined in psm_log.h
+   are serviced from this back end. */
+void psmi_log_message(const char *fileName,
+		      const char *functionName,
+		      int         lineNumber,
+		      const char *format, ...)
+{
+	static const char     *plmf_fileName_kernel         = "/tmp/psm_log";
+	static const char     *plmf_search_format_string    = NULL;
+	static       treeNode *includeFunctionNamesTreeRoot = NULL;
+	static       treeNode *excludeFunctionNamesTreeRoot = NULL;
+	va_list ap;
+	
+	va_start(ap, format);
+
+	/* If not initialized, then, initialize in a single thread of execution. */
+	psmi_initialize(&plmf_fileName_kernel,
+			&plmf_search_format_string,
+			&includeFunctionNamesTreeRoot,
+			&excludeFunctionNamesTreeRoot);
+
+	/* Next, determine if this log message is signal or noise. */
+	if (plmf_search_format_string)
+	{
+		if((format != PSM_LOG_BT_MAGIC) && (format != PSM_LOG_EPM_MAGIC))
+		{
+			if (fnmatch(plmf_search_format_string, format, 0))
+				/* tis noise, return. */
+				return;
+		}
+	}
+	else
+	{
+		if (includeFunctionNamesTreeRoot)
+		{
+			if (lookupNodeInTree(includeFunctionNamesTreeRoot,functionName,lineNumber))
+				/* tis noise, return. */
+				return;
+		}
+
+		if (excludeFunctionNamesTreeRoot)
+		{
+			if (!lookupNodeInTree(excludeFunctionNamesTreeRoot,functionName,lineNumber))
+				/* tis noise, return. */
+				return;
+		}
+	}
+
+	/* At this point, we think that this may be a message that we want to emit to the log.
+	   But, there is one more test, to apply to the two cases where (format == PSM_LOG_BT_MAGIC 
+	   and format == PSM_LOG_EPM_MAGIC. */
+	{
+		void      **voidarray      = NULL;   /*va_arg(ap,void **);*/
+		int         nframes        = 0;      /*va_arg(ap,int);*/
+		const char *newFormat      = format; /*va_arg(ap,const char *);*/
+		int         opcode         = 0;
+		int         txrx           = 0;
+		uint64_t    fromepid       = 0;
+		uint64_t    toepid         = 0;
+		char logFileName[256];
+		FILE *fout;
+		struct timespec tp;
+		
+		if (format == PSM_LOG_BT_MAGIC)
+		{
+			voidarray = va_arg(ap,void **);
+			nframes   = va_arg(ap,int);
+			newFormat = va_arg(ap,const char *);
+			/* One last test to make sure that this message is signal: */
+			if (plmf_search_format_string)
+			{
+				{
+					if (fnmatch(plmf_search_format_string, newFormat, 0))
+						/* tis noise, return. */
+						return;
+				}
+			}
+		}
+		else if (format == PSM_LOG_EPM_MAGIC)
+		{
+			opcode    = va_arg(ap,int);
+			txrx      = va_arg(ap,int);
+			fromepid  = va_arg(ap,uint64_t);
+			toepid    = va_arg(ap,uint64_t);
+			newFormat = va_arg(ap,const char *);
+			/* One last test to make sure that this message is signal: */
+			if (plmf_search_format_string)
+			{
+				{
+					if (fnmatch(plmf_search_format_string, newFormat, 0))
+						/* tis noise, return. */
+						return;
+				}
+			}
+		}
+
+		/* At this point we know that the message is not noise, and it is going to be emitted to the log. */
+		snprintf(logFileName,sizeof(logFileName),"%s.%d.%ld",plmf_fileName_kernel,getpid(),pthread_self());
+		fout = fopen(logFileName,"a");
+		if (!fout)
+			return;
+		
+#define M1()	clock_gettime(CLOCK_REALTIME, &tp);fprintf(fout,"%f %s %s:%d: ",(double)tp.tv_sec + ((double)tp.tv_nsec/1000000000.0),functionName,fileName,lineNumber)
+
+		M1();
+
+		if ((format != PSM_LOG_BT_MAGIC) && (format != PSM_LOG_EPM_MAGIC))
+		{
+			vfprintf(fout,format,ap);
+			fputc('\n',fout);
+		}
+		else if (format == PSM_LOG_BT_MAGIC)
+		{
+			void *newframes[PSM_LOG_BT_BUFFER_SIZE];
+			int  newframecnt      = backtrace(newframes, PSM_LOG_BT_BUFFER_SIZE);
+			int  pframes          = min(newframecnt,nframes);
+
+			vfprintf(fout,newFormat,ap);
+			fputc('\n',fout);
+
+			if (memcmp(voidarray,newframes,pframes * sizeof(void*)))
+			{
+				int i;
+				char **strings;
+
+				memcpy(voidarray,newframes,sizeof(newframes));
+				M1();
+				fprintf(fout,"backtrace() returned %d addresses\n", newframecnt);
+
+				strings = backtrace_symbols(voidarray, pframes);
+				if (strings == NULL)
+				{
+					perror("backtrace_symbols");
+					exit(EXIT_FAILURE);
+				}
+
+				for (i = 0; i < pframes; i++)
+				{
+					M1();
+					fprintf(fout,"%s\n", strings[i]);
+				}
+
+#undef free
+				free(strings);
+			}
+
+		}
+		else /* (format == PSM_LOG_EPM_MAGIC) */
+		{
+			static epmTreeNode *root = 0;
+			static pthread_mutex_t plmf_epm_mutex = PTHREAD_MUTEX_INITIALIZER;
+			int *pcount = 0;
+			if (pthread_mutex_lock(&plmf_epm_mutex))
+			{
+				perror("cannot lock mutex for psmi_log_message facility");
+				return;
+			}
+			/* START OF CRITICAL SECTION */
+			pcount = insertNodeInEpmTree(&root,opcode,txrx,fromepid,toepid);
+			/* END OF CRITICAL SECTION */
+			if (pthread_mutex_unlock(&plmf_epm_mutex))
+			{
+				perror("cannot unlock mutex for psmi_log_message facility");
+				return;
+			}
+			(*pcount)++;
+			fprintf(fout,"%s %s from: %" PRIx64 ", to: %" PRIx64 ", count: %d, ",TxRxString(txrx),OpcodeString(opcode),fromepid,toepid,*pcount);
+			vfprintf(fout,newFormat,ap);
+			fputc('\n',fout);
+		}
+		fclose(fout);
+	}
+
+	va_end(ap);
+}
+
+#endif /* #ifdef PSM_LOG */

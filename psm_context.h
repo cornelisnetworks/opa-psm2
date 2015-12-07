@@ -68,25 +68,26 @@ struct psmi_context {
 	void *tf_ctrl;
 
 	int fd;			/* driver fd */
-	psm_ep_t ep;		/* psm ep handle */
-	psm_epid_t epid;	/* psm integral ep id */
+	psm2_ep_t ep;		/* psm ep handle */
+	psm2_epid_t epid;	/* psm integral ep id */
 	struct hfi1_user_info user_info;
 	uint32_t runtime_flags;
 	uint32_t rcvthread_flags;
-	psm_error_t status_lasterr;
+	psm2_error_t status_lasterr;
+	time_t networkLostTime;
 } psmi_context_t;
 
-psm_error_t
-psmi_context_open(const psm_ep_t ep, long unit_id, long port,
-		  psm_uuid_t const job_key,
+psm2_error_t
+psmi_context_open(const psm2_ep_t ep, long unit_id, long port,
+		  psm2_uuid_t const job_key,
 		  int64_t timeout_ns, psmi_context_t *context);
 
-psm_error_t psmi_context_close(psmi_context_t *context);
+psm2_error_t psmi_context_close(psmi_context_t *context);
 
 /* Check status of context */
-psm_error_t psmi_context_check_status(const psmi_context_t *context);
+psm2_error_t psmi_context_check_status(const psmi_context_t *context);
 
-psm_error_t psmi_context_interrupt_set(psmi_context_t *context, int enable);
+psm2_error_t psmi_context_interrupt_set(psmi_context_t *context, int enable);
 int psmi_context_interrupt_isenabled(psmi_context_t *context);
 
 /* Runtime flags describe what features are enabled in hw/sw and which

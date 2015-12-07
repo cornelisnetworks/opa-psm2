@@ -61,16 +61,16 @@
 #define _PSMI_ERROR_H
 
 #define PSMI_EP_NONE		    (NULL)
-#define PSMI_EP_NORETURN	    ((psm_ep_t) -2)
-#define PSMI_EP_LOGEVENT	    ((psm_ep_t) -3)
+#define PSMI_EP_NORETURN	    ((psm2_ep_t) -2)
+#define PSMI_EP_LOGEVENT	    ((psm2_ep_t) -3)
 
-psm_ep_errhandler_t psmi_errhandler_global;
+psm2_ep_errhandler_t psmi_errhandler_global;
 
-psm_error_t psmi_handle_error(psm_ep_t ep, psm_error_t error,
+psm2_error_t psmi_handle_error(psm2_ep_t ep, psm2_error_t error,
 			      const char *buf, ...)
 			      __attribute__((format(printf, 3, 4)));
 
-psm_error_t psmi_error_cmp(psm_error_t errA, psm_error_t errB);
-int psmi_error_syslog_level(psm_error_t error);
+psm2_error_t psmi_error_cmp(psm2_error_t errA, psm2_error_t errB);
+int psmi_error_syslog_level(psm2_error_t error);
 
 #endif /* _PSMI_ERROR_H */

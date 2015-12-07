@@ -66,7 +66,7 @@ all: ${${TARGLIB}-objs}
 	$(CC) $(CFLAGS) $(INCLUDES) -MMD -c $< -o $@
 
 clean:
-	rm -f *.o *.d
+	rm -f *.o *.d *.gcda *.gcno
 
 install:
 	@echo "Nothing to do for install."

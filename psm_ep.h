@@ -54,7 +54,7 @@
 /* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
 
 #ifndef _PSMI_IN_USER_H
-#error psm_ep.h not meant to be included directly, include psm_user.h instead
+#error psm2_ep.h not meant to be included directly, include psm_user.h instead
 #endif
 
 #ifndef _PSMI_EP_H
@@ -67,10 +67,9 @@
  * CONTEXT:8 bits - Context used for bits (upto 256 contexts)
  * SUBCONTEXT:3 bits - Subcontext used for endpoint
  * HFIUNIT: 2 bits - HFI unit number
- * HFITYPE: 5 bits - OPA1, OPA2, ...
- * MTU: 3 bits - from 1(256) to 7(16384)
+ * HFITYPE: 3 bits - OPA1, OPA2, ...
  * RANK: 26 bits - process rank
- * reserved: 1 bit - for future usage
+ * reserved: 6 bit - for future usage
  */
 
 #define PSMI_HFI_TYPE_UNKNOWN 0
@@ -86,22 +85,20 @@
 #define PSMI_SC_ADMIN	15
 #define PSMI_VL_ADMIN	15
 
-#define PSMI_EPID_PACK(lid, context, subcontext, hfiunit, hfitype, mtu, rank) \
-	(((((uint64_t)lid)&0xffff)<<18)		|      			\
-	 ((((uint64_t)context)&0xff)<<10)	|			\
-	 ((((uint64_t)subcontext)&0x7)<<7)	|			\
-	 ((((uint64_t)hfiunit)&0x3)<<5)		|			\
-	 ((((uint64_t)hfitype)&0x1f)<<0)	|			\
-	 ((((uint64_t)mtu)&0x7)<<34)		|			\
-	 ((((uint64_t)rank)&0x3ffffff)<<37))
+#define PSMI_EPID_PACK(lid, context, subcontext, hfiunit, hfitype, rank) \
+	(((((uint64_t)lid)&0xffff)<<16)		|      			\
+	 ((((uint64_t)context)&0xff)<<8)	|			\
+	 ((((uint64_t)subcontext)&0x7)<<5)	|			\
+	 ((((uint64_t)hfiunit)&0x3)<<3)		|			\
+	 ((((uint64_t)hfitype)&0x7)<<0)	|				\
+	 ((((uint64_t)rank)&0x3ffffff)<<32))
 
-#define PSMI_EPID_GET_LID(epid)		(((epid)>>18)&0xffff)
-#define PSMI_EPID_GET_CONTEXT(epid)	(((epid)>>10)&0xff)
-#define PSMI_EPID_GET_SUBCONTEXT(epid)	(((epid)>>7)&0x7)
-#define PSMI_EPID_GET_HFIUNIT(epid)	(((epid)>>5)&0x3)
-#define PSMI_EPID_GET_HFITYPE(epid)	(((epid)>>0)&0x1f)
-#define PSMI_EPID_GET_MTU(epid)		(((epid)>>34)&0x7)
-#define PSMI_EPID_GET_RANK(epid)	(((epid)>>37)&0x3ffffff)
+#define PSMI_EPID_GET_LID(epid)		(((epid)>>16)&0xffff)
+#define PSMI_EPID_GET_CONTEXT(epid)	(((epid)>>8)&0xff)
+#define PSMI_EPID_GET_SUBCONTEXT(epid)	(((epid)>>5)&0x7)
+#define PSMI_EPID_GET_HFIUNIT(epid)	(((epid)>>3)&0x3)
+#define PSMI_EPID_GET_HFITYPE(epid)	(((epid)>>0)&0x7)
+#define PSMI_EPID_GET_RANK(epid)	(((epid)>>32)&0x3ffffff)
 
 #define PSMI_MIN_EP_CONNECT_TIMEOUT (2 * SEC_ULL)
 #define PSMI_MIN_EP_CLOSE_TIMEOUT   (2 * SEC_ULL)
@@ -124,21 +121,21 @@
 
 #define HFI_MAX_RAILS		4
 
-struct psm_ep {
-	psm_epid_t epid;	    /**> This endpoint's Endpoint ID */
-	psm_epaddr_t epaddr;	    /**> This ep's ep address */
-	psm_mq_t mq;		    /**> only 1 MQ */
+struct psm2_ep {
+	psm2_epid_t epid;	    /**> This endpoint's Endpoint ID */
+	psm2_epaddr_t epaddr;	    /**> This ep's ep address */
+	psm2_mq_t mq;		    /**> only 1 MQ */
 	int unit_id;
 	uint16_t portnum;
 	uint16_t out_sl;
 	uint16_t mtu;		/* out_sl-->vl-->mtu in sysfs */
-	uint16_t network_pkey;	      /**> InfiniBand Pkey */
+	uint16_t network_pkey;	      /**> OPA Pkey */
 	int did_syslog;
-	psm_uuid_t uuid;
+	psm2_uuid_t uuid;
 	uint16_t jkey;
-	uint64_t service_id;	/* Infiniband service ID */
-	psm_path_res_t path_res_type;	/* Path resolution for endpoint */
-	psm_ep_errhandler_t errh;
+	uint64_t service_id;	/* OPA service ID */
+	psm2_path_res_t path_res_type;	/* Path resolution for endpoint */
+	psm2_ep_errhandler_t errh;
 	int devid_enabled[PTL_MAX_INIT];
 	int memmode;		    /**> min, normal, large memory mode */
 
@@ -152,12 +149,12 @@ struct psm_ep {
 	uint32_t yield_spin_cnt;
 
 	/* EP link-lists */
-	struct psm_ep *user_ep_next;
+	struct psm2_ep *user_ep_next;
 
 	/* EP link-lists for multi-context. */
-	struct psm_ep *mctxt_prev;
-	struct psm_ep *mctxt_next;
-	struct psm_ep *mctxt_master;
+	struct psm2_ep *mctxt_prev;
+	struct psm2_ep *mctxt_next;
+	struct psm2_ep *mctxt_master;
 
 	/* Active Message handler table */
 	void **am_htable;
@@ -174,13 +171,13 @@ struct psm_ep {
 };
 
 struct mqq {
-	psm_mq_req_t first;
-	psm_mq_req_t *lastp;
+	psm2_mq_req_t first;
+	psm2_mq_req_t *lastp;
 };
 
 struct mqsq {
-	psm_mq_req_t first;
-	psm_mq_req_t *lastp;
+	psm2_mq_req_t first;
+	psm2_mq_req_t *lastp;
 };
 
 typedef
@@ -198,8 +195,8 @@ union psmi_seqnum {
 /*
  * PSM end point address. One per connection and per rail.
  */
-struct psm_epaddr {
-	psm_epid_t epid;	/* peer's epid */
+struct psm2_epaddr {
+	psm2_epid_t epid;	/* peer's epid */
 	ptl_ctl_t *ptlctl;	/* The control structure for the ptl */
 	struct ips_proto *proto;	/* only for ips protocol */
 	void *usr_ep_ctxt;	/* User context associated with endpoint */
@@ -217,14 +214,14 @@ struct psm_epaddr {
 	PSMI_PROFILE_BLOCK();						\
 	while (!(cond)) {						\
 		err = psmi_poll_internal(ep, 1);			\
-		if (err == PSM_OK_NO_PROGRESS) {			\
+		if (err == PSM2_OK_NO_PROGRESS) {			\
 			PSMI_PROFILE_REBLOCK(1);			\
 			if (++spin_cnt == (ep)->yield_spin_cnt) {	\
 				spin_cnt = 0;				\
 				PSMI_PYIELD();				\
 			}						\
 		}							\
-		else if (err == PSM_OK) {				\
+		else if (err == PSM2_OK) {				\
 			PSMI_PROFILE_REBLOCK(0);			\
 			spin_cnt = 0;					\
 		}							\

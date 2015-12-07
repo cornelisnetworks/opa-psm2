@@ -53,18 +53,18 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
-#ifndef _PSM_AM_INTERNAL_H
-#define _PSM_AM_INTERNAL_H
+#ifndef _PSM2_AM_INTERNAL_H
+#define _PSM2_AM_INTERNAL_H
 
 #define PSMI_AM_MAX_ARGS     10
 #define PSMI_AM_NUM_HANDLERS 256	/* must be power of 2 */
 
-#define PSMI_AM_ARGS_DEFAULT psm_am_token_t token,			\
-			     psm_amarg_t *args, int nargs,		\
+#define PSMI_AM_ARGS_DEFAULT psm2_am_token_t token,			\
+			     psm2_amarg_t *args, int nargs,		\
 			     void *src, uint32_t len
 
 struct psmi_am_token {
-	psm_epaddr_t epaddr_from;
+	psm2_epaddr_t epaddr_from;
 	uint32_t flags;
 	/* Can handler reply? i.e. Not OPCODE_AM_REQUEST_NOREPLY request */
 	uint32_t can_reply;
@@ -73,21 +73,21 @@ struct psmi_am_token {
 };
 
 /* AM capabilities parameters are initialized once in psmi_am_init_internal
-   and copied out in __psm_am_get_parameters.  When debugging is enabled,
+   and copied out in __psm2_am_get_parameters.  When debugging is enabled,
    various assertions reference these parameters for sanity checking. */
-extern struct psm_am_parameters psmi_am_parameters;
+extern struct psm2_am_parameters psmi_am_parameters;
 
-PSMI_ALWAYS_INLINE(psm_am_handler_fn_t
-		   psm_am_get_handler_function(psm_ep_t ep,
-					       psm_handler_t handler_idx))
+PSMI_ALWAYS_INLINE(psm2_am_handler_fn_t
+		   psm_am_get_handler_function(psm2_ep_t ep,
+					       psm2_handler_t handler_idx))
 {
 	int hidx = handler_idx & (PSMI_AM_NUM_HANDLERS - 1);
-	psm_am_handler_fn_t fn = (psm_am_handler_fn_t) ep->am_htable[hidx];
+	psm2_am_handler_fn_t fn = (psm2_am_handler_fn_t) ep->am_htable[hidx];
 	psmi_assert_always(fn != NULL);
 	return fn;
 }
 
 /* PSM internal initialization */
-psm_error_t psmi_am_init_internal(psm_ep_t ep);
+psm2_error_t psmi_am_init_internal(psm2_ep_t ep);
 
 #endif

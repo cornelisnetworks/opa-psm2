@@ -57,7 +57,7 @@ MINOR := $(OPA_LIB_MINOR)
 top_srcdir := ..
 include $(top_srcdir)/buildflags.mak
 BASECFLAGS += -D_GNU_SOURCE
-INCLUDES += -I../ptl_ips
+INCLUDES += -I.. -I../ptl_ips
 
 ifeq (${arch},x86_64)
 	PLATFORM_OBJ=opa_dwordcpy-x86_64-fast.o
@@ -84,11 +84,6 @@ install: all
 %.o: %.S
 	$(CC) $(ASFLAGS) -c $< -o $@
 
-opa_debug.o: WERROR :=
-# This is temporarily necessary in order to get backtrace to work. Bug 3536
-opa_debug.o: opa_debug.c
-	gcc $(BASECFLAGS) $(INCLUDES) -c $< -o $@
-
 clean:
 	rm -f _revision.c
-	rm -f *.o *.d ${TARGLIB}.*
+	rm -f *.o *.d *.gcda *.gcno ${TARGLIB}.*

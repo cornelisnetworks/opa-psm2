@@ -61,26 +61,30 @@ export os ?= $(shell uname -s | tr '[A-Z]' '[a-z]')
 export arch := $(shell uname -p | sed -e 's,\(i[456]86\|athlon$$\),i386,')
 
 ifeq (${CCARCH},pathcc)
-	export CC := pathcc -fno-fast-stdlib 
+	export CC := pathcc -fno-fast-stdlib
 	export PATH := ${PATH}:/opt/pathscale/bin/
 else
 	ifeq (${CCARCH},gcc)
-		export CC := gcc 
+		export CC := gcc
 	else
 		ifeq (${CCARCH},gcc4)
 			export CC := gcc4
 		else
-			anerr := $(error Unknown C compiler arch: ${CCARCH})
+			ifeq (${CCARCH},icc)
+			     export CC := icc
+			else
+			     anerr := $(error Unknown C compiler arch: ${CCARCH})
+			endif # ICC
 		endif # gcc4
 	endif # gcc
 endif # pathcc
 
 ifeq (${FCARCH},pathf90)
-	export FC := pathf90 
+	export FC := pathf90
 	export PATH := ${PATH}:/opt/pathscale/bin/
 else
 	ifeq (${FCARCH},gfortran)
-		export FC := gfortran 
+		export FC := gfortran
 	else
 		anerr := $(error Unknown Fortran compiler arch: ${FCARCH})
 	endif # gfortran
@@ -90,21 +94,61 @@ BASECFLAGS += $(BASE_FLAGS)
 LDFLAGS += $(BASE_FLAGS)
 ASFLAGS += $(BASE_FLAGS)
 
+LDFLAGS += -Wl,--version-script psm2_linker_script.map
 WERROR := -Werror
 INCLUDES := -I. -I$(top_srcdir)/include -I$(top_srcdir)/mpspawn -I$(top_srcdir)/include/$(os)-$(arch)
 
 BASECFLAGS +=-Wall $(WERROR)
+
+#
+# test if compiler supports 16B(SSE2)/32B(AVX2)/64B(AVX512F) move instruction.
+#
+RET := $(shell echo "int main() {}" | $${CC} -msse2 -E -xc - > /dev/null 2>&1; echo $$?)
+ifneq (1,${RET})
+  BASECFLAGS += -msse2
+endif
+
+ifneq (,${PSM_AVX})
+ifeq (${CC},icc)
+  MAVX2=-march=core-avx2
+else
+  MAVX2=-mavx2
+endif
+RET := $(shell echo "int main() {}" | $${CC} ${MAVX2} -E -xc - > /dev/null 2>&1; echo $$?)
+ifneq (1,${RET})
+  BASECFLAGS += ${MAVX2}
+endif
+ifneq (icc,${CC})
+  RET := $(shell echo "int main() {}" | $${CC} -mavx512f -E -xc - > /dev/null 2>&1; echo $$?)
+  ifneq (1,${RET})
+    BASECFLAGS += -mavx512f
+  endif
+endif
+endif
+
 ifneq (,${PSM_DEBUG})
-  BASECFLAGS += -O -g3 -DPSM_DEBUG -funit-at-a-time -Wp,-D_FORTIFY_SOURCE=2
+  BASECFLAGS += -O -g3 -DPSM_DEBUG -D_HFI_DEBUGGING -funit-at-a-time -Wp,-D_FORTIFY_SOURCE=2
 else
   BASECFLAGS += -O3 -g3
+endif
+ifneq (,${PSM_COVERAGE}) # This check must come after PSM_DEBUG to override optimization setting
+  BASECFLAGS += -O -fprofile-arcs -ftest-coverage
+  LDFLAGS += -fprofile-arcs
+endif
+ifneq (,${PSM_LOG})
+   BASECFLAGS += -DPSM_LOG
 endif
 ifneq (,${PSM_PROFILE})
   BASECFLAGS += -DPSM_PROFILE
 endif
-BASECFLAGS += -fpic -fPIC -funwind-tables -D_GNU_SOURCE
 
- EXTRA_LIBS = -luuid
+BASECFLAGS += -fpic -fPIC -D_GNU_SOURCE
+
+ifeq ($CC,gcc)
+  BASECFLAGS += -funwind-tables
+endif
+
+EXTRA_LIBS = -luuid
 
 ifneq (,${PSM_VALGRIND})
   CFLAGS += -DPSM_VALGRIND
@@ -117,8 +161,9 @@ ASFLAGS += -g3 -fpic
 BASECFLAGS += ${OPA_CFLAGS}
 
 ifeq (${CCARCH},icc)
-    BASECFLAGS = -O2 -g3 -fpic -fPIC -D_GNU_SOURCE
+    BASECFLAGS += -O3 -g3 -fpic -fPIC -D_GNU_SOURCE -DPACK_STRUCT_STL=packed,
     CFLAGS += $(BASECFLAGS)
+    LDFLAGS += -static-intel
 else
     ifeq (${CCARCH},pathcc)
 	CFLAGS += $(BASECFLAGS)

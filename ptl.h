@@ -91,15 +91,15 @@ typedef struct ips_proto ips_proto_t;
 struct ptl_ctl_init {
 	size_t(*sizeof_ptl) (void);
 
-	psm_error_t(*init) (const psm_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl);
+	psm2_error_t(*init) (const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl);
 
-	psm_error_t(*fini) (ptl_t *ptl, int force, uint64_t timeout_ns);
+	psm2_error_t(*fini) (ptl_t *ptl, int force, uint64_t timeout_ns);
 
-	psm_error_t
+	psm2_error_t
 	    (*setopt) (const void *component_obj, int optname,
 		       const void *optval, uint64_t optlen);
 
-	psm_error_t
+	psm2_error_t
 	    (*getopt) (const void *component_obj, int optname,
 		       void *optval, uint64_t *optlen);
 };
@@ -130,10 +130,10 @@ struct ptl_arg {
 /* To be filled in as part of ptl_init */
 struct ptl_ctl {
 	ptl_t *ptl;		/* pointer to ptl */
-	psm_ep_t ep;		/* pointer to ep */
+	psm2_ep_t ep;		/* pointer to ep */
 
 	/* EP-specific stuff */
-	 psm_error_t(*ep_poll) (ptl_t *ptl, int replyonly);
+	 psm2_error_t(*ep_poll) (ptl_t *ptl, int replyonly);
 
 	/* PTL-level connect
 	 *
@@ -150,60 +150,60 @@ struct ptl_ctl {
 	 * post 3: PTL returns OK iff all epids are either OK or UNREACHABLE
 	 * post 4: PTL defines content or epaddr[i] only if epaddr[i] is OK.
 	 */
-	 psm_error_t(*ep_connect) (ptl_t *ptl,
+	 psm2_error_t(*ep_connect) (ptl_t *ptl,
 				   int num_ep,
-				   const psm_epid_t input_array_of_epid[],
+				   const psm2_epid_t input_array_of_epid[],
 				   const int array_of_epid_mask[],
-				   psm_error_t output_array_of_errors[],
-				   psm_epaddr_t output_array_of_epddr[],
+				   psm2_error_t output_array_of_errors[],
+				   psm2_epaddr_t output_array_of_epddr[],
 				   uint64_t timeout_ns);
 
-	 psm_error_t(*ep_disconnect) (ptl_t *ptl, int force,
+	 psm2_error_t(*ep_disconnect) (ptl_t *ptl, int force,
 				      int num_ep,
-				      const psm_epaddr_t
+				      const psm2_epaddr_t
 				      input_array_of_epaddr[],
 				      const int array_of_epaddr_mask[],
-				      psm_error_t output_array_of_errors[],
+				      psm2_error_t output_array_of_errors[],
 				      uint64_t timeout_ns);
 
 	/* MQ stuff */
-	 psm_error_t(*mq_send) (psm_mq_t mq, psm_epaddr_t dest,
-				uint32_t flags, psm_mq_tag_t *stag,
+	 psm2_error_t(*mq_send) (psm2_mq_t mq, psm2_epaddr_t dest,
+				uint32_t flags, psm2_mq_tag_t *stag,
 				const void *buf, uint32_t len);
-	 psm_error_t(*mq_isend) (psm_mq_t mq, psm_epaddr_t dest,
-				 uint32_t flags, psm_mq_tag_t *stag,
+	 psm2_error_t(*mq_isend) (psm2_mq_t mq, psm2_epaddr_t dest,
+				 uint32_t flags, psm2_mq_tag_t *stag,
 				 const void *buf, uint32_t len,
-				 void *ctxt, psm_mq_req_t *req);
+				 void *ctxt, psm2_mq_req_t *req);
 
 	int (*epaddr_stats_num) (void);
 	int (*epaddr_stats_init) (char *desc[], uint16_t *flags);
-	int (*epaddr_stats_get) (psm_epaddr_t epaddr, uint64_t *stats);
+	int (*epaddr_stats_get) (psm2_epaddr_t epaddr, uint64_t *stats);
 
 	/* AM stuff */
-	 psm_error_t(*am_get_parameters) (psm_ep_t ep,
-					  struct psm_am_parameters *
+	 psm2_error_t(*am_get_parameters) (psm2_ep_t ep,
+					  struct psm2_am_parameters *
 					  parameters);
-	 psm_error_t(*am_short_request) (psm_epaddr_t epaddr,
-					 psm_handler_t handler,
-					 psm_amarg_t *args, int nargs,
+	 psm2_error_t(*am_short_request) (psm2_epaddr_t epaddr,
+					 psm2_handler_t handler,
+					 psm2_amarg_t *args, int nargs,
 					 void *src, size_t len, int flags,
-					 psm_am_completion_fn_t completion_fn,
+					 psm2_am_completion_fn_t completion_fn,
 					 void *completion_ctxt);
-	 psm_error_t(*am_short_reply) (psm_am_token_t token,
-				       psm_handler_t handler,
-				       psm_amarg_t *args, int nargs, void *src,
+	 psm2_error_t(*am_short_reply) (psm2_am_token_t token,
+				       psm2_handler_t handler,
+				       psm2_amarg_t *args, int nargs, void *src,
 				       size_t len, int flags,
-				       psm_am_completion_fn_t completion_fn,
+				       psm2_am_completion_fn_t completion_fn,
 				       void *completion_ctxt);
 	/* Long messages currently unsupported */
 #if 0
-	 psm_error_t(*am_long_request) (psm_epaddr_t epaddr,
-					psm_handler_t handler,
-					psm_amarg_t *args, int nargs,
+	 psm2_error_t(*am_long_request) (psm2_epaddr_t epaddr,
+					psm2_handler_t handler,
+					psm2_amarg_t *args, int nargs,
 					void *src, size_t len, void *dest,
 					int flags);
-	 psm_error_t(*am_long_reply) (psm_am_token_t token,
-				      psm_handler_t handler, psm_amarg_t *args,
+	 psm2_error_t(*am_long_reply) (psm2_am_token_t token,
+				      psm2_handler_t handler, psm2_amarg_t *args,
 				      int nargs, void *src, size_t len,
 				      void *dest, int flags);
 #endif

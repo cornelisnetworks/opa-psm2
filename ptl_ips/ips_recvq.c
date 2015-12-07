@@ -60,7 +60,7 @@
  * From the point of view of the returned pointer, index -1 always points to
  * the address to call psmi_free on (since we force page-alignment).
  */
-void **ips_recvq_egrbuf_table_alloc(psm_ep_t ep, void *baseptr,
+void **ips_recvq_egrbuf_table_alloc(psm2_ep_t ep, void *baseptr,
 				    uint32_t bufnum, uint32_t bufsize)
 {
 	unsigned i;

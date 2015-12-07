@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
 
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
@@ -60,7 +60,7 @@
 /*
  * Receive header queue initialization.
  */
-psm_error_t
+psm2_error_t
 ips_recvhdrq_init(const psmi_context_t *context,
 		  const struct ips_epstate *epstate,
 		  const struct ips_proto *proto,
@@ -73,7 +73,7 @@ ips_recvhdrq_init(const psmi_context_t *context,
 		  struct ips_recvhdrq_state *recvq_state)
 {
 	const struct hfi1_ctxt_info *ctxt_info = &context->ctrl->ctxt_info;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	memset(recvq, 0, sizeof(*recvq));
 	recvq->proto = (struct ips_proto *)proto;
@@ -104,7 +104,7 @@ ips_recvhdrq_init(const psmi_context_t *context,
 					 recvq->egrq.elemcnt,
 					 recvq->egrq.elemsz);
 	if (recvq->egrq_buftable == NULL) {
-		err = psmi_handle_error(proto->ep, PSM_NO_MEMORY,
+		err = psmi_handle_error(proto->ep, PSM2_NO_MEMORY,
 					"Couldn't allocate memory for eager buffer index table");
 		goto fail;
 	}
@@ -116,29 +116,30 @@ ips_recvhdrq_init(const psmi_context_t *context,
 	recvq->state->hdrq_head = 0;
 	recvq->state->rcv_egr_index_head = NO_EAGER_UPDATE;
 	recvq->state->num_hdrq_done = 0;
+	recvq->state->num_egrq_done = 0;
 	recvq->state->hdr_countdown = 0;
 
 	{
 		union psmi_envvar_val env_hdr_update;
-		psmi_getenv("PSM_HEAD_UPDATE",
-			    "header queue update interval (0 to update after all entries are processed). Default is 16",
+		psmi_getenv("PSM2_HEAD_UPDATE",
+			    "header queue update interval (0 to update after all entries are processed). Default is 64",
 			    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
-			    (union psmi_envvar_val)16, &env_hdr_update);
+			    (union psmi_envvar_val) 64, &env_hdr_update);
 
 		/* Cap max header update interval to size of header/eager queue */
 		recvq->state->head_update_interval =
-		    min(env_hdr_update.e_uint,
-			min(recvq->hdrq.elemcnt - 1, recvq->egrq.elemcnt - 1));
+			min(env_hdr_update.e_uint, recvq->hdrq.elemcnt - 1);
+		recvq->state->egrq_update_interval = 1;
 	}
 
 fail:
 	return err;
 }
 
-psm_error_t ips_recvhdrq_fini(struct ips_recvhdrq *recvq)
+psm2_error_t ips_recvhdrq_fini(struct ips_recvhdrq *recvq)
 {
 	ips_recvq_egrbuf_table_free(recvq->egrq_buftable);
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 /* flush the eager buffers, by setting the eager index head to eager index tail
@@ -258,6 +259,7 @@ _update_error_stats(struct ips_proto *proto, uint32_t err)
 		proto->error_stats.num_khdrlen_err++;
 }
 
+#ifdef PSM_DEBUG
 static int _check_headers(struct ips_recvhdrq_event *rcv_ev)
 {
 	struct ips_recvhdrq *recvq = (struct ips_recvhdrq *)rcv_ev->recvq;
@@ -271,7 +273,7 @@ static int _check_headers(struct ips_recvhdrq_event *rcv_ev)
 
 	/* Check that the receive header queue entry has a sane sequence number */
 	if (_get_rhf_seq(recvq, rcv_hdr) > LAST_RHF_SEQNO) {
-		psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 				  "ErrPkt: Invalid header queue entry! RHF Sequence in Hdrq Seq: %d, Recvq State Seq: %d. LRH[0]: 0x%08x, LRH[1] (PktCount): 0x%08x\n",
 				  _get_rhf_seq(recvq, rcv_hdr),
 				  recvq->state->hdrq_rhf_seq, lrh[0], lrh[1]);
@@ -288,7 +290,7 @@ static int _check_headers(struct ips_recvhdrq_event *rcv_ev)
 		ips_proto_dump_err_stats(proto);
 		_dump_invalid_pkt(rcv_ev);
 
-		psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 				  "ErrPkt: Received packet for context %d on context %d. Receive Header Queue offset: 0x%x. Exiting.\n",
 				  dest_context, recvq->proto->epinfo.ep_context,
 				  state->hdrq_head);
@@ -323,6 +325,7 @@ static int _check_headers(struct ips_recvhdrq_event *rcv_ev)
 
 	return 0;
 }
+#endif
 
 static __inline__ int do_pkt_cksum(struct ips_recvhdrq_event *rcv_ev)
 {
@@ -432,7 +435,7 @@ process_pending_acks(struct ips_recvhdrq *recvq))
  * endpoints.  In order to support shared contexts, it can also handle packets
  * destined for other contexts (or "subcontexts").
  */
-psm_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
+psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 {
 	struct ips_recvhdrq_state *state = recvq->state;
 	const __le32 *rhf;
@@ -464,6 +467,7 @@ psm_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 	    (const uint32_t *)recvq->hdrq.base_addr + state->hdrq_head;
 	uint32_t tmp_hdrq_head;
 
+	PSM2_LOG_MSG("entering");
 	done = !next_hdrq_is_ready();
 
 	while (!done) {
@@ -519,9 +523,10 @@ psm_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 		} else
 			rcv_ev.is_congested = 0;
 
+#ifdef PSM_DEBUG
 		if_pf(_check_headers(&rcv_ev))
 			goto skip_packet;
-
+#endif
 		dest_subcontext = _get_proto_subcontext(rcv_ev.p_hdr);
 
 		/* If the destination is not our subcontext, process
@@ -532,7 +537,10 @@ psm_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 			ret = recvq->recvq_callbacks.callback_subcontext
 						(&rcv_ev, dest_subcontext);
 			if (ret == IPS_RECVHDRQ_REVISIT)
-				return PSM_OK_NO_PROGRESS;
+			{
+				PSM2_LOG_MSG("leaving");
+				return PSM2_OK_NO_PROGRESS;
+			}
 
 			goto skip_packet;
 		}
@@ -609,7 +617,10 @@ psm_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 			rcv_ev.ipsaddr = epstaddr->ipsaddr;
 			ret = ips_proto_process_packet(&rcv_ev);
 			if (ret == IPS_RECVHDRQ_REVISIT)
-				return PSM_OK_NO_PROGRESS;
+			{
+				PSM2_LOG_MSG("leaving");
+				return PSM2_OK_NO_PROGRESS;
+			}
 		}
 
 skip_packet:
@@ -618,9 +629,11 @@ skip_packet:
 		 */
 		if (hfi_hdrget_use_egrbfr(rhf)) {
 			/* set only when a new entry is used */
-			if (hfi_hdrget_egrbfr_offset(rhf) == 0)
+			if (hfi_hdrget_egrbfr_offset(rhf) == 0){
 				state->rcv_egr_index_head =
 				    hfi_hdrget_egrbfr_index(rhf);
+				state->num_egrq_done++;
+			}
 			/* a header entry is using an eager entry, stop tracing. */
 			state->hdr_countdown = 0;
 		}
@@ -656,22 +669,19 @@ skip_packet_no_egr_update:
 				  state->head_update_interval) : done);
 		if (do_hdr_update) {
 			ips_recvq_head_update(&recvq->hdrq, state->hdrq_head);
-
+			/* Reset header queue entries processed */
+			state->num_hdrq_done = 0;
+		}
+		if (state->num_egrq_done >= state->egrq_update_interval) {
 			/* Lazy update of egrq */
 			if (state->rcv_egr_index_head != NO_EAGER_UPDATE) {
 				ips_recvq_head_update(&recvq->egrq,
 						      state->
 						      rcv_egr_index_head);
 				state->rcv_egr_index_head = NO_EAGER_UPDATE;
+				state->num_egrq_done = 0;
 			}
-
-			/* Process any pending acks while updated eager/headq queue */
-			process_pending_acks(recvq);
-
-			/* Reset header queue entries processed */
-			state->num_hdrq_done = 0;
 		}
-
 		if (state->hdr_countdown > 0) {
 			/* a header entry is consumed. */
 			state->hdr_countdown -= hdrq_elemsz;
@@ -703,5 +713,6 @@ skip_packet_no_egr_update:
 	/* Process any pending acks before exiting */
 	process_pending_acks(recvq);
 
-	return num_hdrq_done ? PSM_OK : PSM_OK_NO_PROGRESS;
+	PSM2_LOG_MSG("leaving");
+	return num_hdrq_done ? PSM2_OK : PSM2_OK_NO_PROGRESS;
 }

@@ -78,8 +78,8 @@ struct psmi_epid_table {
 struct psmi_epid_tabentry {
 	void *entry;
 	uint64_t key;
-	psm_ep_t ep;
-	psm_epid_t epid;
+	psm2_ep_t ep;
+	psm2_epid_t epid;
 };
 
 extern struct psmi_epid_table psmi_epid_table;
@@ -87,25 +87,25 @@ extern struct psmi_epid_table psmi_epid_table;
 #define PSMI_EPID_TABSIZE_CHUNK	 128
 #define PSMI_EPID_TABLOAD_FACTOR ((float)0.7)
 
-psm_error_t psmi_epid_init();
-psm_error_t psmi_epid_fini();
-void *psmi_epid_lookup(psm_ep_t ep, psm_epid_t epid);
-void *psmi_epid_remove(psm_ep_t ep, psm_epid_t epid);
-psm_error_t psmi_epid_add(psm_ep_t ep, psm_epid_t epid, void *entry);
-#define PSMI_EP_HOSTNAME    ((psm_ep_t) -1)	/* Special endpoint handle we use
+psm2_error_t psmi_epid_init();
+psm2_error_t psmi_epid_fini();
+void *psmi_epid_lookup(psm2_ep_t ep, psm2_epid_t epid);
+void *psmi_epid_remove(psm2_ep_t ep, psm2_epid_t epid);
+psm2_error_t psmi_epid_add(psm2_ep_t ep, psm2_epid_t epid, void *entry);
+#define PSMI_EP_HOSTNAME    ((psm2_ep_t) -1)	/* Special endpoint handle we use
 						 * to register hostnames */
-#define PSMI_EP_CROSSTALK   ((psm_ep_t) -2)	/* Second special endpoint handle
+#define PSMI_EP_CROSSTALK   ((psm2_ep_t) -2)	/* Second special endpoint handle
 						 * to log which nodes we've seen
 						 * crosstalk from */
 struct psmi_eptab_iterator {
 	int i;			/* last index looked up */
-	psm_ep_t ep;
+	psm2_ep_t ep;
 };
-void psmi_epid_itor_init(struct psmi_eptab_iterator *itor, psm_ep_t ep);
+void psmi_epid_itor_init(struct psmi_eptab_iterator *itor, psm2_ep_t ep);
 void *psmi_epid_itor_next(struct psmi_eptab_iterator *itor);
 void psmi_epid_itor_fini(struct psmi_eptab_iterator *itor);
 
-uint64_t psmi_epid_hfi_type(psm_epid_t epid);
+uint64_t psmi_epid_hfi_type(psm2_epid_t epid);
 
 /*
  * Hostname manipulation
@@ -113,15 +113,15 @@ uint64_t psmi_epid_hfi_type(psm_epid_t epid);
 #define	     PSMI_EP_HOSTNAME_LEN   64	/* hostname only */
 #define	     PSMI_EP_NAME_LEN       96	/* hostname:LID:context:subcontext */
 char *psmi_gethostname(void);
-const char *psmi_epaddr_get_hostname(psm_epid_t epid);
-const char *psmi_epaddr_get_name(psm_epid_t epid);
-psm_error_t psmi_epid_set_hostname(uint64_t nid, const char *hostname,
+const char *psmi_epaddr_get_hostname(psm2_epid_t epid);
+const char *psmi_epaddr_get_name(psm2_epid_t epid);
+psm2_error_t psmi_epid_set_hostname(uint64_t nid, const char *hostname,
 				   int overwrite);
 
 /*
  * Memory allocation, use macros only.
  *
- * In all calls, ep can be a specific endpoint (valid psm_ep_t) or PSMI_EP_NONE
+ * In all calls, ep can be a specific endpoint (valid psm2_ep_t) or PSMI_EP_NONE
  * if no endpoint is available.
  *
  *   psmi_malloc(ep, memtype, size)
@@ -163,13 +163,13 @@ struct psmi_stats_malloc {
 
 extern struct psmi_stats_malloc psmi_stats_memory;
 
-void *psmi_malloc_internal(psm_ep_t ep, psmi_memtype_t mt, size_t sz,
+void *psmi_malloc_internal(psm2_ep_t ep, psmi_memtype_t mt, size_t sz,
 			   const char *curloc);
-void *psmi_memalign_internal(psm_ep_t ep, psmi_memtype_t mt, size_t alignment,
+void *psmi_memalign_internal(psm2_ep_t ep, psmi_memtype_t mt, size_t alignment,
 			     size_t sz, const char *curloc);
-void *psmi_calloc_internal(psm_ep_t ep, psmi_memtype_t mt, size_t num,
+void *psmi_calloc_internal(psm2_ep_t ep, psmi_memtype_t mt, size_t num,
 			   size_t sz, const char *curloc);
-void *psmi_strdup_internal(psm_ep_t ep, const char *string, const char *curloc);
+void *psmi_strdup_internal(psm2_ep_t ep, const char *string, const char *curloc);
 void psmi_free_internal(void *ptr);
 
 #define psmi_strdup(ep, string) psmi_strdup_internal(ep, string, PSMI_CURLOC)
@@ -217,7 +217,7 @@ struct psmi_rlimit_mpool {
 		uint32_t obj_max;
 	} mode[PSMI_MEMMODE_NUM];
 };
-psm_error_t psmi_parse_mpool_env(const psm_mq_t mq, int level,
+psm2_error_t psmi_parse_mpool_env(const psm2_mq_t mq, int level,
 				 const struct psmi_rlimit_mpool *rlim,
 				 uint32_t *valo, uint32_t *chunkszo);
 int psmi_parse_memmode(void);
@@ -262,10 +262,10 @@ int psmi_getenv(const char *name, const char *descr, int level,
 uintptr_t psmi_getpagesize(void);
 uint64_t psmi_cycles_left(uint64_t start_cycles, int64_t timeout_ns);
 uint32_t psmi_get_ipv4addr();
-void psmi_syslog(psm_ep_t ep, int to_console, int level,
+void psmi_syslog(psm2_ep_t ep, int to_console, int level,
 		 const char *format, ...);
-void psmi_uuid_unparse(const psm_uuid_t uuid, char *out);
-int psmi_uuid_compare(const psm_uuid_t uuA, const psm_uuid_t uuB);
+void psmi_uuid_unparse(const psm2_uuid_t uuid, char *out);
+int psmi_uuid_compare(const psm2_uuid_t uuA, const psm2_uuid_t uuB);
 void *psmi_memcpyo(void *dst, const void *src, size_t n);
 uint32_t psmi_crc(unsigned char *buf, int len);
 uint32_t psmi_get_hfi_type(psmi_context_t *context);
@@ -299,19 +299,19 @@ int psmi_faultinj_is_fault(struct psmi_faultinj_spec *spec);
 /*
  * PSM core component set/get options
  */
-psm_error_t psmi_core_setopt(const void *core_obj, int optname,
+psm2_error_t psmi_core_setopt(const void *core_obj, int optname,
 			     const void *optval, uint64_t optlen);
 
-psm_error_t psmi_core_getopt(const void *core_obj, int optname,
+psm2_error_t psmi_core_getopt(const void *core_obj, int optname,
 			     void *optval, uint64_t *optlen);
 
 /*
  * PSM AM component set/get options
  */
-psm_error_t psmi_am_setopt(const void *am_obj, int optname,
+psm2_error_t psmi_am_setopt(const void *am_obj, int optname,
 			   const void *optval, uint64_t optlen);
 
-psm_error_t psmi_am_getopt(const void *am_obj, int optname,
+psm2_error_t psmi_am_getopt(const void *am_obj, int optname,
 			   void *optval, uint64_t *optlen);
 
 #endif /* _PSMI_UTILS_H */

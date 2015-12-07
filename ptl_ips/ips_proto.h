@@ -119,12 +119,12 @@ typedef struct ips_path_grp {
  *
  */
 struct ips_proto;
-psm_error_t ips_proto_init(const psmi_context_t *context, const struct ptl *ptl, int num_of_send_bufs, int num_of_send_desc, uint32_t imm_size, const struct psmi_timer_ctrl *timerq,	/* PTL's timerq */
+psm2_error_t ips_proto_init(const psmi_context_t *context, const struct ptl *ptl, int num_of_send_bufs, int num_of_send_desc, uint32_t imm_size, const struct psmi_timer_ctrl *timerq,	/* PTL's timerq */
 			   const struct ips_epstate *epstate,	/* PTL's epstate */
 			   const struct ips_spio *spioc,	/* PTL's spio control */
 			   struct ips_proto *proto);	/* output protocol */
 
-psm_error_t ips_proto_fini(struct ips_proto *proto, int force,
+psm2_error_t ips_proto_fini(struct ips_proto *proto, int force,
 			   uint64_t timeout);
 
 /*
@@ -153,17 +153,17 @@ struct ips_ctrlq {
 /*
  * Connect/disconnect, as implemented by ips
  */
-psm_error_t ips_proto_connect(struct ips_proto *proto, int numep,
-			      const psm_epid_t *array_of_epid,
+psm2_error_t ips_proto_connect(struct ips_proto *proto, int numep,
+			      const psm2_epid_t *array_of_epid,
 			      const int *array_of_epid_mask,
-			      psm_error_t *array_of_errors,
-			      psm_epaddr_t *array_of_epaddr,
+			      psm2_error_t *array_of_errors,
+			      psm2_epaddr_t *array_of_epaddr,
 			      uint64_t timeout_in);
 
-psm_error_t ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
-				 const psm_epaddr_t array_of_epaddr[],
+psm2_error_t ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
+				 const psm2_epaddr_t array_of_epaddr[],
 				 const int array_of_epaddr_mask[],
-				 psm_error_t array_of_errors[],
+				 psm2_error_t array_of_errors[],
 				 uint64_t timeout_in);
 
 int ips_proto_isconnected(struct ips_epaddr *ipsaddr);
@@ -173,7 +173,7 @@ int ips_proto_isconnected(struct ips_epaddr *ipsaddr);
  */
 struct ips_pend_sreq {
 	STAILQ_ENTRY(ips_pend_sreq) next;
-	psm_mq_req_t req;
+	psm2_mq_req_t req;
 	uint32_t type;
 };
 
@@ -246,11 +246,11 @@ struct opp_api {
 };
 
 struct ips_ibta_compliance_fn {
-	psm_error_t(*get_path_rec) (struct ips_proto *proto, uint16_t slid,
+	psm2_error_t(*get_path_rec) (struct ips_proto *proto, uint16_t slid,
 				    uint16_t dlid, uint16_t desthfi_type,
 				    unsigned long timeout,
 				    ips_path_grp_t **ppathgrp);
-	psm_error_t(*fini) (struct ips_proto *proto);
+	psm2_error_t(*fini) (struct ips_proto *proto);
 };
 
 /* please don't change the flow id order */
@@ -275,8 +275,8 @@ typedef enum psm_protocol_type {
 
 struct ips_proto {
 	struct ptl *ptl;	/* cached */
-	psm_ep_t ep;		/* cached, for errors */
-	psm_mq_t mq;		/* cached, for mq handling */
+	psm2_ep_t ep;		/* cached, for errors */
+	psm2_mq_t mq;		/* cached, for mq handling */
 	int fd;			/* cached, for writev ops */
 
 	/* Pending sends */
@@ -398,7 +398,7 @@ struct ips_proto {
  *
  * Directly implements the ptl epaddr.
  */
-typedef psm_error_t(*ips_flow_flush_fn_t) (struct ips_flow *, int *nflushed);
+typedef psm2_error_t(*ips_flow_flush_fn_t) (struct ips_flow *, int *nflushed);
 
 struct ips_flow {
 	SLIST_ENTRY(ips_flow) next;	/* List of flows with pending acks */
@@ -437,10 +437,10 @@ struct ips_flow {
 #define IPS_FLOW_MSG_TOGGLE_OOO_MASK	(1 << 0)	/* ooo msg check */
 #define IPS_FLOW_MSG_TOGGLE_UNEXP_MASK	(1 << 1)	/* unexp msg check */
 /*
- * Make sure ips_epaddr_t and psm_epaddr_t can be converted each other.
+ * Make sure ips_epaddr_t and psm2_epaddr_t can be converted each other.
  */
 struct ips_epaddr {
-	struct psm_epaddr epaddr;	/* inlined psm level epaddr */
+	struct psm2_epaddr epaddr;	/* inlined psm level epaddr */
 	struct ips_msgctl *msgctl;	/* ips level msg control */
 
 	struct ips_epaddr *next;	/* linklist */
@@ -523,19 +523,19 @@ void ips_scb_prepare_flow(ips_scb_t *scb, ips_epaddr_t *ipsaddr,
 
 void ips_proto_flow_enqueue(struct ips_flow *flow, ips_scb_t *scb);
 
-psm_error_t ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed);
-psm_error_t ips_proto_flow_flush_dma(struct ips_flow *flow, int *nflushed);
+psm2_error_t ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed);
+psm2_error_t ips_proto_flow_flush_dma(struct ips_flow *flow, int *nflushed);
 
 /* Wrapper for enqueue + flush */
-psm_error_t ips_proto_scb_pio_send(struct ips_flow *flow, ips_scb_t *scb);
+psm2_error_t ips_proto_scb_pio_send(struct ips_flow *flow, ips_scb_t *scb);
 
 void ips_proto_scb_dma_enqueue(struct ips_proto *proto, ips_scb_t *scb);
-psm_error_t ips_proto_scb_dma_flush(struct ips_proto *proto,
+psm2_error_t ips_proto_scb_dma_flush(struct ips_proto *proto,
 				    ips_epaddr_t *ipsaddr, int *nflushed);
-psm_error_t ips_proto_dma_wait_until(struct ips_proto *proto, ips_scb_t *scb);
-psm_error_t ips_proto_dma_completion_update(struct ips_proto *proto);
+psm2_error_t ips_proto_dma_wait_until(struct ips_proto *proto, ips_scb_t *scb);
+psm2_error_t ips_proto_dma_completion_update(struct ips_proto *proto);
 
-psm_error_t ips_dma_transfer_frame(struct ips_proto *proto,
+psm2_error_t ips_dma_transfer_frame(struct ips_proto *proto,
 				   struct ips_flow *flow, ips_scb_t *scb,
 				   void *payload, uint32_t paylen,
 				   uint32_t have_cksum, uint32_t cksum);
@@ -572,26 +572,26 @@ uint32_t ips_crc_calculate(uint32_t len, uint8_t *data, uint32_t crc);
 /*
  * Matched-Queue processing and sends
  */
-psm_error_t ips_proto_mq_push_cts_req(struct ips_proto *proto,
-				      psm_mq_req_t req);
-psm_error_t ips_proto_mq_push_rts_data(struct ips_proto *proto,
-				       psm_mq_req_t req);
+psm2_error_t ips_proto_mq_push_cts_req(struct ips_proto *proto,
+				      psm2_mq_req_t req);
+psm2_error_t ips_proto_mq_push_rts_data(struct ips_proto *proto,
+				       psm2_mq_req_t req);
 int ips_proto_mq_handle_cts(struct ips_recvhdrq_event *rcv_ev);
 int ips_proto_mq_handle_rts(struct ips_recvhdrq_event *rcv_ev);
 int ips_proto_mq_handle_tiny(struct ips_recvhdrq_event *rcv_ev);
 int ips_proto_mq_handle_short(struct ips_recvhdrq_event *rcv_ev);
 int ips_proto_mq_handle_eager(struct ips_recvhdrq_event *rcv_ev);
-void ips_proto_mq_handle_outoforder_queue(psm_mq_t mq, ips_msgctl_t *msgctl);
+void ips_proto_mq_handle_outoforder_queue(psm2_mq_t mq, ips_msgctl_t *msgctl);
 int ips_proto_mq_handle_data(struct ips_recvhdrq_event *rcv_ev);
 
-psm_error_t ips_proto_mq_send(psm_mq_t mq, psm_epaddr_t epaddr,
-			      uint32_t flags, psm_mq_tag_t *tag,
+psm2_error_t ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t epaddr,
+			      uint32_t flags, psm2_mq_tag_t *tag,
 			      const void *ubuf, uint32_t len);
 
-psm_error_t ips_proto_mq_isend(psm_mq_t mq, psm_epaddr_t epaddr,
-			       uint32_t flags, psm_mq_tag_t *tag,
+psm2_error_t ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t epaddr,
+			       uint32_t flags, psm2_mq_tag_t *tag,
 			       const void *ubuf, uint32_t len, void *context,
-			       psm_mq_req_t *req_o);
+			       psm2_mq_req_t *req_o);
 
 int ips_proto_am(struct ips_recvhdrq_event *rcv_ev);
 
@@ -603,9 +603,9 @@ extern ips_packet_service_fn_t
 	ips_packet_service_routine[OPCODE_FUTURE_FROM-OPCODE_RESERVED];
 
 /* IBTA feature related functions (path record, sl2sc2vl etc.) */
-psm_error_t ips_ibta_init_sl2sc2vl_table(struct ips_proto *proto);
-psm_error_t ips_ibta_link_updown_event(struct ips_proto *proto);
-psm_error_t ips_ibta_init(struct ips_proto *proto);
-psm_error_t ips_ibta_fini(struct ips_proto *proto);
+psm2_error_t ips_ibta_init_sl2sc2vl_table(struct ips_proto *proto);
+psm2_error_t ips_ibta_link_updown_event(struct ips_proto *proto);
+psm2_error_t ips_ibta_init(struct ips_proto *proto);
+psm2_error_t ips_ibta_fini(struct ips_proto *proto);
 
 #endif /* _IPS_PROTO_H */

@@ -109,21 +109,21 @@ PSMI_ALWAYS_INLINE(int ips_tf_available(struct ips_tf *tf))
 	return tf->tf_ctrl->tf_num_avail;
 }
 
-psm_error_t ips_tf_init(struct ips_protoexp *protoexp,
+psm2_error_t ips_tf_init(struct ips_protoexp *protoexp,
 			const psmi_context_t *context,
 			struct ips_tf *tfc,
 			ips_tf_avail_cb_fn_t cb);
-psm_error_t ips_tf_fini(struct ips_tf *tfc);
+psm2_error_t ips_tf_fini(struct ips_tf *tfc);
 
 /* Allocate a tidflow */
-psm_error_t ips_tf_allocate(struct ips_tf *tfc,
+psm2_error_t ips_tf_allocate(struct ips_tf *tfc,
 			struct ips_tid_recv_desc **tidrecvc);
 
 /* Deallocate a tidflow */
-psm_error_t ips_tf_deallocate(struct ips_tf *tfc, uint32_t tf_idx);
+psm2_error_t ips_tf_deallocate(struct ips_tf *tfc, uint32_t tf_idx);
 
 /* Allocate a generation for a flow */
-psm_error_t ips_tfgen_allocate(struct ips_tf *tfc,
+psm2_error_t ips_tfgen_allocate(struct ips_tf *tfc,
 			uint32_t tf_idx, uint32_t *tfgen);
 
 #endif

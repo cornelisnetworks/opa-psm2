@@ -70,9 +70,9 @@ struct ips_recvq_params {
  * Tables to map eager indexes into their buffer addresses
  *
  * If function returns NULL, no memory has been allocated and the error handler
- * has been executed on 'ep' and hence assume status PSM_NO_MEMORY.
+ * has been executed on 'ep' and hence assume status PSM2_NO_MEMORY.
  */
-void **ips_recvq_egrbuf_table_alloc(psm_ep_t ep,
+void **ips_recvq_egrbuf_table_alloc(psm2_ep_t ep,
 				    void *base, uint32_t bufnum,
 				    uint32_t bufsize);
 void ips_recvq_egrbuf_table_free(void **buftable);

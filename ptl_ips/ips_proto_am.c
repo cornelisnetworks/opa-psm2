@@ -88,12 +88,12 @@ static struct {
 static mpool_t ips_am_msg_pool;
 
 
-psm_error_t
+psm2_error_t
 ips_proto_am_init(struct ips_proto *proto,
 		  int num_of_send_bufs, int num_of_send_desc,
 		  uint32_t imm_size, struct ips_proto_am *proto_am)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	int send_buf_size = proto->scb_bufsize;
 
 	proto_am->proto = proto;
@@ -105,7 +105,7 @@ ips_proto_am_init(struct ips_proto *proto,
 		ips_am_outoforder_q.head.next = NULL;
 		ips_am_outoforder_q.tail = &ips_am_outoforder_q.head;
 
-		psmi_getenv("PSM_AM_MAX_OOO_MSGS",
+		psmi_getenv("PSM2_AM_MAX_OOO_MSGS",
 			"Maximum number of OOO Active Messages to queue before dropping.",
 			PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_UINT,
 			(union psmi_envvar_val)1024, &max_msgs);
@@ -123,26 +123,26 @@ fail:
 	return err;
 }
 
-psm_error_t ips_proto_am_fini(struct ips_proto_am *proto_am)
+psm2_error_t ips_proto_am_fini(struct ips_proto_am *proto_am)
 {
 	if (ips_am_msg_pool != NULL) {
 		psmi_mpool_destroy(ips_am_msg_pool);
 		ips_am_msg_pool = NULL;
 	}
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 /* Fill in AM capabilities parameters */
-psm_error_t
-ips_am_get_parameters(psm_ep_t ep, struct psm_am_parameters *parameters)
+psm2_error_t
+ips_am_get_parameters(psm2_ep_t ep, struct psm2_am_parameters *parameters)
 {
 	int max_nargs = min(1 << IPS_AM_HDR_NARGS_BITS, PSMI_AM_MAX_ARGS);
 	int max_payload = ep->context.ctrl->__hfi_piosize -
-	    ((max_nargs - IPS_AM_HDR_NARGS) * sizeof(psm_amarg_t));
+	    ((max_nargs - IPS_AM_HDR_NARGS) * sizeof(psm2_amarg_t));
 
 	if (parameters == NULL) {
-		return PSM_PARAM_ERR;
+		return PSM2_PARAM_ERR;
 	}
 
 	parameters->max_handlers = 1 << IPS_AM_HDR_HIDX_BITS;
@@ -150,17 +150,17 @@ ips_am_get_parameters(psm_ep_t ep, struct psm_am_parameters *parameters)
 	parameters->max_request_short = max_payload;
 	parameters->max_reply_short = max_payload;
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 static
-psm_error_t
+psm2_error_t
 am_short_reqrep(ips_scb_t *scb, struct ips_epaddr *ipsaddr,
-		psm_amarg_t *args, int nargs, uint8_t opcode,
+		psm2_amarg_t *args, int nargs, uint8_t opcode,
 		void *src, size_t len, int flags, int pad_bytes)
 {
 	int i, hdr_qwords = IPS_AM_HDR_NARGS;
-	struct ips_proto *proto = ((psm_epaddr_t)ipsaddr)->proto;
+	struct ips_proto *proto = ((psm2_epaddr_t)ipsaddr)->proto;
 	struct ips_flow *flow = &ipsaddr->flows[proto->msgflowid];
 
 	/* There are a limited number of bits for nargs in the header, making
@@ -188,7 +188,7 @@ am_short_reqrep(ips_scb_t *scb, struct ips_epaddr *ipsaddr,
 			 */
 			uintptr_t bufp = (uintptr_t) scb->payload;
 			size_t arg_payload_len =
-			    sizeof(psm_amarg_t) * (nargs - IPS_AM_HDR_NARGS);
+			    sizeof(psm2_amarg_t) * (nargs - IPS_AM_HDR_NARGS);
 
 			psmi_mq_mtucpy((void *)bufp,
 				       &args[IPS_AM_HDR_NARGS],
@@ -242,7 +242,7 @@ send_scb:
 	ips_proto_flow_enqueue(flow, scb);
 	flow->flush(flow, NULL);
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 static inline int
@@ -257,7 +257,7 @@ static inline
 void
 ips_am_scb_init(ips_scb_t *scb, uint8_t handler, int nargs,
 		int pad_bytes,
-		psm_am_completion_fn_t completion_fn, void *completion_ctxt)
+		psm2_am_completion_fn_t completion_fn, void *completion_ctxt)
 {
 	psmi_assert(pad_bytes < (1 << IPS_AM_HDR_LEN_BITS));
 
@@ -272,21 +272,21 @@ ips_am_scb_init(ips_scb_t *scb, uint8_t handler, int nargs,
 	return;
 }
 
-psm_error_t
-ips_am_short_request(psm_epaddr_t epaddr,
-		     psm_handler_t handler, psm_amarg_t *args, int nargs,
+psm2_error_t
+ips_am_short_request(psm2_epaddr_t epaddr,
+		     psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 		     void *src, size_t len, int flags,
-		     psm_am_completion_fn_t completion_fn,
+		     psm2_am_completion_fn_t completion_fn,
 		     void *completion_ctxt)
 {
 	struct ips_proto_am *proto_am = &epaddr->proto->proto_am;
-	psm_error_t err;
+	psm2_error_t err;
 	ips_scb_t *scb;
 	ips_epaddr_t *ipsaddr;
 	int pad_bytes = calculate_pad_bytes(len);
 	int payload_sz = (nargs << 3);
 
-	if_pt(!(flags & PSM_AM_FLAG_ASYNC))
+	if_pt(!(flags & PSM2_AM_FLAG_ASYNC))
 	    payload_sz += len;
 
 	if (payload_sz > (IPS_AM_HDR_NARGS << 3)) {
@@ -319,16 +319,16 @@ ips_am_short_request(psm_epaddr_t epaddr,
 
 	return am_short_reqrep(scb, ipsaddr, args,
 			       nargs,
-			       (flags & PSM_AM_FLAG_NOREPLY) ?
+			       (flags & PSM2_AM_FLAG_NOREPLY) ?
 			       OPCODE_AM_REQUEST_NOREPLY : OPCODE_AM_REQUEST,
 			       src, len, flags, pad_bytes);
 }
 
-psm_error_t
-ips_am_short_reply(psm_am_token_t tok,
-		   psm_handler_t handler, psm_amarg_t *args, int nargs,
+psm2_error_t
+ips_am_short_reply(psm2_am_token_t tok,
+		   psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 		   void *src, size_t len, int flags,
-		   psm_am_completion_fn_t completion_fn, void *completion_ctxt)
+		   psm2_am_completion_fn_t completion_fn, void *completion_ctxt)
 {
 	struct ips_am_token *token = (struct ips_am_token *)tok;
 	struct ips_proto_am *proto_am = token->proto_am;
@@ -339,7 +339,7 @@ ips_am_short_reply(psm_am_token_t tok,
 
 	if (!token->tok.can_reply) {
 		_HFI_ERROR("Invalid AM reply for request!");
-		return PSM_AM_INVALID_REPLY;
+		return PSM2_AM_INVALID_REPLY;
 	}
 
 	psmi_assert(ips_scbctrl_avail(&proto_am->scbc_reply));
@@ -349,7 +349,7 @@ ips_am_short_reply(psm_am_token_t tok,
 	} else {
 		int payload_sz = (nargs << 3);
 
-		payload_sz += (flags & PSM_AM_FLAG_ASYNC) ?
+		payload_sz += (flags & PSM2_AM_FLAG_ASYNC) ?
 			      0 : (len + pad_bytes);
 		scb_flags |= (payload_sz > (IPS_AM_HDR_NARGS << 3)) ?
 		    IPS_SCB_FLAG_ADD_BUFFER : 0;
@@ -364,7 +364,7 @@ ips_am_short_reply(psm_am_token_t tok,
 			completion_fn, completion_ctxt);
 	am_short_reqrep(scb, ipsaddr, args, nargs, OPCODE_AM_REPLY,
 			src, len, flags, pad_bytes);
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 /* Prepares and runs a handler from a receive event. */
@@ -376,11 +376,11 @@ ips_am_run_handler(const struct ips_message_header *p_hdr,
 {
 	struct ips_am_token token;
 	int nargs = p_hdr->amhdr_nargs;
-	psm_am_handler_fn_t hfn;
-	psm_amarg_t *args = (psm_amarg_t *)p_hdr->data;
+	psm2_am_handler_fn_t hfn;
+	psm2_amarg_t *args = (psm2_amarg_t *)p_hdr->data;
 
 	token.tok.flags = p_hdr->flags;
-	token.tok.epaddr_from = (psm_epaddr_t)&ipsaddr->msgctl->master_epaddr;
+	token.tok.epaddr_from = (psm2_epaddr_t)&ipsaddr->msgctl->master_epaddr;
 	token.tok.can_reply =
 		(_get_proto_hfi_opcode(p_hdr) == OPCODE_AM_REQUEST);
 	token.epaddr_rail = ipsaddr;
@@ -398,9 +398,9 @@ ips_am_run_handler(const struct ips_message_header *p_hdr,
 			/* Args are split across header and payload */
 			int payload_args_len =
 				(nargs - IPS_AM_HDR_NARGS) *
-				sizeof(psm_amarg_t);
+				sizeof(psm2_amarg_t);
 
-			args = alloca(PSMI_AM_MAX_ARGS * sizeof(psm_amarg_t));
+			args = alloca(PSMI_AM_MAX_ARGS * sizeof(psm2_amarg_t));
 
 			args[0].u64 = p_hdr->data[0].u64;
 			args[1].u64 = p_hdr->data[1].u64;
@@ -473,11 +473,13 @@ int ips_proto_am(struct ips_recvhdrq_event *rcv_ev)
 	struct ips_epaddr *ipsaddr = rcv_ev->ipsaddr;
 	struct ips_proto_am *proto_am = &rcv_ev->proto->proto_am;
 	ips_epaddr_flow_t flowid = ips_proto_flowid(p_hdr);
-	struct ips_flow *flow = &ipsaddr->flows[flowid];
+	struct ips_flow *flow;
 	struct ips_am_message *msg = NULL;
 	int ret = IPS_RECVHDRQ_CONTINUE;
 	enum ips_msg_order msgorder;
 
+	psmi_assert(flowid < EP_FLOW_LAST);
+	flow = &ipsaddr->flows[flowid];
 	/*
 	 * Based on AM request/reply traffic pattern, if we don't have a reply
 	 * scb slot then we can't process the request packet, we just silently
@@ -503,6 +505,7 @@ int ips_proto_am(struct ips_recvhdrq_event *rcv_ev)
 		uint64_t *payload = ips_recvhdrq_event_payload(rcv_ev);
 		uint32_t paylen = ips_recvhdrq_event_paylen(rcv_ev);
 
+		psmi_assert(paylen == 0 || payload);
 		msg = psmi_mpool_get(ips_am_msg_pool);
 		msg_payload = psmi_sysbuf_alloc(
 				ips_recvhdrq_event_paylen(rcv_ev));
@@ -532,6 +535,7 @@ int ips_proto_am(struct ips_recvhdrq_event *rcv_ev)
 		uint64_t *payload = ips_recvhdrq_event_payload(rcv_ev);
 		uint32_t paylen = ips_recvhdrq_event_paylen(rcv_ev);
 
+		psmi_assert(paylen == 0 || payload);
 		if (ips_am_run_handler(p_hdr, ipsaddr, proto_am,
 					payload, paylen))
 			ret = IPS_RECVHDRQ_BREAK;

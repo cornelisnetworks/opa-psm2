@@ -56,14 +56,14 @@
 #include <dlfcn.h>
 #include "psm_user.h"
 
-static int psmi_verno_major = PSM_VERNO_MAJOR;
-static int psmi_verno_minor = PSM_VERNO_MINOR;
-static int psmi_verno = PSMI_VERNO_MAKE(PSM_VERNO_MAJOR, PSM_VERNO_MINOR);
+static int psmi_verno_major = PSM2_VERNO_MAJOR;
+static int psmi_verno_minor = PSM2_VERNO_MINOR;
+static int psmi_verno = PSMI_VERNO_MAKE(PSM2_VERNO_MAJOR, PSM2_VERNO_MINOR);
 static int psmi_verno_client_val;
 
 #define PSMI_NOT_INITIALIZED    0
 #define PSMI_INITIALIZED        1
-#define PSMI_FINALIZED         -1	/* Prevent the user from calling psm_init
+#define PSMI_FINALIZED         -1	/* Prevent the user from calling psm2_init
 					 * once psm_finalize has been called. */
 static int psmi_isinit = PSMI_NOT_INITIALIZED;
 
@@ -90,7 +90,7 @@ pthread_t psmi_progress_lock_owner = PSMI_PLOCK_NO_OWNER;
  */
 int psmi_verno_isinteroperable(uint16_t verno)
 {
-	if (PSMI_VERNO_GET_MAJOR(verno) != PSM_VERNO_MAJOR)
+	if (PSMI_VERNO_GET_MAJOR(verno) != PSM2_VERNO_MAJOR)
 		return 0;
 
 	return 1;
@@ -103,52 +103,53 @@ int psmi_isinitialized()
 
 extern char psmi_hfi_revision[];
 
-psm_error_t __psm_init(int *major, int *minor)
+psm2_error_t __psm2_init(int *major, int *minor)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	union psmi_envvar_val env_tmask;
 
+	PSM2_LOG_MSG("entering");
 	if (psmi_isinit == PSMI_INITIALIZED)
 		goto update;
 
 	if (psmi_isinit == PSMI_FINALIZED) {
-		err = PSM_IS_FINALIZED;
+		err = PSM2_IS_FINALIZED;
 		goto fail;
 	}
 
 	if (major == NULL || minor == NULL) {
-		err = PSM_PARAM_ERR;
+		err = PSM2_PARAM_ERR;
 		goto fail;
 	}
 #ifdef PSM_DEBUG
-	if (!getenv("PSM_NO_WARN"))
+	if (!getenv("PSM2_NO_WARN"))
 		fprintf(stderr,
 			"!!! WARNING !!! You are running an internal-only PSM *DEBUG* build.\n");
 #endif
 
 #ifdef PSM_PROFILE
-	if (!getenv("PSM_NO_WARN"))
+	if (!getenv("PSM2_NO_WARN"))
 		fprintf(stderr,
 			"!!! WARNING !!! You are running an internal-only PSM *PROFILE* build.\n");
 #endif
 
 	/* Make sure we complain if fault injection is enabled */
-	if (getenv("PSM_FI") && !getenv("PSM_NO_WARN"))
+	if (getenv("PSM2_FI") && !getenv("PSM2_NO_WARN"))
 		fprintf(stderr,
 			"!!! WARNING !!! You are running with fault injection enabled!\n");
 
 	/* Make sure, as an internal check, that this version knows how to detect
 	 * cmopatibility with other library versions it may communicate with */
 	if (psmi_verno_isinteroperable(psmi_verno) != 1) {
-		err = psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,
+		err = psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 					"psmi_verno_isinteroperable() not updated for current version!");
 		goto fail;
 	}
 
 	/* The only way to not support a client is if the major number doesn't
 	 * match */
-	if (*major != PSM_VERNO_MAJOR && *major != PSM_VERNO_COMPAT_MAJOR) {
-		err = psmi_handle_error(NULL, PSM_INIT_BAD_API_VERSION,
+	if (*major != PSM2_VERNO_MAJOR && *major != PSM2_VERNO_COMPAT_MAJOR) {
+		err = psmi_handle_error(NULL, PSM2_INIT_BAD_API_VERSION,
 					"This library does not implement version %d.%d",
 					*major, *minor);
 		goto fail;
@@ -161,12 +162,14 @@ psm_error_t __psm_init(int *major, int *minor)
 
 	psmi_isinit = PSMI_INITIALIZED;
 	/* hfi_debug lives in libhfi.so */
-	psmi_getenv("PSM_TRACEMASK",
+	psmi_getenv("PSM2_TRACEMASK",
 		    "Mask flags for tracing",
 		    PSMI_ENVVAR_LEVEL_USER,
 		    PSMI_ENVVAR_TYPE_ULONG_FLAGS,
 		    (union psmi_envvar_val)hfi_debug, &env_tmask);
 	hfi_debug = (long)env_tmask.e_ulong;
+
+	_HFI_VDBG("PSM2 version: %d.%d, %s\n",PSM2_VERNO_MAJOR,PSM2_VERNO_MINOR, psmi_hfi_revision);
 
 	/* The "real thing" is done in hfi_proto.c as a constructor function, but
 	 * we getenv it here to report what we're doing with the setting */
@@ -187,10 +190,10 @@ psm_error_t __psm_init(int *major, int *minor)
 			     "with mallopt()\n");
 	}
 
-	if (getenv("PSM_IDENTIFY")) {
+	if (getenv("PSM2_IDENTIFY")) {
 		Dl_info info_psm, info_hfi;
 		_HFI_INFO("%s from %s:%s\n", psmi_hfi_revision,
-			  dladdr(psm_init, &info_psm) ? info_psm.dli_fname :
+			  dladdr(psm2_init, &info_psm) ? info_psm.dli_fname :
 			  "libpsm not available",
 			  dladdr(hfi_userinit, &info_hfi) ? info_hfi.dli_fname :
 			  "libhfi not available");
@@ -199,7 +202,7 @@ psm_error_t __psm_init(int *major, int *minor)
 	psmi_spin_init(&psmi_progress_lock);
 #endif
 
-	if (getenv("PSM_DIAGS")) {
+	if (getenv("PSM2_DIAGS")) {
 		_HFI_INFO("Running diags...\n");
 		psmi_diags();
 	}
@@ -208,7 +211,7 @@ psm_error_t __psm_init(int *major, int *minor)
 
 	/* Initialize the unexpected system buffer allocator */
 	err = psmi_sysbuf_init();
-	if (err != PSM_OK)
+	if (err != PSM2_OK)
 		goto fail;
 
 	psmi_epid_init();
@@ -217,23 +220,26 @@ update:
 	*major = (int)psmi_verno_major;
 	*minor = (int)psmi_verno_minor;
 fail:
+	PSM2_LOG_MSG("leaving");
 	return err;
 }
-PSMI_API_DECL(psm_init)
+PSMI_API_DECL(psm2_init)
 
-psm_error_t __psm_finalize(void)
+psm2_error_t __psm2_finalize(void)
 {
 	struct psmi_eptab_iterator itor;
 	char *hostname;
-	psm_ep_t ep;
-	extern psm_ep_t psmi_opened_endpoint;	/* in psm_endpoint.c */
+	psm2_ep_t ep;
+	extern psm2_ep_t psmi_opened_endpoint;	/* in psm_endpoint.c */
+
+	PSM2_LOG_MSG("entering");
 
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
 
 	ep = psmi_opened_endpoint;
 	while (ep != NULL) {
 		psmi_opened_endpoint = ep->user_ep_next;
-		psm_ep_close(ep, PSM_EP_CLOSE_GRACEFUL,
+		psm2_ep_close(ep, PSM2_EP_CLOSE_GRACEFUL,
 			     2 * PSMI_MIN_EP_CLOSE_TIMEOUT);
 		ep = psmi_opened_endpoint;
 	}
@@ -254,25 +260,28 @@ psm_error_t __psm_finalize(void)
 	psmi_sysbuf_fini();
 
 	psmi_isinit = PSMI_FINALIZED;
-	return PSM_OK;
+	PSM2_LOG_MSG("leaving");
+	return PSM2_OK;
 }
-PSMI_API_DECL(psm_finalize)
+PSMI_API_DECL(psm2_finalize)
 
 /*
  * Function exposed in >= 1.05
  */
-psm_error_t
-__psm_map_nid_hostname(int num, const uint64_t *nids, const char **hostnames)
+psm2_error_t
+__psm2_map_nid_hostname(int num, const uint64_t *nids, const char **hostnames)
 {
 	int i;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
+
+	PSM2_LOG_MSG("entering");
 
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
 
 	PSMI_PLOCK();
 
 	if (nids == NULL || hostnames == NULL) {
-		err = PSM_PARAM_ERR;
+		err = PSM2_PARAM_ERR;
 		goto fail;
 	}
 
@@ -283,112 +292,147 @@ __psm_map_nid_hostname(int num, const uint64_t *nids, const char **hostnames)
 
 fail:
 	PSMI_PUNLOCK();
+	PSM2_LOG_MSG("leaving");
 	return err;
 }
-PSMI_API_DECL(psm_map_nid_hostname)
+PSMI_API_DECL(psm2_map_nid_hostname)
 
-void __psm_epaddr_setlabel(psm_epaddr_t epaddr, char const *epaddr_label)
+void __psm2_epaddr_setlabel(psm2_epaddr_t epaddr, char const *epaddr_label)
 {
+	PSM2_LOG_MSG("entering");
+	PSM2_LOG_MSG("leaving");
 	return;			/* ignore this function */
 }
-PSMI_API_DECL(psm_epaddr_setlabel)
+PSMI_API_DECL(psm2_epaddr_setlabel)
 
-void __psm_epaddr_setctxt(psm_epaddr_t epaddr, void *ctxt)
+void __psm2_epaddr_setctxt(psm2_epaddr_t epaddr, void *ctxt)
 {
 
 	/* Eventually deprecate this API to use set/get opt as this is unsafe. */
-	psm_setopt(PSM_COMPONENT_CORE, (const void *)epaddr,
-		   PSM_CORE_OPT_EP_CTXT, (const void *)ctxt, sizeof(void *));
-
+	PSM2_LOG_MSG("entering");
+	psm2_setopt(PSM2_COMPONENT_CORE, (const void *)epaddr,
+		   PSM2_CORE_OPT_EP_CTXT, (const void *)ctxt, sizeof(void *));
+	PSM2_LOG_MSG("leaving");
 }
-PSMI_API_DECL(psm_epaddr_setctxt)
+PSMI_API_DECL(psm2_epaddr_setctxt)
 
-void *__psm_epaddr_getctxt(psm_epaddr_t epaddr)
+void *__psm2_epaddr_getctxt(psm2_epaddr_t epaddr)
 {
-	psm_error_t err;
+	psm2_error_t err;
 	uint64_t optlen = sizeof(void *);
 	void *result = NULL;
 
+	PSM2_LOG_MSG("entering");
 	/* Evetually deprecate this API to use set/get opt as this is unsafe. */
-	err = psm_getopt(PSM_COMPONENT_CORE, (const void *)epaddr,
-			 PSM_CORE_OPT_EP_CTXT, (void *)&result, &optlen);
+	err = psm2_getopt(PSM2_COMPONENT_CORE, (const void *)epaddr,
+			 PSM2_CORE_OPT_EP_CTXT, (void *)&result, &optlen);
 
-	if (err == PSM_OK)
+	PSM2_LOG_MSG("leaving");
+
+	if (err == PSM2_OK)
 		return result;
 	else
 		return NULL;
 }
-PSMI_API_DECL(psm_epaddr_getctxt)
+PSMI_API_DECL(psm2_epaddr_getctxt)
 
-psm_error_t
-__psm_setopt(psm_component_t component, const void *component_obj,
+psm2_error_t
+__psm2_setopt(psm2_component_t component, const void *component_obj,
 	     int optname, const void *optval, uint64_t optlen)
 {
+	psm2_error_t rv;
+	PSM2_LOG_MSG("entering");
 	switch (component) {
-	case PSM_COMPONENT_CORE:
-		return psmi_core_setopt(component_obj, optname, optval, optlen);
+	case PSM2_COMPONENT_CORE:
+		rv = psmi_core_setopt(component_obj, optname, optval, optlen);
+		PSM2_LOG_MSG("leaving");
+		return rv;
 		break;
-	case PSM_COMPONENT_MQ:
+	case PSM2_COMPONENT_MQ:
 		/* Use the deprecated MQ set/get opt for now which does not use optlen */
-		return psm_mq_setopt((psm_mq_t) component_obj, optname, optval);
+		rv = psm2_mq_setopt((psm2_mq_t) component_obj, optname, optval);
+		PSM2_LOG_MSG("leaving");
+		return rv;
 		break;
-	case PSM_COMPONENT_AM:
+	case PSM2_COMPONENT_AM:
 		/* Hand off to active messages */
-		return psmi_am_setopt(component_obj, optname, optval, optlen);
+		rv = psmi_am_setopt(component_obj, optname, optval, optlen);
+		PSM2_LOG_MSG("leaving");
+		return rv;
 		break;
-	case PSM_COMPONENT_IB:
+	case PSM2_COMPONENT_IB:
 		/* Hand off to IPS ptl to set option */
-		return psmi_ptl_ips.setopt(component_obj, optname, optval,
+		rv = psmi_ptl_ips.setopt(component_obj, optname, optval,
 					   optlen);
+		PSM2_LOG_MSG("leaving");
+		return rv;
 		break;
 	}
 
 	/* Unrecognized/unknown component */
-	return psmi_handle_error(NULL, PSM_PARAM_ERR, "Unknown component %u",
+	rv = psmi_handle_error(NULL, PSM2_PARAM_ERR, "Unknown component %u",
 				 component);
-
+	PSM2_LOG_MSG("leaving");
+	return rv;
 }
-PSMI_API_DECL(psm_setopt);
+PSMI_API_DECL(psm2_setopt);
 
-psm_error_t
-__psm_getopt(psm_component_t component, const void *component_obj,
+psm2_error_t
+__psm2_getopt(psm2_component_t component, const void *component_obj,
 	     int optname, void *optval, uint64_t *optlen)
 {
+	psm2_error_t rv;
+
+	PSM2_LOG_MSG("entering");
 	switch (component) {
-	case PSM_COMPONENT_CORE:
-		return psmi_core_getopt(component_obj, optname, optval, optlen);
+	case PSM2_COMPONENT_CORE:
+		rv = psmi_core_getopt(component_obj, optname, optval, optlen);
+		PSM2_LOG_MSG("leaving");
+		return rv;
 		break;
-	case PSM_COMPONENT_MQ:
+	case PSM2_COMPONENT_MQ:
 		/* Use the deprecated MQ set/get opt for now which does not use optlen */
-		return psm_mq_getopt((psm_mq_t) component_obj, optname, optval);
+		rv = psm2_mq_getopt((psm2_mq_t) component_obj, optname, optval);
+		PSM2_LOG_MSG("leaving");
+		return rv;
 		break;
-	case PSM_COMPONENT_AM:
+	case PSM2_COMPONENT_AM:
 		/* Hand off to active messages */
-		return psmi_am_getopt(component_obj, optname, optval, optlen);
+		rv = psmi_am_getopt(component_obj, optname, optval, optlen);
+		PSM2_LOG_MSG("leaving");
+		return rv;
 		break;
-	case PSM_COMPONENT_IB:
+	case PSM2_COMPONENT_IB:
 		/* Hand off to IPS ptl to set option */
-		return psmi_ptl_ips.getopt(component_obj, optname, optval,
+		rv = psmi_ptl_ips.getopt(component_obj, optname, optval,
 					   optlen);
+		PSM2_LOG_MSG("leaving");
+		return rv;
 		break;
 	}
 
 	/* Unrecognized/unknown component */
-	return psmi_handle_error(NULL, PSM_PARAM_ERR, "Unknown component %u",
+	rv = psmi_handle_error(NULL, PSM2_PARAM_ERR, "Unknown component %u",
 				 component);
+	PSM2_LOG_MSG("leaving");
+	return rv;
 }
-PSMI_API_DECL(psm_getopt);
+PSMI_API_DECL(psm2_getopt);
 
-psm_error_t __psmi_poll_noop(ptl_t *ptl, int replyonly)
+psm2_error_t __psmi_poll_noop(ptl_t *ptl, int replyonly)
 {
-	return PSM_OK_NO_PROGRESS;
+	PSM2_LOG_MSG("entering");
+	PSM2_LOG_MSG("leaving");
+	return PSM2_OK_NO_PROGRESS;
 }
 PSMI_API_DECL(psmi_poll_noop)
 
-psm_error_t __psm_poll(psm_ep_t ep)
+psm2_error_t __psm2_poll(psm2_ep_t ep)
 {
-	psm_error_t err1 = PSM_OK, err2 = PSM_OK;
-	psm_ep_t tmp;
+	psm2_error_t err1 = PSM2_OK, err2 = PSM2_OK;
+	psm2_ep_t tmp;
+
+	PSM2_LOG_MSG("entering");
 
 	PSMI_ASSERT_INITIALIZED();
 
@@ -397,52 +441,60 @@ psm_error_t __psm_poll(psm_ep_t ep)
 	tmp = ep;
 	do {
 		err1 = ep->ptl_amsh.ep_poll(ep->ptl_amsh.ptl, 0);	/* poll reqs & reps */
-		if (err1 > PSM_OK_NO_PROGRESS) {	/* some error unrelated to polling */
+		if (err1 > PSM2_OK_NO_PROGRESS) {	/* some error unrelated to polling */
 			PSMI_PUNLOCK();
+			PSM2_LOG_MSG("leaving");
 			return err1;
 		}
 
 		err2 = ep->ptl_ips.ep_poll(ep->ptl_ips.ptl, 0);	/* get into ips_do_work */
-		if (err2 > PSM_OK_NO_PROGRESS) {	/* some error unrelated to polling */
+		if (err2 > PSM2_OK_NO_PROGRESS) {	/* some error unrelated to polling */
 			PSMI_PUNLOCK();
+			PSM2_LOG_MSG("leaving");
 			return err2;
 		}
 		ep = ep->mctxt_next;
 	} while (ep != tmp);
 
 	/* This is valid because..
-	 * PSM_OK & PSM_OK_NO_PROGRESS => PSM_OK
-	 * PSM_OK & PSM_OK => PSM_OK
-	 * PSM_OK_NO_PROGRESS & PSM_OK => PSM_OK
-	 * PSM_OK_NO_PROGRESS & PSM_OK_NO_PROGRESS => PSM_OK_NO_PROGRESS */
+	 * PSM2_OK & PSM2_OK_NO_PROGRESS => PSM2_OK
+	 * PSM2_OK & PSM2_OK => PSM2_OK
+	 * PSM2_OK_NO_PROGRESS & PSM2_OK => PSM2_OK
+	 * PSM2_OK_NO_PROGRESS & PSM2_OK_NO_PROGRESS => PSM2_OK_NO_PROGRESS */
 	PSMI_PUNLOCK();
+	PSM2_LOG_MSG("leaving");
 	return (err1 & err2);
 }
-PSMI_API_DECL(psm_poll)
+PSMI_API_DECL(psm2_poll)
 
-psm_error_t __psmi_poll_internal(psm_ep_t ep, int poll_amsh)
+psm2_error_t __psmi_poll_internal(psm2_ep_t ep, int poll_amsh)
 {
-	psm_error_t err1 = PSM_OK_NO_PROGRESS;
-	psm_error_t err2;
-	psm_ep_t tmp;
+	psm2_error_t err1 = PSM2_OK_NO_PROGRESS;
+	psm2_error_t err2;
+	psm2_ep_t tmp;
 
+	PSM2_LOG_MSG("entering");
 	PSMI_PLOCK_ASSERT();
 
 	tmp = ep;
 	do {
 		if (poll_amsh) {
 			err1 = ep->ptl_amsh.ep_poll(ep->ptl_amsh.ptl, 0);	/* poll reqs & reps */
-			if (err1 > PSM_OK_NO_PROGRESS)	/* some error unrelated to polling */
+			if (err1 > PSM2_OK_NO_PROGRESS) { /* some error unrelated to polling */
+				PSM2_LOG_MSG("leaving");
 				return err1;
+			}
 		}
 
 		err2 = ep->ptl_ips.ep_poll(ep->ptl_ips.ptl, 0);	/* get into ips_do_work */
-		if (err2 > PSM_OK_NO_PROGRESS)	/* some error unrelated to polling */
+		if (err2 > PSM2_OK_NO_PROGRESS) { /* some error unrelated to polling */
+			PSM2_LOG_MSG("leaving");
 			return err2;
+		}
 
 		ep = ep->mctxt_next;
 	} while (ep != tmp);
-
+	PSM2_LOG_MSG("leaving");
 	return (err1 & err2);
 }
 PSMI_API_DECL(psmi_poll_internal)

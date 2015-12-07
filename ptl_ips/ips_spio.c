@@ -77,17 +77,19 @@ static void spio_report_stall(struct ips_spio *ctrl,
 
 static void spio_handle_stall(struct ips_spio *ctrl, uint64_t send_failures);
 
-static psm_error_t spio_reset_hfi(struct ips_spio *ctrl);
-static psm_error_t spio_reset_hfi_shared(struct ips_spio *ctrl);
-static psm_error_t spio_credit_return_update(struct ips_spio *ctrl);
-static psm_error_t spio_credit_return_update_shared(struct ips_spio *ctrl);
+static psm2_error_t spio_reset_hfi(struct ips_spio *ctrl);
+static psm2_error_t spio_reset_hfi_shared(struct ips_spio *ctrl);
+static psm2_error_t spio_credit_return_update(struct ips_spio *ctrl);
+static psm2_error_t spio_credit_return_update_shared(struct ips_spio *ctrl);
 
-psm_error_t
+psm2_error_t
 ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 	      struct ips_spio *ctrl)
 {
 	const struct hfi1_base_info *base_info = &context->ctrl->base_info;
 	const struct hfi1_ctxt_info *ctxt_info = &context->ctrl->ctxt_info;
+	cpuid_t id;
+	int i;
 
 	ctrl->ptl = ptl;
 	ctrl->context = context;
@@ -121,7 +123,7 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 		    psmi_calloc(context->ep, UNDEFINED, 1,
 				sizeof(struct ips_spio_ctrl));
 		if (ctrl->spio_ctrl == NULL) {
-			return PSM_NO_MEMORY;
+			return PSM2_NO_MEMORY;
 		}
 
 		ctrl->spio_reset_hfi = spio_reset_hfi;
@@ -157,17 +159,74 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 			    (ctrl->spio_ctrl->spio_credits.value) == 0);
 	}
 
+	/*
+	 * Setup the PIO block copying routine.
+	 */
+	ctrl->spio_blockcpy_selected = NULL;
+	ctrl->spio_blockcpy_routines[0] = hfi_pio_blockcpy_64;
+
+	ctrl->spio_blockcpy_routines[1] = NULL;
+#ifdef __SSE2__
+	ctrl->spio_blockcpy_routines[1] = hfi_pio_blockcpy_128;
+#endif
+	ctrl->spio_blockcpy_routines[2] = NULL;
+#ifdef __AVX2__
+	ctrl->spio_blockcpy_routines[2] = hfi_pio_blockcpy_256;
+#endif
+	ctrl->spio_blockcpy_routines[3] = NULL;
+#ifdef __AVX512F__
+	ctrl->spio_blockcpy_routines[3] = hfi_pio_blockcpy_512;
+#endif
+
+	get_cpuid(0x7, 0, &id);
+	if (id.ebx & (1<<AVX512F_BIT)) {
+		/* avx512f supported */
+		for (i = 3; i>= 0; i--) {
+			if (ctrl->spio_blockcpy_routines[i]) {
+				ctrl->spio_blockcpy_selected =
+					ctrl->spio_blockcpy_routines[i];
+				break;
+			}
+		}
+	} else if (id.ebx & (1<<AVX2_BIT)) {
+		/* 32B copying supported */
+		for (i = 2; i >=0; i--) {
+			if (ctrl->spio_blockcpy_routines[i]) {
+			    ctrl->spio_blockcpy_selected =
+				ctrl->spio_blockcpy_routines[i];
+			    break;
+			}
+		}
+	} else {
+		get_cpuid(0x1, 0, &id);
+		if (id.edx & (1<<SSE2_BIT)) {
+			/* 16B copying supported */
+			for (i = 1; i >=0; i--) {
+				if (ctrl->spio_blockcpy_routines[i]) {
+				    ctrl->spio_blockcpy_selected =
+					ctrl->spio_blockcpy_routines[i];
+				    break;
+				}
+			}
+		} else {
+			/* use 8B copying */
+			ctrl->spio_blockcpy_selected =
+					ctrl->spio_blockcpy_routines[0];
+		}
+	}
+	psmi_assert(ctrl->spio_blockcpy_selected != NULL);
+
 	_HFI_PRDBG("ips_spio_init() done\n");
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
-psm_error_t ips_spio_fini(struct ips_spio *ctrl)
+psm2_error_t ips_spio_fini(struct ips_spio *ctrl)
 {
 	spio_report_stall(ctrl, get_cycles(), 0ULL);
 	if (!ctrl->context->spio_ctrl)
 		psmi_free((void *)ctrl->spio_ctrl);
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 static
@@ -189,7 +248,7 @@ spio_report_stall(struct ips_spio *ctrl, uint64_t t_cyc_now,
 		off = snprintf(buf, sizeof(buf) - 1,
 			       "PIO Send context %d with total blocks %d , available blocks %d, "
 			       "fill counter %d, free counter %d ",
-			       (int)psm_epid_context(ctrl->context->epid),
+			       (int)psm2_epid_context(ctrl->context->epid),
 			       ctrl->spio_total_blocks,
 			       ctrl->spio_ctrl->spio_available_blocks,
 			       ctrl->spio_ctrl->spio_fill_counter,
@@ -247,7 +306,7 @@ static void spio_handle_stall(struct ips_spio *ctrl, uint64_t send_failures)
 
 	if (ctrl->spio_next_stall_warning <= t_cyc_now) {
 		/* If context status is ok (i.e. no cables pulled or anything) */
-		if (psmi_context_check_status(ctrl->context) == PSM_OK)
+		if (psmi_context_check_status(ctrl->context) == PSM2_OK)
 			spio_report_stall(ctrl, t_cyc_now, send_failures);
 		ctrl->spio_next_stall_warning =
 		    get_cycles() + SPIO_STALL_WARNING_INTERVAL;
@@ -275,7 +334,7 @@ static void spio_reset_context(struct ips_spio *ctrl)
 	/* if there are too many reset, teardown process */
 	ctrl->spio_ctrl->spio_reset_count++;
 	if (ctrl->spio_ctrl->spio_reset_count > IPS_CTXT_RESET_MAX)
-		psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 			"Too many send context reset, teardown...\n");
 
 	/*
@@ -292,7 +351,7 @@ static void spio_reset_context(struct ips_spio *ctrl)
 	 */
 	ips_wmb();
 	if (hfi_reset_context(ctrl->context->ctrl))
-		psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 			"Send context reset failed: %d.\n", errno);
 
 	/* Reset spio shared control struct. */
@@ -344,14 +403,14 @@ static void spio_reset_hfi_internal(struct ips_spio *ctrl)
 		ips_proto_dma_completion_update(proto);
 }
 
-static psm_error_t spio_reset_hfi(struct ips_spio *ctrl)
+static psm2_error_t spio_reset_hfi(struct ips_spio *ctrl)
 {
 	/* Drain receive header queue before reset hfi, we use
 	 * the main progression loop to do this so we return from
 	 * here.
 	 */
 	if (!ips_recvhdrq_isempty(&ctrl->ptl->recvq))
-		return PSM_OK_NO_PROGRESS;
+		return PSM2_OK_NO_PROGRESS;
 
 	/* do the real reset work:
 	 * 1. reset receive header queue;
@@ -360,7 +419,7 @@ static psm_error_t spio_reset_hfi(struct ips_spio *ctrl)
 	 */
 	spio_reset_hfi_internal(ctrl);
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 /*
@@ -372,7 +431,7 @@ static psm_error_t spio_reset_hfi(struct ips_spio *ctrl)
  * it just saves the shared count to local count and return. All the
  * operation are locked by spio_ctrl_lock.
  */
-static psm_error_t spio_reset_hfi_shared(struct ips_spio *ctrl)
+static psm2_error_t spio_reset_hfi_shared(struct ips_spio *ctrl)
 {
 	volatile struct ips_spio_ctrl *spio_ctrl = ctrl->spio_ctrl;
 
@@ -381,7 +440,7 @@ static psm_error_t spio_reset_hfi_shared(struct ips_spio *ctrl)
 	 * here. We don't reset software receive header queue.
 	 */
 	if (!ips_recvhdrq_isempty(&ctrl->ptl->recvq))
-		return PSM_OK_NO_PROGRESS;
+		return PSM2_OK_NO_PROGRESS;
 
 	pthread_spin_lock(&spio_ctrl->spio_ctrl_lock);
 
@@ -408,15 +467,15 @@ static psm_error_t spio_reset_hfi_shared(struct ips_spio *ctrl)
 
 	pthread_spin_unlock(&spio_ctrl->spio_ctrl_lock);
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 /*
  * return value:
- * PSM_OK: new credits updated;
- * PSM_OK_NO_PROGRESS: no new credits;
+ * PSM2_OK: new credits updated;
+ * PSM2_OK_NO_PROGRESS: no new credits;
  */
-static psm_error_t
+static psm2_error_t
 spio_credit_return_update(struct ips_spio *ctrl)
 {
 	uint64_t credit_return;
@@ -424,7 +483,7 @@ spio_credit_return_update(struct ips_spio *ctrl)
 	credit_return = *ctrl->spio_credits_addr;
 	/* Update available blocks based on fill counter and free counter */
 	if (ctrl->spio_ctrl->spio_credits.credit_return == credit_return)
-		return PSM_OK_NO_PROGRESS;
+		return PSM2_OK_NO_PROGRESS;
 
 	ctrl->spio_ctrl->spio_credits.credit_return = credit_return;
 
@@ -454,15 +513,15 @@ spio_credit_return_update(struct ips_spio *ctrl)
 		ctrl->spio_ctrl->spio_reset_count = 0;
 	}
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 /*
  * return value:
- * PSM_OK: new credits updated;
- * PSM_OK_NO_PROGRESS: no new credits;
+ * PSM2_OK: new credits updated;
+ * PSM2_OK_NO_PROGRESS: no new credits;
  */
-static psm_error_t
+static psm2_error_t
 spio_credit_return_update_shared(struct ips_spio *ctrl)
 {
 	uint64_t credit_return;
@@ -473,7 +532,7 @@ spio_credit_return_update_shared(struct ips_spio *ctrl)
 	/* Update available blocks based on fill counter and free counter */
 	if (ctrl->spio_ctrl->spio_credits.credit_return == credit_return) {
 		pthread_spin_unlock(&ctrl->spio_ctrl->spio_ctrl_lock);
-		return PSM_OK_NO_PROGRESS;
+		return PSM2_OK_NO_PROGRESS;
 	}
 
 	ctrl->spio_ctrl->spio_credits.credit_return = credit_return;
@@ -520,18 +579,19 @@ spio_credit_return_update_shared(struct ips_spio *ctrl)
 
 	pthread_spin_unlock(&ctrl->spio_ctrl->spio_ctrl_lock);
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 /*
  * Check and process events
  * return value:
- *  PSM_OK: normal events processing;
- *  PSM_OK_NO_PROGRESS: no event is processed;
+ *  PSM2_OK: normal events processing;
+ *  PSM2_OK_NO_PROGRESS: no event is processed;
  */
-psm_error_t
-ips_spio_process_events(struct ips_spio *ctrl)
+psm2_error_t
+ips_spio_process_events(const struct ptl *ptl)
 {
+	struct ips_spio *ctrl = ptl->proto.spioc;
 	__u64 event_mask;
 
 	/*
@@ -541,14 +601,26 @@ ips_spio_process_events(struct ips_spio *ctrl)
 	if_pf(*ctrl->spio_event == 0)
 		return ctrl->spio_credit_return_update(ctrl);
 
+	/*
+	 * Process mmu invalidation event, this will invalidate
+	 * all caching items removed by mmu notifier.
+	 */
+	if ((*ctrl->spio_event) & HFI1_EVENT_TID_MMU_NOTIFY) {
+		/*
+		 * driver will clear the event bit before return,
+		 * PSM does not need to ack the event.
+		 */
+		return ips_tidcache_invalidation(&ptl->proto.protoexp->tidc);
+	}
+
 	/* Get event mask for PSM to process */
 	event_mask = (uint64_t) *ctrl->spio_event;
 
 	/* Check if HFI is frozen */
 	if (event_mask & HFI1_EVENT_FROZEN) {
 		/* if no progress, return and retry */
-		if (ctrl->spio_reset_hfi(ctrl) != PSM_OK)
-			return PSM_OK_NO_PROGRESS;
+		if (ctrl->spio_reset_hfi(ctrl) != PSM2_OK)
+			return PSM2_OK_NO_PROGRESS;
 	}
 
 	/* First ack the driver the receipt of the events */
@@ -556,19 +628,19 @@ ips_spio_process_events(struct ips_spio *ctrl)
 		  (uint64_t) event_mask);
 	hfi_event_ack(ctrl->context->ctrl, event_mask);
 
-	if (event_mask & HFI1_EVENT_LINKDOWN_BIT) {
+	if (event_mask & HFI1_EVENT_LINKDOWN) {
 		/* A link down event can clear the LMC and SL2VL
 		 * change as those events are implicitly handled
 		 * in the link up/down event handler.
 		 */
 		event_mask &=
-			    ~(HFI1_EVENT_LMC_CHANGE_BIT |
-				HFI1_EVENT_SL2VL_CHANGE_BIT);
+			    ~(HFI1_EVENT_LMC_CHANGE |
+				HFI1_EVENT_SL2VL_CHANGE);
 		ips_ibta_link_updown_event(&ctrl->ptl->proto);
 		_HFI_VDBG("Link down detected.\n");
 	}
 
-	if (event_mask & HFI1_EVENT_LID_CHANGE_BIT) {
+	if (event_mask & HFI1_EVENT_LID_CHANGE) {
 		/* Display a warning that LID change has occured during
 		 * the run. This is not supported in the current
 		 * implementation and in general is bad for the SM to
@@ -582,15 +654,15 @@ ips_spio_process_events(struct ips_spio *ctrl)
 					   ctrl->portnum));
 	}
 
-	if (event_mask & HFI1_EVENT_LMC_CHANGE_BIT)
+	if (event_mask & HFI1_EVENT_LMC_CHANGE)
 			_HFI_INFO("Fabric LMC changed.\n");
 
-	if (event_mask & HFI1_EVENT_SL2VL_CHANGE_BIT) {
+	if (event_mask & HFI1_EVENT_SL2VL_CHANGE) {
 		_HFI_INFO("SL2VL mapping changed for port.\n");
 		ips_ibta_init_sl2sc2vl_table(&ctrl->ptl->proto);
 	}
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 static void
@@ -606,14 +678,14 @@ spio_handle_resync(struct ips_spio *ctrl, uint64_t consecutive_send_failed)
  * This function attempts to write a packet to a PIO.
  *
  * Recoverable errors:
- * PSM_OK: Packet triggered through PIO.
- * PSM_EP_NO_RESOURCES: No PIO bufs available or cable pulled.
+ * PSM2_OK: Packet triggered through PIO.
+ * PSM2_EP_NO_RESOURCES: No PIO bufs available or cable pulled.
  *
  * Unrecoverable errors:
- * PSM_EP_NO_NETWORK: No network, no lid, ...
- * PSM_EP_DEVICE_FAILURE: Chip failures, rxe/txe parity, etc.
+ * PSM2_EP_NO_NETWORK: No network, no lid, ...
+ * PSM2_EP_DEVICE_FAILURE: Chip failures, rxe/txe parity, etc.
  */
-psm_error_t
+psm2_error_t
 ips_spio_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 			struct hfi_pbc *pbc, uint32_t *payload,
 			uint32_t length, uint32_t isCtrlMsg,
@@ -623,7 +695,7 @@ ips_spio_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 	volatile struct ips_spio_ctrl *spio_ctrl = ctrl->spio_ctrl;
 	volatile uint64_t *pioaddr;
 	uint32_t paylen, nblks;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	int do_lock = (ctrl->runtime_flags & PSMI_RUNTIME_RCVTHREAD);
 
 	if (do_lock)
@@ -637,7 +709,7 @@ ips_spio_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 		if (psmi_faultinj_is_fault(fi_lost)) {
 			if (do_lock)
 				pthread_spin_unlock(&ctrl->spio_lock);
-			return PSM_OK;
+			return PSM2_OK;
 		} else if (psmi_faultinj_is_fault(fi_busy))
 			goto fi_busy;
 		/* else fall through normal processing path, i.e. no faults */
@@ -655,7 +727,7 @@ ips_spio_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 fi_busy:
 			if ((err =
 			     psmi_context_check_status(ctrl->context)) ==
-			    PSM_OK) {
+			    PSM2_OK) {
 				if (0 ==
 				    (++ctrl->
 				     spio_consecutive_failures &
@@ -663,12 +735,12 @@ fi_busy:
 					spio_handle_resync(ctrl,
 							   ctrl->
 							   spio_consecutive_failures);
-				err = PSM_EP_NO_RESOURCES;
+				err = PSM2_EP_NO_RESOURCES;
 			}
 			/* If cable is pulled, we don't count it as a consecutive failure,
 			 * we just make it as though no send pio was available */
-			else if (err == PSM_OK_NO_PROGRESS)
-				err = PSM_EP_NO_RESOURCES;
+			else if (err == PSM2_OK_NO_PROGRESS)
+				err = PSM2_EP_NO_RESOURCES;
 			/* else something bad happened in check_status */
 			if (do_lock)
 				pthread_spin_unlock(&ctrl->spio_lock);
@@ -687,7 +759,7 @@ fi_busy:
 
 			if (do_lock)
 				pthread_spin_unlock(&ctrl->spio_lock);
-			return PSM_EP_NO_RESOURCES;
+			return PSM2_EP_NO_RESOURCES;
 		}
 	}
 
@@ -743,7 +815,7 @@ fi_busy:
 	if (++ctrl->spio_block_index == ctrl->spio_total_blocks)
 		ctrl->spio_block_index = 0;
 
-	hfi_qwordcpy_safe(pioaddr, (uint64_t *) pbc, 8);
+	ctrl->spio_blockcpy_selected(pioaddr, (uint64_t *) pbc, 1);
 	_HFI_VDBG("pio qw write sop %p: 8\n", pioaddr);
 
 	/* Write to PIO: other blocks of payload */
@@ -754,26 +826,26 @@ fi_busy:
 
 		pioaddr = ctrl->spio_bufbase + ctrl->spio_block_index * 8;
 		if (blks2end >= blks2send) {
-			hfi_qwordcpy_safe(pioaddr,
-				(uint64_t *)payload, blks2send*8);
-			_HFI_VDBG("pio qw write %p: %d\n",
-					pioaddr, blks2send*8);
+			ctrl->spio_blockcpy_selected(pioaddr,
+				(uint64_t *)payload, blks2send);
+			_HFI_VDBG("pio blk write %p: %d\n",
+					pioaddr, blks2send);
 			ctrl->spio_block_index += blks2send;
 			if (ctrl->spio_block_index == ctrl->spio_total_blocks)
 				ctrl->spio_block_index = 0;
 			payload += blks2send*16;
 		} else {
-			hfi_qwordcpy_safe(pioaddr,
-				(uint64_t *)payload, blks2end*8);
-			_HFI_VDBG("pio qw write %p: %d\n",
-					pioaddr, blks2end*8);
+			ctrl->spio_blockcpy_selected(pioaddr,
+				(uint64_t *)payload, blks2end);
+			_HFI_VDBG("pio blk write %p: %d\n",
+					pioaddr, blks2end);
 			payload += blks2end*16;
 
 			pioaddr = ctrl->spio_bufbase;
-			hfi_qwordcpy_safe(pioaddr,
-				(uint64_t *)payload, (blks2send-blks2end)*8);
-			_HFI_VDBG("pio qw write %p: %d\n",
-					pioaddr, (blks2send-blks2end)*8);
+			ctrl->spio_blockcpy_selected(pioaddr,
+				(uint64_t *)payload, (blks2send-blks2end));
+			_HFI_VDBG("pio blk write %p: %d\n",
+					pioaddr, (blks2send-blks2end));
 			ctrl->spio_block_index = blks2send - blks2end;
 			payload += (blks2send-blks2end)*16;
 		}
@@ -846,5 +918,5 @@ fi_busy:
 		pthread_spin_unlock(&spio_ctrl->spio_ctrl_lock);
 	}
 
-	return PSM_OK;
+	return PSM2_OK;
 }				/* ips_spio_transfer_frame() */

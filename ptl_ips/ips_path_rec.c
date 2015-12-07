@@ -120,9 +120,9 @@ static void ips_gen_ipd_table(struct ips_proto *proto)
 	}
 }
 
-static psm_error_t ips_gen_cct_table(struct ips_proto *proto)
+static psm2_error_t ips_gen_cct_table(struct ips_proto *proto)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	uint32_t cca_divisor, ipdidx, ipdval = 1;
 	uint16_t *cct_table;
 
@@ -134,7 +134,7 @@ static psm_error_t ips_gen_cct_table(struct ips_proto *proto)
 	cct_table = psmi_calloc(proto->ep, UNDEFINED,
 				proto->ccti_size, sizeof(uint16_t));
 	if (!cct_table) {
-		err = PSM_NO_MEMORY;
+		err = PSM2_NO_MEMORY;
 		goto fail;
 	}
 
@@ -251,12 +251,12 @@ static opa_rate ips_rate_to_enum(int link_rate)
 	return rate;
 }
 
-static psm_error_t
+static psm2_error_t
 ips_none_get_path_rec(struct ips_proto *proto,
 		      uint16_t slid, uint16_t dlid, uint16_t desthfi_type,
 		      unsigned long timeout, ips_path_rec_t **ppath_rec)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	ips_path_rec_t *path_rec;
 	ENTRY elid, *epath = NULL;
 	char eplid[128];
@@ -277,7 +277,7 @@ ips_none_get_path_rec(struct ips_proto *proto,
 				psmi_free(elid.key);
 			if (path_rec)
 				psmi_free(path_rec);
-			return PSM_NO_MEMORY;
+			return PSM2_NO_MEMORY;
 		}
 
 		/* Create path record */
@@ -297,7 +297,7 @@ ips_none_get_path_rec(struct ips_proto *proto,
 		if (path_rec->pr_sl > PSMI_SL_MAX) {
 			psmi_free(elid.key);
 			psmi_free(path_rec);
-			return PSM_INTERNAL_ERR;
+			return PSM2_INTERNAL_ERR;
 		}
 		if (!(proto->ccti_ctrlmap & (1 << path_rec->pr_sl))) {
 			_HFI_CCADBG("No CCA for sl %d, disable CCA\n",
@@ -344,12 +344,12 @@ ips_none_get_path_rec(struct ips_proto *proto,
 	return err;
 }
 
-static psm_error_t
+static psm2_error_t
 ips_none_path_rec(struct ips_proto *proto,
 		  uint16_t slid, uint16_t dlid, uint16_t desthfi_type,
 		  unsigned long timeout, ips_path_grp_t **ppathgrp)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	uint16_t pidx, num_path = (1 << proto->epinfo.ep_lmc);
 	uint16_t base_slid, base_dlid;
 	ips_path_rec_t *path;
@@ -389,7 +389,7 @@ ips_none_path_rec(struct ips_proto *proto,
 			psmi_free(elid.key);
 		if (pathgrp)
 			psmi_free(pathgrp);
-		err = PSM_NO_MEMORY;
+		err = PSM2_NO_MEMORY;
 		goto fail;
 	}
 
@@ -418,7 +418,7 @@ ips_none_path_rec(struct ips_proto *proto,
 		err =
 		    ips_none_get_path_rec(proto, base_slid, base_dlid,
 					  desthfi_type, timeout, &path);
-		if (err != PSM_OK) {
+		if (err != PSM2_OK) {
 			psmi_free(elid.key);
 			psmi_free(pathgrp);
 			goto fail;
@@ -461,16 +461,16 @@ ips_none_path_rec(struct ips_proto *proto,
 	*ppathgrp = pathgrp;
 
 fail:
-	if (err != PSM_OK)
+	if (err != PSM2_OK)
 		_HFI_PRDBG
 		    ("Unable to get path record for LID %x <---> DLID %x.\n",
 		     slid, dlid);
 	return err;
 }
 
-static psm_error_t ips_none_path_rec_init(struct ips_proto *proto)
+static psm2_error_t ips_none_path_rec_init(struct ips_proto *proto)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	/* Obtain the SL and PKEY to use from the environment (HFI_SL & PSM_KEY) */
 	proto->epinfo.ep_sl = proto->ep->out_sl;
@@ -489,7 +489,7 @@ static psm_error_t ips_none_path_rec_init(struct ips_proto *proto)
 			IPS_PROTO_ERRCHK_FACTOR_DEFAULT
 		};
 
-		if (!psmi_getenv("PSM_ERRCHK_TIMEOUT",
+		if (!psmi_getenv("PSM2_ERRCHK_TIMEOUT",
 				 "Errchk timeouts in mS <min:max:factor>",
 				 PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_STR,
 				 (union psmi_envvar_val)errchk_to, &env_to)) {
@@ -512,7 +512,7 @@ static psm_error_t ips_none_path_rec_init(struct ips_proto *proto)
 	/* With no path records queries set pkey manually */
 	if (hfi_set_pkey(proto->ep->context.ctrl,
 			 (uint16_t) proto->ep->network_pkey) != 0) {
-		err = psmi_handle_error(proto->ep, PSM_EP_DEVICE_FAILURE,
+		err = psmi_handle_error(proto->ep, PSM2_EP_DEVICE_FAILURE,
 					"Couldn't set device pkey 0x%x: %s",
 					(int)proto->ep->network_pkey,
 					strerror(errno));
@@ -522,7 +522,7 @@ static psm_error_t ips_none_path_rec_init(struct ips_proto *proto)
 }
 
 /* (Re)load the SL2VL table */
-psm_error_t ips_ibta_init_sl2sc2vl_table(struct ips_proto *proto)
+psm2_error_t ips_ibta_init_sl2sc2vl_table(struct ips_proto *proto)
 {
 	int ret, i;
 
@@ -551,22 +551,22 @@ psm_error_t ips_ibta_init_sl2sc2vl_table(struct ips_proto *proto)
 		proto->sc2vl[i] = (uint16_t) ret;
 	}
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 /* On link up/down we need to update some state */
-psm_error_t ips_ibta_link_updown_event(struct ips_proto *proto)
+psm2_error_t ips_ibta_link_updown_event(struct ips_proto *proto)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	int ret;
 
 	/* Get base lid, lmc and rate as these may have changed if the link bounced */
 	proto->epinfo.ep_base_lid =
-	    __cpu_to_be16((uint16_t) psm_epid_nid(proto->ep->context.epid));
+	    __cpu_to_be16((uint16_t) psm2_epid_nid(proto->ep->context.epid));
 
 	if ((ret = hfi_get_port_lmc(proto->ep->context.ctrl->__hfi_unit,
 				    proto->ep->context.ctrl->__hfi_port)) < 0) {
-		err = psmi_handle_error(proto->ep, PSM_EP_DEVICE_FAILURE,
+		err = psmi_handle_error(proto->ep, PSM2_EP_DEVICE_FAILURE,
 					"Could obtain LMC for unit %u:%u. Error: %s",
 					proto->ep->context.ctrl->__hfi_unit,
 					proto->ep->context.ctrl->__hfi_port,
@@ -579,7 +579,7 @@ psm_error_t ips_ibta_link_updown_event(struct ips_proto *proto)
 				     proto->ep->context.ctrl->__hfi_port)) <
 	    0) {
 		err =
-		    psmi_handle_error(proto->ep, PSM_EP_DEVICE_FAILURE,
+		    psmi_handle_error(proto->ep, PSM2_EP_DEVICE_FAILURE,
 				      "Could obtain link rate for unit %u:%u. Error: %s",
 				      proto->ep->context.ctrl->__hfi_unit,
 				      proto->ep->context.ctrl->__hfi_port,
@@ -601,14 +601,14 @@ fail:
 	return err;
 }
 
-psm_error_t ips_ibta_init(struct ips_proto *proto)
+psm2_error_t ips_ibta_init(struct ips_proto *proto)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	union psmi_envvar_val psm_path_policy;
 	union psmi_envvar_val disable_cca;
 
 	/* Get the path selection policy */
-	psmi_getenv("PSM_PATH_SELECTION",
+	psmi_getenv("PSM2_PATH_SELECTION",
 		    "Policy to use if multiple paths are available between endpoints. Options are adaptive, static_src, static_dest, static_base. Default is adaptive.",
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_STR,
 		    (union psmi_envvar_val)"adaptive", &psm_path_policy);
@@ -633,30 +633,24 @@ psm_error_t ips_ibta_init(struct ips_proto *proto)
 	if (proto->flags & IPS_PROTO_FLAG_PPOLICY_STATIC_BASE)
 		_HFI_PRDBG("Static path selection: Base LID\n");
 
-	psmi_getenv("PSM_DISABLE_CCA",
+	psmi_getenv("PSM2_DISABLE_CCA",
 		    "Disable use of Congestion Control Architecure (CCA) [enabled] ",
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
 		    (union psmi_envvar_val)0, &disable_cca);
 	if (disable_cca.e_uint)
 		_HFI_CCADBG("CCA is disabled for congestion control.\n");
-	else
-		proto->flags |= IPS_PROTO_FLAG_CCA;
-
-	{
-		/* Get CCA related parameters from the environment */
-		union psmi_envvar_val ccti_incr;
-		union psmi_envvar_val ccti_timer;
-		union psmi_envvar_val ccti_size;
+	else {
 		int i;
 		char ccabuf[256];
 		uint8_t *p;
 
+		proto->flags |= IPS_PROTO_FLAG_CCA;
 /*
  * If user set any environment variable, use self CCA.
  */
-		if (getenv("PSM_CCTI_INCREMENT") || getenv("PSM_CCTI_TIMER")
-		    || getenv("PSM_CCTI_TABLE_SIZE")) {
-			goto selfcca;
+		if (getenv("PSM2_CCTI_INCREMENT") || getenv("PSM2_CCTI_TIMER")
+		    || getenv("PSM2_CCTI_TABLE_SIZE")) {
+			goto disablecca;
 		}
 
 /*
@@ -667,7 +661,7 @@ psm_error_t ips_ibta_init(struct ips_proto *proto)
 					    proto->ep->context.ctrl->__hfi_port,
 					    ccabuf);
 		if (i <= 0) {
-			goto selfcca;
+			goto disablecca;
 		}
 		p = (uint8_t *) ccabuf;
 		memcpy(&proto->ccti_ctrlmap, p, 4);
@@ -693,68 +687,20 @@ psm_error_t ips_ibta_init(struct ips_proto *proto)
 					 proto->ep->context.ctrl->__hfi_port,
 					 &proto->cct);
 		if (i < 0) {
-			err = PSM_NO_MEMORY;
+			err = PSM2_NO_MEMORY;
 			goto fail;
 		} else if (i == 0) {
-			goto selfcca;
+			goto disablecca;
 		}
 		proto->ccti_limit = i;
 		proto->ccti_size = proto->ccti_limit + 1;
 		goto finishcca;
 
 /*
- * Since there is no qib driver CCA settings, use self built CCA.
+ * Disable CCA.
  */
-selfcca:
-		psmi_getenv("PSM_CCTI_INCREMENT",
-			    "IBTA_CCA: Index increment for CCT table on receipt of a BECN packet (less than table size, default 1)",
-			    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
-			    (union psmi_envvar_val)1, &ccti_incr);
-
-		psmi_getenv("PSM_CCTI_TIMER",
-			    "IBTA_CCA: CCT table congestion timer (>0, default 1 us)",
-			    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
-			    (union psmi_envvar_val)1, &ccti_timer);
-
-		psmi_getenv("PSM_CCTI_TABLE_SIZE", "IBTA_CCA: Number of entries in CCT table (multiple of 64, default 128)", PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS, (union psmi_envvar_val)DF_CCT_TABLE_SIZE,	/* 128 */
-			    &ccti_size);
-
-		/* Check the invalid values. */
-		if (ccti_size.e_uint < 64 || ccti_size.e_uint % 64) {
-			_HFI_INFO
-			    ("Invalid PSM_CCTI_TABLE_SIZE=%d, at least 64 and multiple of 64, setting to default 128\n",
-			     ccti_size.e_uint);
-			ccti_size.e_uint = 128;
-		}
-		proto->ccti_size = ccti_size.e_uint;
-		/* For now the CCT limit is same as table size.
-		 * This does not have to be the case. */
-		proto->ccti_limit = proto->ccti_size - 1;
-
-		if (ccti_timer.e_uint <= 0) {
-			_HFI_INFO
-			    ("Invalid PSM_CCTI_TIMER=%d, should be bigger than 0, setting to default 1\n",
-			     ccti_timer.e_uint);
-			ccti_timer.e_uint = 1;
-		}
-		if (ccti_incr.e_uint <= 0
-		    || ccti_incr.e_uint >= ccti_size.e_uint) {
-			_HFI_INFO
-			    ("Invalid PSM_CCTI_INCREMENT=%d, should be less than table size, setting to default 1\n",
-			     ccti_incr.e_uint);
-			ccti_incr.e_uint = 1;
-		}
-
-		/* Setup CCA parameters for port */
-		proto->ccti_portctrl = 1;	/* SL/Port based congestion control */
-		proto->ccti_ctrlmap = 0xFFFF;
-		for (i = 0; i < 32; i++) {
-			proto->cace[i].ccti_increase = ccti_incr.e_uint;
-			proto->cace[i].ccti_timer_cycles =
-			    us_2_cycles(ccti_timer.e_uint);
-			proto->cace[i].ccti_threshold = 8;
-			proto->cace[i].ccti_min = 0;
-		}
+disablecca:
+		proto->flags &= ~IPS_PROTO_FLAG_CCA;
 	}
 
 finishcca:
@@ -766,24 +712,24 @@ finishcca:
 	hcreate_r(DF_PATH_GRP_HASH_SIZE, &proto->ips_path_grp_hash);
 
 	/* On startup treat it as a link up/down event to setup state . */
-	if ((err = ips_ibta_link_updown_event(proto)) != PSM_OK)
+	if ((err = ips_ibta_link_updown_event(proto)) != PSM2_OK)
 		goto fail;
 
 	/* Setup the appropriate query interface for the endpoint */
 	switch (proto->ep->path_res_type) {
-	case PSM_PATH_RES_OPP:
+	case PSM2_PATH_RES_OPP:
 		err = ips_opp_init(proto);
-		if (err != PSM_OK)
+		if (err != PSM2_OK)
 			_HFI_ERROR
 			    ("Unable to use OFED Plus Plus for path record queries.\n");
 		break;
-	case PSM_PATH_RES_UMAD:
+	case PSM2_PATH_RES_UMAD:
 		_HFI_ERROR
 		    ("Path record queries using UMAD is not supported in PSM version %d.%dx\n",
-		     PSM_VERNO_MAJOR, PSM_VERNO_MINOR);
-		err = PSM_EPID_PATH_RESOLUTION;
+		     PSM2_VERNO_MAJOR, PSM2_VERNO_MINOR);
+		err = PSM2_EPID_PATH_RESOLUTION;
 		break;
-	case PSM_PATH_RES_NONE:
+	case PSM2_PATH_RES_NONE:
 	default:
 		err = ips_none_path_rec_init(proto);
 	}
@@ -792,9 +738,9 @@ fail:
 	return err;
 }
 
-psm_error_t ips_ibta_fini(struct ips_proto *proto)
+psm2_error_t ips_ibta_fini(struct ips_proto *proto)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	if (proto->ibta.fini)
 		err = proto->ibta.fini(proto);

@@ -58,17 +58,17 @@
 #include "psm_mq_internal.h"
 #include "psm_am_internal.h"
 
-psm_error_t
-psmi_amsh_am_short_request(psm_epaddr_t epaddr,
-			   psm_handler_t handler, psm_amarg_t *args, int nargs,
+psm2_error_t
+psmi_amsh_am_short_request(psm2_epaddr_t epaddr,
+			   psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 			   void *src, size_t len, int flags,
-			   psm_am_completion_fn_t completion_fn,
+			   psm2_am_completion_fn_t completion_fn,
 			   void *completion_ctxt)
 {
-	psm_amarg_t req_args[NSHORT_ARGS + NBULK_ARGS];
+	psm2_amarg_t req_args[NSHORT_ARGS + NBULK_ARGS];
 
-	/* All sends are synchronous. Ignore PSM_AM_FLAG_ASYNC.
-	 * Treat PSM_AM_FLAG_NOREPLY as "advisory". This was mainly
+	/* All sends are synchronous. Ignore PSM2_AM_FLAG_ASYNC.
+	 * Treat PSM2_AM_FLAG_NOREPLY as "advisory". This was mainly
 	 * used to optimize the IPS path though we could put a stricter interpretation
 	 * on it to disallow any replies.
 	 */
@@ -81,24 +81,24 @@ psmi_amsh_am_short_request(psm_epaddr_t epaddr,
 
 	req_args[0].u32w0 = (uint32_t) handler;
 	psmi_mq_mtucpy((void *)&req_args[1], (const void *)args,
-		       (nargs * sizeof(psm_amarg_t)));
+		       (nargs * sizeof(psm2_amarg_t)));
 	psmi_amsh_short_request(epaddr->ptlctl->ptl, epaddr, am_handler_hidx,
 				req_args, nargs + 1, src, len, 0);
 
 	if (completion_fn)
 		completion_fn(completion_ctxt);
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
-psm_error_t
-psmi_amsh_am_short_reply(psm_am_token_t tok,
-			 psm_handler_t handler, psm_amarg_t *args, int nargs,
+psm2_error_t
+psmi_amsh_am_short_reply(psm2_am_token_t tok,
+			 psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 			 void *src, size_t len, int flags,
-			 psm_am_completion_fn_t completion_fn,
+			 psm2_am_completion_fn_t completion_fn,
 			 void *completion_ctxt)
 {
-	psm_amarg_t rep_args[NSHORT_ARGS + NBULK_ARGS];
+	psm2_amarg_t rep_args[NSHORT_ARGS + NBULK_ARGS];
 
 	/* For now less than NSHORT_ARGS+NBULK_ARGS-1. We use the first arg to carry
 	 * the handler index.
@@ -106,7 +106,7 @@ psmi_amsh_am_short_reply(psm_am_token_t tok,
 	psmi_assert(nargs <= (NSHORT_ARGS + NBULK_ARGS - 1));
 	rep_args[0].u32w0 = (uint32_t) handler;
 	psmi_mq_mtucpy((void *)&rep_args[1], (const void *)args,
-		       (nargs * sizeof(psm_amarg_t)));
+		       (nargs * sizeof(psm2_amarg_t)));
 
 	psmi_amsh_short_reply((amsh_am_token_t *) tok, am_handler_hidx,
 			      rep_args, nargs + 1, src, len, 0);
@@ -114,5 +114,5 @@ psmi_amsh_am_short_reply(psm_am_token_t tok,
 	if (completion_fn)
 		completion_fn(completion_ctxt);
 
-	return PSM_OK;
+	return PSM2_OK;
 }

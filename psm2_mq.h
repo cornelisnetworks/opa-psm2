@@ -53,8 +53,8 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
-#ifndef PSM_MQ_H
-#define PSM_MQ_H
+#ifndef PSM2_MQ_H
+#define PSM2_MQ_H
 
 #include <psm2.h>
 
@@ -63,10 +63,10 @@ extern "C" {
 #endif
 
 /*!
- * @file psm_mq.h
+ * @file psm2_mq.h
  * @brief PSM Matched Queues
  *
- * @page psm_mq Matched Queues interface
+ * @page psm2_mq Matched Queues interface
  *
  * The Matched Queues (MQ) interface implements a queue-based communication
  * model with the distinction that queue message consumers use a 3-tuple of
@@ -81,11 +81,11 @@ extern "C" {
  *
  * @section tagmatch MQ Tag Matching
  *
- * A successful MQ tag match requires an endpoint address (@ref psm_epaddr_t)
+ * A successful MQ tag match requires an endpoint address (@ref psm2_epaddr_t)
  * and a 3-tuple of tag objects.  Two of the tag objects are provided by the
- * receiver when posting a receive buffer (@ref psm_mq_irecv) and the last is
- * provided by the sender as part of every message sent (@ref psm_mq_send and
- * @ref psm_mq_isend).  Since MQ is a receiver-directed communication model,
+ * receiver when posting a receive buffer (@ref psm2_mq_irecv) and the last is
+ * provided by the sender as part of every message sent (@ref psm2_mq_send and
+ * @ref psm2_mq_isend).  Since MQ is a receiver-directed communication model,
  * the tag matching done at the receiver involves matching the sent message's
  * origin and send tag (@c stag) with the source endpointer address, tag (@c
  * rtag), and tag selector (@c rtagsel) attached to every preposted receive
@@ -153,11 +153,11 @@ extern "C" {
  * MQ messages are either received as @e expected or @e unexpected: @li The
  * received message is @e expected if the incoming message tag matches the
  * combination of tag and tag selector of at least one of the user-provided
- * receive buffers preposted with @ref psm_mq_irecv.
+ * receive buffers preposted with @ref psm2_mq_irecv.
  *
  * @li The received message is @e unexpected if the incoming message tag @b
  * doesn't match any combination of tag and tag selector from all the
- * user-provided receive buffers preposted with @ref psm_mq_irecv.
+ * user-provided receive buffers preposted with @ref psm2_mq_irecv.
  *
  * Unexpected messages are messages that the MQ library buffers until the
  * user provides a receive buffer that can match the unexpected message.
@@ -175,17 +175,17 @@ extern "C" {
  *   @li If and when possible, receive buffers should be posted as early as
  *       possible and ideally before calling into the progress engine.
  *   @li Use of rendezvous messaging that can be controlled with
- *       @ref PSM_MQ_RNDV_HFI_SZ and @ref PSM_MQ_RNDV_SHM_SZ options.  These
+ *       @ref PSM2_MQ_RNDV_HFI_SZ and @ref PSM2_MQ_RNDV_SHM_SZ options.  These
  *       options default to values determined to make effective use of
  *       bandwidth and are hence not advisable for all communication message
  *       sizes, but rendezvous messages inherently prevent unexpected
  *       messages by synchronizing the sender with the receiver beforehand.
  *   @li The amount of memory that is allocated to handle unexpected messages
- *       can be bounded by adjusting the Global @ref PSM_MQ_MAX_SYSBUF_MBYTES
+ *       can be bounded by adjusting the Global @ref PSM2_MQ_MAX_SYSBUF_MBYTES
  *       option.
  *   @li MQ statistics, such as the amount of received unexpected messages and
  *       the aggregate amount of unexpected bytes are available in the @ref
- *       psm_mq_stats structure.
+ *       psm2_mq_stats structure.
  *
  * Whenever a match occurs, whether the message is expected or unexpected, it
  * is generally up to the user to ensure that the message is not truncated.
@@ -194,8 +194,8 @@ extern "C" {
  * message truncation by always copying the appropriate amount of bytes as to
  * not overwrite any data.  While it is valid to send less data than the amount
  * of data that has been preposted, messages that are truncated will be marked
- * @ref PSM_MQ_TRUNCATION as part of the error code in the message status
- * structure (@ref psm_mq_status_t or @ref psm_mq_status2_t).
+ * @ref PSM2_MQ_TRUNCATION as part of the error code in the message status
+ * structure (@ref psm2_mq_status_t or @ref psm2_mq_status2_t).
  *
  * @section mq_completion MQ Completion Semantics
  *
@@ -206,7 +206,7 @@ extern "C" {
  * MQ does not make any remote completion guarantees for sends.  MQ does
  * however, allow a sender to synchronize with a receiver to send a synchronous
  * message which sends a message only after a matching receive buffer has been
- * posted by the receiver (@ref PSM_MQ_FLAG_SENDSYNC).
+ * posted by the receiver (@ref PSM2_MQ_FLAG_SENDSYNC).
  *
  * A receive is deemed complete after it has matched its associated receive
  * buffer with an incoming send and that the data from the send has been
@@ -218,25 +218,25 @@ extern "C" {
  * The progress requirement holds even if certain areas of the MQ
  * implementation require less network attention than others, or if progress
  * may internally be guaranteed through interrupts.  The main polling function,
- * @ref psm_poll, is the most general form of ensuring process on a given
- * endpoint.  Calling @ref psm_poll ensures that progress is made over all the
+ * @ref psm2_poll, is the most general form of ensuring process on a given
+ * endpoint.  Calling @ref psm2_poll ensures that progress is made over all the
  * MQs and other components instantiated over the endpoint passed to @ref
- * psm_poll.
+ * psm2_poll.
  *
- * While @ref psm_poll is the only way to directly ensure progress, other MQ
+ * While @ref psm2_poll is the only way to directly ensure progress, other MQ
  * functions will conditionally ensure progres depending on how they are used:
  *
- * @li @ref psm_mq_wait employs polling and waits until the request is
+ * @li @ref psm2_mq_wait employs polling and waits until the request is
  * completed.  For blocking communication operations where the caller is
- * waiting on a single send or receive to complete, psm_mq_wait usually
+ * waiting on a single send or receive to complete, psm2_mq_wait usually
  * provides the best responsiveness in terms of latency.
  *
- * @li @ref psm_mq_test can test a particular request for completion, but @b
+ * @li @ref psm2_mq_test can test a particular request for completion, but @b
  * never directly or indirectly ensures progress as it only tests the
  * completion status of a request, nothing more.  See functional documentation
- * in @ref psm_mq_test for a detailed discussion.
+ * in @ref psm2_mq_test for a detailed discussion.
  *
- * @li @ref psm_mq_ipeek ensures progress if and only if the MQ's completion
+ * @li @ref psm2_mq_ipeek ensures progress if and only if the MQ's completion
  * queue is empty and will not ensure progress as long as the completion queue
  * is non-empty.  Users that always aggressively process all elements of the MQ
  * completion queue as part of their own progress engine will indirectly always
@@ -262,8 +262,8 @@ extern "C" {
  *                           send tag are required to maintain MQ message
  *                           order.  In MPI parlance, this mask sets the bits
  *                           that store the context (or communicator ID).  The
- *                           user can choose to pass PSM_MQ_ORDERMASK_NONE or
- *                           PSM_MQ_ORDERMASK_ALL to tell MQ to respectively
+ *                           user can choose to pass PSM2_MQ_ORDERMASK_NONE or
+ *                           PSM2_MQ_ORDERMASK_ALL to tell MQ to respectively
  *                           provide no ordering guarantees or to provide
  *                           ordering over all messages by ignoring the
  *                           contexts of the send tags.
@@ -279,22 +279,22 @@ extern "C" {
  * @post The user obtains a handle to an instantiated Match Queue.
  *
  * The following error code is returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK A new Matched Queue has been instantiated across all the
+ * @retval PSM2_OK A new Matched Queue has been instantiated across all the
  *         members of the group.
  *
  * @verbatim
  * int try_open_endpoint_and_initialize_mq(
- *	  psm_ep_t *ep,	// endpoint handle
- *	  psm_epid_t *epid, // unique endpoint ID
- *	  psm_uuid_t job_uuid, // unique job uuid, for ep_open
- *	  psm_mq_t *mq, // MQ handle initialized on endpoint 'ep'
+ *	  psm2_ep_t *ep,	// endpoint handle
+ *	  psm2_epid_t *epid, // unique endpoint ID
+ *	  psm2_uuid_t job_uuid, // unique job uuid, for ep_open
+ *	  psm2_mq_t *mq, // MQ handle initialized on endpoint 'ep'
  *        uint64_t communicator_bits) // Where we store our communicator or
  *                                    // context bits in the 64-bit tag.
  * {
- *     // Simplifed open, see psm_ep_open documentation for more info
- *     psm_ep_open(job_uuid,
+ *     // Simplifed open, see psm2_ep_open documentation for more info
+ *     psm2_ep_open(job_uuid,
  *                 NULL, // no options
  *                 ep, epid);
  *
@@ -302,7 +302,7 @@ extern "C" {
  *     // order-significant in the tag.  Point-to-point ordering will not be
  *     // maintained between senders where the communicator bits are not the
  *     // same.
- *     psm_mq_init(ep,
+ *     psm2_mq_init(ep,
  *                 communicator_bits,
  *                 NULL, // no other MQ options
  *                 0,    // 0 options passed
@@ -312,31 +312,31 @@ extern "C" {
  * }
  * @endverbatim
  */
-psm_error_t
-psm_mq_init(psm_ep_t ep, uint64_t tag_order_mask,
-	    const struct psm_optkey *opts, int numopts, psm_mq_t *mq);
+psm2_error_t
+psm2_mq_init(psm2_ep_t ep, uint64_t tag_order_mask,
+	    const struct psm2_optkey *opts, int numopts, psm2_mq_t *mq);
 
-#define PSM_MQ_ORDERMASK_NONE	0ULL
+#define PSM2_MQ_ORDERMASK_NONE	0ULL
 	/**< Used to initialize MQ and disable all MQ message ordering
 	 * guarantees (this mask may prevent the use of MQ to maintain matched
 	 * message envelope delivery required in MPI). */
 
-#define PSM_MQ_ORDERMASK_ALL	0xffffffffffffffffULL
+#define PSM2_MQ_ORDERMASK_ALL	0xffffffffffffffffULL
 	/**< Used to initialize MQ with no message ordering hints, which forces
 	 * MQ to maintain order over all messages */
 
 /** @brief Finalize (close) an MQ handle
  *
  * The following error code is returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK A given Matched Queue has been freed and use of the future
+ * @retval PSM2_OK A given Matched Queue has been freed and use of the future
  * use of the handle produces undefined results.
  */
-	 psm_error_t psm_mq_finalize(psm_mq_t mq);
+	 psm2_error_t psm2_mq_finalize(psm2_mq_t mq);
 
-#define PSM_MQ_TAG_ELEMENTS 3
-	/**< Represents the number of 32-bit tag elements in the psm_mq_tag_t
+#define PSM2_MQ_TAG_ELEMENTS 3
+	/**< Represents the number of 32-bit tag elements in the psm2_mq_tag_t
 	 *   type. */
 
 /** @brief MQ Message tag
@@ -348,21 +348,21 @@ psm_mq_init(psm_ep_t ep, uint64_t tag_order_mask,
  * 64.  For interoperability with existing PSM routines, 64 bit tags are
  * extended to a 96 bit tag by setting the upper 32 bits (tag[2] or tag2) to
  * zero.  Other than this caveat, all of the existing routines using 64-bit
- * tags are interchangeable with PSM2 routines using this psm_mq_tag_t type.
- * For example, a message sent using @ref psm_mq_send can be received using
- * @ref psm_mq_irecv2, provided the tags match as described above.
+ * tags are interchangeable with PSM2 routines using this psm2_mq_tag_t type.
+ * For example, a message sent using @ref psm2_mq_send can be received using
+ * @ref psm2_mq_irecv2, provided the tags match as described above.
  */
 typedef
-struct psm_mq_tag {
+struct psm2_mq_tag {
 	union {
-		uint32_t tag[PSM_MQ_TAG_ELEMENTS] __attribute__ ((aligned(16)));
+		uint32_t tag[PSM2_MQ_TAG_ELEMENTS] __attribute__ ((aligned(16)));
 		struct {
 			uint32_t tag0;
 			uint32_t tag1;
 			uint32_t tag2;
 		};
 	};
-} psm_mq_tag_t;
+} psm2_mq_tag_t;
 
 /** @brief MQ Non-blocking operation status
  *
@@ -373,7 +373,7 @@ struct psm_mq_tag {
  * pointer.
  */
 typedef
-struct psm_mq_status {
+struct psm2_mq_status {
 	/** Sender's original message tag (receive reqs only) */
 	uint64_t msg_tag;
 	/** Sender's original message length (receive reqs only) */
@@ -381,10 +381,10 @@ struct psm_mq_status {
 	/** Actual number of bytes transfered (receive reqs only) */
 	uint32_t nbytes;
 	/** MQ error code for communication operation */
-	psm_error_t error_code;
+	psm2_error_t error_code;
 	/**< User-associated context for send or receive */
 	void *context;
-} psm_mq_status_t;
+} psm2_mq_status_t;
 
 /** @brief MQ Non-blocking operation status
  *
@@ -392,28 +392,28 @@ struct psm_mq_status {
  * wait and test functions, MQ fills in the structure upon completion.  Upon
  * completion, requests fill in every field of the status structure with the
  * exception of the nbytes field, which is only valid for receives.  Version 2
- * of the status type contains an @ref psm_mq_tag_t type to represent the tag
+ * of the status type contains an @ref psm2_mq_tag_t type to represent the tag
  * instead of a 64-bit integer value and is for use with PSM v2 routines.
  */
 
 typedef
-struct psm_mq_status2 {
+struct psm2_mq_status2 {
 	/** Remote peer's epaddr */
-	psm_epaddr_t msg_peer;
+	psm2_epaddr_t msg_peer;
 	/** Sender's original message tag */
-	psm_mq_tag_t msg_tag;
+	psm2_mq_tag_t msg_tag;
 	/** Sender's original message length */
 	uint32_t msg_length;
 	/** Actual number of bytes transfered (receiver only) */
 	uint32_t nbytes;
 	/** MQ error code for communication operation */
-	psm_error_t error_code;
+	psm2_error_t error_code;
 	/** User-associated context for send or receive */
 	void *context;
-} psm_mq_status2_t;
+} psm2_mq_status2_t;
 
-/** @brief PSM Communication handle (opaque) */
-typedef struct psm_mq_req *psm_mq_req_t;
+/** @brief PSM2 Communication handle (opaque) */
+typedef struct psm2_mq_req *psm2_mq_req_t;
 
 /*! @} */
 /*! @ingroup mq
@@ -425,24 +425,24 @@ typedef struct psm_mq_req *psm_mq_req_t;
  * which messages are sent as synchronous.
  *
  * @verbatim
- * uint32_t get_hfirv_size(psm_mq_t mq)
+ * uint32_t get_hfirv_size(psm2_mq_t mq)
  * {
  *     uint32_t rvsize;
- *     psm_getopt(mq, PSM_MQ_RNDV_HFI_SZ, &rvsize);
+ *     psm2_getopt(mq, PSM2_MQ_RNDV_HFI_SZ, &rvsize);
  *     return rvsize;
  * }
  * @endverbatim
  */
 
-/** @brief Get an MQ option (Deprecated. Use psm_getopt with PSM_COMPONENT_MQ)
+/** @brief Get an MQ option (Deprecated. Use psm2_getopt with PSM2_COMPONENT_MQ)
  *
  * Function to retrieve the value of an MQ option.
  *
  * @param[in] mq Matched Queue handle
  * @param[in] option Index of option to retrieve.  Possible values are:
- *            @li @ref PSM_MQ_RNDV_HFI_SZ
- *            @li @ref PSM_MQ_RNDV_SHM_SZ
- *            @li @ref PSM_MQ_MAX_SYSBUF_MBYTES
+ *            @li @ref PSM2_MQ_RNDV_HFI_SZ
+ *            @li @ref PSM2_MQ_RNDV_SHM_SZ
+ *            @li @ref PSM2_MQ_MAX_SYSBUF_MBYTES
  *
  * @param[in] value Pointer to storage that can be used to store the value of
  *            the option to be set.  It is up to the user to ensure that the
@@ -450,45 +450,45 @@ typedef struct psm_mq_req *psm_mq_req_t;
  *            the value associated to the type.  Each option documents the size
  *            associated to its value.
  *
- * @returns PSM_OK if option could be retrieved.
- * @returns PSM_PARAM_ERR if the option is not a valid option number
+ * @returns PSM2_OK if option could be retrieved.
+ * @returns PSM2_PARAM_ERR if the option is not a valid option number
  */
-psm_error_t psm_mq_getopt(psm_mq_t mq, int option, void *value);
+psm2_error_t psm2_mq_getopt(psm2_mq_t mq, int option, void *value);
 
-/** @brief Set an MQ option (Deprecated. Use psm_setopt with PSM_COMPONENT_MQ)
+/** @brief Set an MQ option (Deprecated. Use psm2_setopt with PSM2_COMPONENT_MQ)
  *
  * Function to set the value of an MQ option.
  *
  * @param[in] mq Matched Queue handle
  * @param[in] option Index of option to retrieve.  Possible values are:
- *            @li @ref PSM_MQ_RNDV_HFI_SZ
- *            @li @ref PSM_MQ_RNDV_SHM_SZ
- *            @li @ref PSM_MQ_MAX_SYSBUF_MBYTES
+ *            @li @ref PSM2_MQ_RNDV_HFI_SZ
+ *            @li @ref PSM2_MQ_RNDV_SHM_SZ
+ *            @li @ref PSM2_MQ_MAX_SYSBUF_MBYTES
  *
  * @param[in] value Pointer to storage that contains the value to be updated
  *                  for the supplied option number.  It is up to the user to
  *                  ensure that the pointer points to a memory location with a
  *                  correct size.
  *
- * @returns PSM_OK if option could be retrieved.
- * @returns PSM_PARAM_ERR if the option is not a valid option number
- * @returns PSM_OPT_READONLY if the option to be set is a read-only option
+ * @returns PSM2_OK if option could be retrieved.
+ * @returns PSM2_PARAM_ERR if the option is not a valid option number
+ * @returns PSM2_OPT_READONLY if the option to be set is a read-only option
  *                           (currently no MQ options are read-only).
  */
-psm_error_t psm_mq_setopt(psm_mq_t mq, int option, const void *value);
+psm2_error_t psm2_mq_setopt(psm2_mq_t mq, int option, const void *value);
 
 /*! @}  */
 /*! @ingroup mq
  * @{
  */
 
-#define PSM_MQ_FLAG_SENDSYNC	0x01
+#define PSM2_MQ_FLAG_SENDSYNC	0x01
 				/**< MQ Send Force synchronous send */
 
-#define PSM_MQ_REQINVALID	((psm_mq_req_t)(NULL))
+#define PSM2_MQ_REQINVALID	((psm2_mq_req_t)(NULL))
 				/**< MQ request completion value */
 
-#define PSM_MQ_ANY_ADDR		((psm_epaddr_t)NULL)
+#define PSM2_MQ_ANY_ADDR		((psm2_epaddr_t)NULL)
 				/**< MQ receive from any source epaddr */
 
 /** @brief Post a receive to a Matched Queue with tag selection criteria
@@ -504,24 +504,24 @@ psm_error_t psm_mq_setopt(psm_mq_t mq, int option, const void *value);
  * @param[in] flags Receive flags (None currently supported)
  * @param[in] buf Receive buffer
  * @param[in] len Receive buffer length
- * @param[in] context User context pointer, available in @ref psm_mq_status_t
+ * @param[in] context User context pointer, available in @ref psm2_mq_status_t
  *                    upon completion
  * @param[out] req PSM MQ Request handle created by the preposted receive, to
  *                 be used for explicitly controlling message receive
  *                 completion.
  *
  * @post The supplied receive buffer is given to MQ to match against incoming
- *       messages unless it is cancelled via @ref psm_mq_cancel @e before any
+ *       messages unless it is cancelled via @ref psm2_mq_cancel @e before any
  *       match occurs.
  *
  * The following error code is returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The receive buffer has successfully been posted to the MQ.
+ * @retval PSM2_OK The receive buffer has successfully been posted to the MQ.
  */
-psm_error_t
-psm_mq_irecv(psm_mq_t mq, uint64_t rtag, uint64_t rtagsel, uint32_t flags,
-	     void *buf, uint32_t len, void *context, psm_mq_req_t *req);
+psm2_error_t
+psm2_mq_irecv(psm2_mq_t mq, uint64_t rtag, uint64_t rtagsel, uint32_t flags,
+	     void *buf, uint32_t len, void *context, psm2_mq_req_t *req);
 
 /** @brief Post a receive to a Matched Queue with source and tag selection
  *  criteria
@@ -532,61 +532,61 @@ psm_mq_irecv(psm_mq_t mq, uint64_t rtag, uint64_t rtagsel, uint32_t flags,
  * described in @ref tagmatch.
  *
  * @param[in] mq Matched Queue Handle
- * @param[in] src Source (sender's) epaddr (may be PSM_MQ_ANY_ADDR)
+ * @param[in] src Source (sender's) epaddr (may be PSM2_MQ_ANY_ADDR)
  * @param[in] rtag Receive tag
  * @param[in] rtagsel Receive tag selector
  * @param[in] flags Receive flags (None currently supported)
  * @param[in] buf Receive buffer
  * @param[in] len Receive buffer length
- * @param[in] context User context pointer, available in @ref psm_mq_status2_t
+ * @param[in] context User context pointer, available in @ref psm2_mq_status2_t
  *                    upon completion
  * @param[out] req PSM MQ Request handle created by the preposted receive, to
  *                 be used for explicitly controlling message receive
  *                 completion.
  *
  * @post The supplied receive buffer is given to MQ to match against incoming
- *       messages unless it is cancelled via @ref psm_mq_cancel @e before any
+ *       messages unless it is cancelled via @ref psm2_mq_cancel @e before any
  *       match occurs.
  *
  * The following error code is returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The receive buffer has successfully been posted to the MQ.
+ * @retval PSM2_OK The receive buffer has successfully been posted to the MQ.
  */
-psm_error_t
-psm_mq_irecv2(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *rtag,
-	      psm_mq_tag_t *rtagsel, uint32_t flags, void *buf, uint32_t len,
-	      void *context, psm_mq_req_t *req);
+psm2_error_t
+psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *rtag,
+	      psm2_mq_tag_t *rtagsel, uint32_t flags, void *buf, uint32_t len,
+	      void *context, psm2_mq_req_t *req);
 
 /** @brief Post a receive to a Matched Queue with matched request
  *
  * Function to receive a non-blocking MQ message by providing a preposted
  * buffer. The provided request should already be matched using the @ref
- * psm_mq_improbe or @ref psm_mq_improbe2 routines.  It is an error to pass a
+ * psm2_mq_improbe or @ref psm2_mq_improbe2 routines.  It is an error to pass a
  * request that has not already been matched by one of those routines.
  *
  * @param[in] mq Matched Queue Handle
  * @param[in] flags Receive flags (None currently supported)
  * @param[in] buf Receive buffer
  * @param[in] len Receive buffer length
- * @param[in] context User context pointer, available in @ref psm_mq_status_t
+ * @param[in] context User context pointer, available in @ref psm2_mq_status_t
  *                    upon completion
  * @param[inout] req PSM MQ Request handle matched previously by a matched
- *		     probe routine (@ref psm_mq_improbe or @ref
- *		     psm_mq_improbe2), also to be used for explicitly
+ *		     probe routine (@ref psm2_mq_improbe or @ref
+ *		     psm2_mq_improbe2), also to be used for explicitly
  *		     controlling message receive completion.
  *
  * @post The supplied receive buffer is given to MQ to deliver the matched
  *       message.
  *
  * The following error code is returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The receive buffer has successfully been posted to the MQ.
+ * @retval PSM2_OK The receive buffer has successfully been posted to the MQ.
  */
-psm_error_t
-psm_mq_imrecv(psm_mq_t mq, uint32_t flags, void *buf, uint32_t len,
-	      void *context, psm_mq_req_t *reqo);
+psm2_error_t
+psm2_mq_imrecv(psm2_mq_t mq, uint32_t flags, void *buf, uint32_t len,
+	      void *context, psm2_mq_req_t *reqo);
 
 /** @brief Send a blocking MQ message
  *
@@ -596,7 +596,7 @@ psm_mq_imrecv(psm_mq_t mq, uint32_t flags, void *buf, uint32_t len,
  * @param[in] mq Matched Queue Handle
  * @param[in] dest Destination EP address
  * @param[in] flags Message flags, currently:
- *            @li PSM_MQ_FLAG_SENDSYNC tells PSM to send the message
+ *            @li PSM2_MQ_FLAG_SENDSYNC tells PSM to send the message
  *            synchronously, meaning that the message will not be sent until
  *            the receiver acknowledges that it has matched the send with a
  *            receive buffer.
@@ -609,12 +609,12 @@ psm_mq_imrecv(psm_mq_t mq, uint32_t flags, void *buf, uint32_t len,
  * @note This send function has been implemented to best suit MPI_Send.
  *
  * The following error code is returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The message has been successfully sent.
+ * @retval PSM2_OK The message has been successfully sent.
  */
-psm_error_t
-psm_mq_send(psm_mq_t mq, psm_epaddr_t dest, uint32_t flags, uint64_t stag,
+psm2_error_t
+psm2_mq_send(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags, uint64_t stag,
 	    const void *buf, uint32_t len);
 
 /** @brief Send a blocking MQ message
@@ -625,7 +625,7 @@ psm_mq_send(psm_mq_t mq, psm_epaddr_t dest, uint32_t flags, uint64_t stag,
  * @param[in] mq Matched Queue Handle
  * @param[in] dest Destination EP address
  * @param[in] flags Message flags, currently:
- *            @li PSM_MQ_FLAG_SENDSYNC tells PSM to send the message
+ *            @li PSM2_MQ_FLAG_SENDSYNC tells PSM to send the message
  *            synchronously, meaning that the message will not be sent until
  *            the receiver acknowledges that it has matched the send with a
  *            receive buffer.
@@ -638,25 +638,25 @@ psm_mq_send(psm_mq_t mq, psm_epaddr_t dest, uint32_t flags, uint64_t stag,
  * @note This send function has been implemented to best suit MPI_Send.
  *
  * The following error code is returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The message has been successfully sent.
+ * @retval PSM2_OK The message has been successfully sent.
  */
-psm_error_t
-psm_mq_send2(psm_mq_t mq, psm_epaddr_t dest, uint32_t flags,
-	     psm_mq_tag_t *stag, const void *buf, uint32_t len);
+psm2_error_t
+psm2_mq_send2(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags,
+	     psm2_mq_tag_t *stag, const void *buf, uint32_t len);
 
 /** @brief Send a non-blocking MQ message
  *
  * Function to initiate the send of a non-blocking MQ message, whereby the
  * user guarantees that the source data will remain unmodified until the send
- * is locally completed through a call such as @ref psm_mq_wait or @ref
- * psm_mq_test.
+ * is locally completed through a call such as @ref psm2_mq_wait or @ref
+ * psm2_mq_test.
  *
  * @param[in] mq Matched Queue Handle
  * @param[in] dest Destination EP address
  * @param[in] flags Message flags, currently:
- *            @li PSM_MQ_FLAG_SENDSYNC tells PSM to send the message
+ *            @li PSM2_MQ_FLAG_SENDSYNC tells PSM to send the message
  *            synchronously, meaning that the message will not be sent until
  *            the receiver acknowledges that it has matched the send with a
  *            receive buffer.
@@ -664,61 +664,61 @@ psm_mq_send2(psm_mq_t mq, psm_epaddr_t dest, uint32_t flags,
  * @param[in] buf Source buffer pointer
  * @param[in] len Length of message starting at @c buf.
  * @param[in] context Optional user-provided pointer available in @ref
- *                    psm_mq_status_t when the send is locally completed.
+ *                    psm2_mq_status_t when the send is locally completed.
  * @param[out] req PSM MQ Request handle created by the non-blocking send, to
  *                 be used for explicitly controlling message completion.
  *
  * @post The source buffer is not reusable and the send is not locally complete
- *       until its request is completed by either @ref psm_mq_test or @ref
- *       psm_mq_wait.
+ *       until its request is completed by either @ref psm2_mq_test or @ref
+ *       psm2_mq_wait.
  *
  * @note This send function has been implemented to suit MPI_Isend.
  *
  * The following error code is returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The message has been successfully initiated.
+ * @retval PSM2_OK The message has been successfully initiated.
  *
  * @verbatim
- * psm_mq_req_t
- * non_blocking_send(const psm_mq_t mq, psm_epaddr_t dest_ep,
+ * psm2_mq_req_t
+ * non_blocking_send(const psm2_mq_t mq, psm2_epaddr_t dest_ep,
  *                       const void *buf, uint32_t len,
  *			 int context_id, int send_tag, const my_request_t *req)
  * {
- *     psm_mq_req_t req_mq;
+ *     psm2_mq_req_t req_mq;
  *     // Set up our send tag, assume that "my_rank" is global and represents
  *     // the rank of this process in the job
  *     uint64_t tag = ( ((context_id & 0xffff) << 48) |
  *                      ((my_rank & 0xffff) << 32)    |
  *                      ((send_tag & 0xffffffff)) );
  *
- *     psm_mq_isend(mq, dest_ep,
+ *     psm2_mq_isend(mq, dest_ep,
  *                  0, // no flags
  *                  tag,
  *                  buf,
  *                  len,
- *                  req, // this req is available in psm_mq_status_t when one
+ *                  req, // this req is available in psm2_mq_status_t when one
  *                       // of the synchronization functions is called.
  *                  &req_mq);
  *     return req_mq;
  * }
  * @endverbatim
  */
-psm_error_t
-psm_mq_isend(psm_mq_t mq, psm_epaddr_t dest, uint32_t flags, uint64_t stag,
-	     const void *buf, uint32_t len, void *context, psm_mq_req_t *req);
+psm2_error_t
+psm2_mq_isend(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags, uint64_t stag,
+	     const void *buf, uint32_t len, void *context, psm2_mq_req_t *req);
 
 /** @brief Send a non-blocking MQ message
  *
  * Function to initiate the send of a non-blocking MQ message, whereby the
  * user guarantees that the source data will remain unmodified until the send
- * is locally completed through a call such as @ref psm_mq_wait or @ref
- * psm_mq_test.
+ * is locally completed through a call such as @ref psm2_mq_wait or @ref
+ * psm2_mq_test.
  *
  * @param[in] mq Matched Queue Handle
  * @param[in] dest Destination EP address
  * @param[in] flags Message flags, currently:
- *            @li PSM_MQ_FLAG_SENDSYNC tells PSM to send the message
+ *            @li PSM2_MQ_FLAG_SENDSYNC tells PSM to send the message
  *            synchronously, meaning that the message will not be sent until
  *            the receiver acknowledges that it has matched the send with a
  *            receive buffer.
@@ -726,51 +726,51 @@ psm_mq_isend(psm_mq_t mq, psm_epaddr_t dest, uint32_t flags, uint64_t stag,
  * @param[in] buf Source buffer pointer
  * @param[in] len Length of message starting at @c buf.
  * @param[in] context Optional user-provided pointer available in @ref
- *                    psm_mq_status2_t when the send is locally completed.
+ *                    psm2_mq_status2_t when the send is locally completed.
  * @param[out] req PSM MQ Request handle created by the non-blocking send, to
  *                 be used for explicitly controlling message completion.
  *
  * @post The source buffer is not reusable and the send is not locally complete
- *       until its request is completed by either @ref psm_mq_test or @ref
- *       psm_mq_wait.
+ *       until its request is completed by either @ref psm2_mq_test or @ref
+ *       psm2_mq_wait.
  *
  * @note This send function has been implemented to suit MPI_Isend.
  *
  * The following error code is returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The message has been successfully initiated.
+ * @retval PSM2_OK The message has been successfully initiated.
  *
  * @verbatim
- * psm_mq_req_t
- * non_blocking_send(const psm_mq_t mq, psm_epaddr_t dest_ep,
+ * psm2_mq_req_t
+ * non_blocking_send(const psm2_mq_t mq, psm2_epaddr_t dest_ep,
  *                       const void *buf, uint32_t len,
  *			 int context_id, int send_tag, const my_request_t *req)
  * {
- *     psm_mq_req_t req_mq;
+ *     psm2_mq_req_t req_mq;
  *     // Set up our send tag, assume that "my_rank" is global and represents
  *     // the rank of this process in the job
- *     psm_mq_tag_t tag;
+ *     psm2_mq_tag_t tag;
  *     tag.tag[0] = send_tag;
  *     tag.tag[1] = my_rank;
  *     tag.tag[2] = context_id;
  *
- *     psm_mq_isend(mq, dest_ep,
+ *     psm2_mq_isend(mq, dest_ep,
  *                  0, // no flags
  *                  &tag,
  *                  buf,
  *                  len,
- *                  req, // this req is available in psm_mq_status2_t when one
+ *                  req, // this req is available in psm2_mq_status2_t when one
  *                       // of the synchronization functions is called.
  *                  &req_mq);
  *     return req_mq;
  * }
  * @endverbatim
  */
-psm_error_t
-psm_mq_isend2(psm_mq_t mq, psm_epaddr_t dest, uint32_t flags,
-	      psm_mq_tag_t *stag, const void *buf, uint32_t len, void *context,
-	      psm_mq_req_t *req);
+psm2_error_t
+psm2_mq_isend2(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags,
+	      psm2_mq_tag_t *stag, const void *buf, uint32_t len, void *context,
+	      psm2_mq_req_t *req);
 
 /** @brief Try to Probe if a message is received matching tag selection
  * criteria
@@ -778,7 +778,7 @@ psm_mq_isend2(psm_mq_t mq, psm_epaddr_t dest, uint32_t flags,
  * Function to verify if a message matching the supplied tag and tag selectors
  * has been received.  The message is not fully matched until the user
  * provides a buffer with the successfully matching tag selection criteria
- * through @ref psm_mq_irecv.
+ * through @ref psm2_mq_irecv.
  * Probing for messages may be useful if the size of the
  * message to be received is unknown, in which case its size will be
  * available in the @c msg_length member of the returned @c status.
@@ -790,15 +790,15 @@ psm_mq_isend2(psm_mq_t mq, psm_epaddr_t dest, uint32_t flags,
  *                    regarding the matching send.
  *
  * The following error codes are returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The iprobe is successful and status is updated if non-NULL.
- * @retval PSM_MQ_NO_COMPLETIONS The iprobe is unsuccessful and status is
+ * @retval PSM2_OK The iprobe is successful and status is updated if non-NULL.
+ * @retval PSM2_MQ_NO_COMPLETIONS The iprobe is unsuccessful and status is
  *                               unchaged.
  */
-psm_error_t
-psm_mq_iprobe(psm_mq_t mq, uint64_t rtag, uint64_t rtagsel,
-	      psm_mq_status_t *status);
+psm2_error_t
+psm2_mq_iprobe(psm2_mq_t mq, uint64_t rtag, uint64_t rtagsel,
+	      psm2_mq_status_t *status);
 
 /** @brief Try to Probe if a message is received matching source and tag
  * selection criteria
@@ -806,27 +806,27 @@ psm_mq_iprobe(psm_mq_t mq, uint64_t rtag, uint64_t rtagsel,
  * Function to verify if a message matching the supplied source, tag, and tag
  * selectors has been received.  The message is not fully matched until the
  * user provides a buffer with the successfully matching tag selection criteria
- * through @ref psm_mq_irecv.  Probing for messages may be useful if the size
+ * through @ref psm2_mq_irecv.  Probing for messages may be useful if the size
  * of the message to be received is unknown, in which case its size will be
  * available in the @c msg_length member of the returned @c status.
  *
  * @param[in] mq Matched Queue Handle
- * @param[in] src Source (sender's) epaddr (may be PSM_MQ_ANY_ADDR)
+ * @param[in] src Source (sender's) epaddr (may be PSM2_MQ_ANY_ADDR)
  * @param[in] rtag Message receive tag
  * @param[in] rtagsel Message receive tag selector
  * @param[out] status Upon return, @c status is filled with information
  *                    regarding the matching send.
  *
  * The following error codes are returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The iprobe is successful and status is updated if non-NULL.
- * @retval PSM_MQ_NO_COMPLETIONS The iprobe is unsuccessful and status is
+ * @retval PSM2_OK The iprobe is successful and status is updated if non-NULL.
+ * @retval PSM2_MQ_NO_COMPLETIONS The iprobe is unsuccessful and status is
  *                               unchaged.
  */
-psm_error_t
-psm_mq_iprobe2(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *rtag,
-	       psm_mq_tag_t *rtagsel, psm_mq_status2_t *status);
+psm2_error_t
+psm2_mq_iprobe2(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *rtag,
+	       psm2_mq_tag_t *rtagsel, psm2_mq_status2_t *status);
 
 /** @brief Try to Probe if a message is received matching tag selection
  * criteria
@@ -834,9 +834,9 @@ psm_mq_iprobe2(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *rtag,
  * Function to verify if a message matching the supplied source, tag, and tag
  * selectors has been received.  If a match is successful, the message is
  * removed from the matching queue and returned as a request object.  The
- * message can be received using @ref psm_mq_imrecv.  It is erroneous to use
- * the request object returned by @ref psm_mq_improbe for any purpose other
- * than passing to @ref psm_mq_imrecv.  Probing for messages may be useful if
+ * message can be received using @ref psm2_mq_imrecv.  It is erroneous to use
+ * the request object returned by @ref psm2_mq_improbe for any purpose other
+ * than passing to @ref psm2_mq_imrecv.  Probing for messages may be useful if
  * the size of the message to be received is unknown, in which case its size
  * will be available in the @c msg_length member of the returned @c status.
  *
@@ -849,14 +849,14 @@ psm_mq_iprobe2(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *rtag,
  *                    regarding the matching send.
  *
  * The following error codes are returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The iprobe is successful and status is updated if non-NULL.
- * @retval PSM_MQ_NO_COMPLETIONS The iprobe is unsuccessful and status is unchaged.
+ * @retval PSM2_OK The iprobe is successful and status is updated if non-NULL.
+ * @retval PSM2_MQ_NO_COMPLETIONS The iprobe is unsuccessful and status is unchaged.
  */
-psm_error_t
-psm_mq_improbe(psm_mq_t mq, uint64_t rtag, uint64_t rtagsel, psm_mq_req_t *req,
-	       psm_mq_status_t *status);
+psm2_error_t
+psm2_mq_improbe(psm2_mq_t mq, uint64_t rtag, uint64_t rtagsel, psm2_mq_req_t *req,
+	       psm2_mq_status_t *status);
 
 /** @brief Try to Probe if a message is received matching source and tag
  * selection criteria
@@ -864,36 +864,36 @@ psm_mq_improbe(psm_mq_t mq, uint64_t rtag, uint64_t rtagsel, psm_mq_req_t *req,
  * Function to verify if a message matching the supplied tag and tag selectors
  * has been received.  If a match is successful, the message is removed from
  * the matching queue and returned as a request object.  The message can be
- * received using @ref psm_mq_imrecv.  It is erroneous to use the request
- * object returned by @ref psm_mq_improbe for any purpose other than passing to
- * @ref psm_mq_imrecv.  Probing for messages may be useful if the size of the
+ * received using @ref psm2_mq_imrecv.  It is erroneous to use the request
+ * object returned by @ref psm2_mq_improbe for any purpose other than passing to
+ * @ref psm2_mq_imrecv.  Probing for messages may be useful if the size of the
  * message to be received is unknown, in which case its size will be available
  * in the @c msg_length member of the returned @c status.
  *
  * @param[in] mq Matched Queue Handle
- * @param[in] src Source (sender's) epaddr (may be PSM_MQ_ANY_ADDR)
+ * @param[in] src Source (sender's) epaddr (may be PSM2_MQ_ANY_ADDR)
  * @param[in] rtag Message receive tag
  * @param[in] rtagsel Message receive tag selector
  * @param[out] status Upon return, @c status is filled with information
  *                    regarding the matching send.
  *
  * The following error codes are returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The iprobe is successful and status is updated if non-NULL.
- * @retval PSM_MQ_NO_COMPLETIONS The iprobe is unsuccessful and status is unchaged.
+ * @retval PSM2_OK The iprobe is successful and status is updated if non-NULL.
+ * @retval PSM2_MQ_NO_COMPLETIONS The iprobe is unsuccessful and status is unchaged.
  */
-psm_error_t
-psm_mq_improbe2(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *rtag,
-		psm_mq_tag_t *rtagsel, psm_mq_req_t *req,
-		psm_mq_status2_t *status);
+psm2_error_t
+psm2_mq_improbe2(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *rtag,
+		psm2_mq_tag_t *rtagsel, psm2_mq_req_t *req,
+		psm2_mq_status2_t *status);
 
 /** @brief Query for non-blocking requests ready for completion.
  *
  * Function to query a particular MQ for non-blocking requests that are ready
  * for completion.  Requests "ready for completion" are not actually considered
  * complete by MQ until they are returned to the MQ library through @ref
- * psm_mq_wait or @ref psm_mq_test.
+ * psm2_mq_wait or @ref psm2_mq_test.
  *
  * If the user can deal with consuming request completions in the order in
  * which they complete, this function can be used both for completions and for
@@ -907,43 +907,43 @@ psm_mq_improbe2(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *rtag,
  * @param[in] status Optional MQ status, can be NULL.
  *
  * @post The user has ensured progress if the function returns @ref
- *       PSM_MQ_NO_COMPLETIONS
+ *       PSM2_MQ_NO_COMPLETIONS
  *
  * The following error codes are returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The peek is successful and @c req is updated with a request
+ * @retval PSM2_OK The peek is successful and @c req is updated with a request
  *                ready for completion.  If @c status is non-NULL, it is also
  *                updated.
  *
- * @retval PSM_MQ_NO_COMPLETIONS The peek is not successful, meaning that there
+ * @retval PSM2_MQ_NO_COMPLETIONS The peek is not successful, meaning that there
  *                               are no further requests ready for completion.
  *                               The contents of @c req and @c status remain
  *                               unchanged.
  * @verbatim
- * // Example that uses ipeek_mq_ipeek to make progress instead of psm_poll
+ * // Example that uses ipeek_mq_ipeek to make progress instead of psm2_poll
  * // We return the amount of non-blocking requests that we've completed
- * int main_progress_loop(psm_mq_t mq)
+ * int main_progress_loop(psm2_mq_t mq)
  * {
  *     int num_completed = 0;
- *     psm_mq_req_t req;
- *     psm_mq_status_t status;
- *     psm_error_t err;
+ *     psm2_mq_req_t req;
+ *     psm2_mq_status_t status;
+ *     psm2_error_t err;
  *     my_request_t *myreq;
  *
  *     do {
- *         err = psm_mq_ipeek(mq, &req,
+ *         err = psm2_mq_ipeek(mq, &req,
  *                            NULL); // No need for status in ipeek here
- *         if (err == PSM_MQ_NO_COMPLETIONS)
+ *         if (err == PSM2_MQ_NO_COMPLETIONS)
  *             return num_completed;
- *         else if (err != PSM_OK)
+ *         else if (err != PSM2_OK)
  *             goto errh;
  *         num_completed++;
  *
  *         // We obtained 'req' at the head of the completion queue.  We can
  *         // now free the request with PSM and obtain our original reques
  *         // from the status' context
- *         err = psm_mq_test(&req, // will be marked as invalid
+ *         err = psm2_mq_test(&req, // will be marked as invalid
  *                           &status); // we need the status
  *         myreq = (my_request_t *) status.context;
  *
@@ -953,15 +953,15 @@ psm_mq_improbe2(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *rtag,
  *    while (1);
  * }
  * @endverbatim */
-psm_error_t
-psm_mq_ipeek(psm_mq_t mq, psm_mq_req_t *req, psm_mq_status_t *status);
+psm2_error_t
+psm2_mq_ipeek(psm2_mq_t mq, psm2_mq_req_t *req, psm2_mq_status_t *status);
 
 /** @brief Query for non-blocking requests ready for completion.
  *
  * Function to query a particular MQ for non-blocking requests that are ready
  * for completion.  Requests "ready for completion" are not actually considered
  * complete by MQ until they are returned to the MQ library through @ref
- * psm_mq_wait or @ref psm_mq_test.
+ * psm2_mq_wait or @ref psm2_mq_test.
  *
  * If the user can deal with consuming request completions in the order in
  * which they complete, this function can be used both for completions and for
@@ -975,43 +975,43 @@ psm_mq_ipeek(psm_mq_t mq, psm_mq_req_t *req, psm_mq_status_t *status);
  * @param[in] status Optional MQ status, can be NULL.
  *
  * @post The user has ensured progress if the function returns @ref
- *       PSM_MQ_NO_COMPLETIONS
+ *       PSM2_MQ_NO_COMPLETIONS
  *
  * The following error codes are returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The peek is successful and @c req is updated with a request
+ * @retval PSM2_OK The peek is successful and @c req is updated with a request
  *                ready for completion.  If @c status is non-NULL, it is also
  *                updated.
  *
- * @retval PSM_MQ_NO_COMPLETIONS The peek is not successful, meaning that there
+ * @retval PSM2_MQ_NO_COMPLETIONS The peek is not successful, meaning that there
  *                            are no further requests ready for completion.
  *                            The contents of @c req and @c status remain
  *                            unchanged.
  * @verbatim
- * // Example that uses ipeek_mq_ipeek to make progress instead of psm_poll
+ * // Example that uses ipeek_mq_ipeek to make progress instead of psm2_poll
  * // We return the amount of non-blocking requests that we've completed
- * int main_progress_loop(psm_mq_t mq)
+ * int main_progress_loop(psm2_mq_t mq)
  * {
  *     int num_completed = 0;
- *     psm_mq_req_t req;
- *     psm_mq_status2_t status;
- *     psm_error_t err;
+ *     psm2_mq_req_t req;
+ *     psm2_mq_status2_t status;
+ *     psm2_error_t err;
  *     my_request_t *myreq;
  *
  *     do {
- *         err = psm_mq_ipeek2(mq, &req,
+ *         err = psm2_mq_ipeek2(mq, &req,
  *                            NULL); // No need for status in ipeek here
- *         if (err == PSM_MQ_NO_COMPLETIONS)
+ *         if (err == PSM2_MQ_NO_COMPLETIONS)
  *             return num_completed;
- *         else if (err != PSM_OK)
+ *         else if (err != PSM2_OK)
  *             goto errh;
  *         num_completed++;
  *
  *         // We obtained 'req' at the head of the completion queue.  We can
  *         // now free the request with PSM and obtain our original reques
  *         // from the status' context
- *         err = psm_mq_test2(&req, // will be marked as invalid
+ *         err = psm2_mq_test2(&req, // will be marked as invalid
  *                           &status); // we need the status
  *         myreq = (my_request_t *) status.context;
  *
@@ -1021,8 +1021,8 @@ psm_mq_ipeek(psm_mq_t mq, psm_mq_req_t *req, psm_mq_status_t *status);
  *    while (1);
  * }
  * @endverbatim */
-psm_error_t
-psm_mq_ipeek2(psm_mq_t mq, psm_mq_req_t *req, psm_mq_status2_t *status);
+psm2_error_t
+psm2_mq_ipeek2(psm2_mq_t mq, psm2_mq_req_t *req, psm2_mq_status2_t *status);
 
 /** @brief Wait until a non-blocking request completes
  *
@@ -1034,16 +1034,16 @@ psm_mq_ipeek2(psm_mq_t mq, psm_mq_req_t *req, psm_mq_status2_t *status);
  * @param[in,out] request MQ non-blocking request
  * @param[out] status Updated if non-NULL when request successfully completes
  *
- * @pre The user has obtained a valid MQ request by calling @ref psm_mq_isend
- *      or @ref psm_mq_irecv and passes a pointer to enough storage to write
- *      the output of a @ref psm_mq_status_t or NULL if status is to be
+ * @pre The user has obtained a valid MQ request by calling @ref psm2_mq_isend
+ *      or @ref psm2_mq_irecv and passes a pointer to enough storage to write
+ *      the output of a @ref psm2_mq_status_t or NULL if status is to be
  *      ignored.
  *
  * @pre Since MQ will internally ensure progress while the user is
  *      suspended, the user need not ensure that progress is made prior to
  *      calling this function.
  *
- * @post The request is assigned the value @ref PSM_MQ_REQINVALID and all
+ * @post The request is assigned the value @ref PSM2_MQ_REQINVALID and all
  *       associated MQ request storage is released back to the MQ library.
  *
  * @remarks
@@ -1051,18 +1051,18 @@ psm_mq_ipeek2(psm_mq_t mq, psm_mq_req_t *req, psm_mq_status2_t *status);
  *      is incomplete.
  *  @li @c status can be NULL, in which case no status is written upon
  *      completion.
- *  @li If @c request is @ref PSM_MQ_REQINVALID, the function returns
+ *  @li If @c request is @ref PSM2_MQ_REQINVALID, the function returns
  *      immediately.
  *
  * The following error code is returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The request is complete or the value of @c was
- *                @ref PSM_MQ_REQINVALID.
+ * @retval PSM2_OK The request is complete or the value of @c was
+ *                @ref PSM2_MQ_REQINVALID.
  *
  */
-psm_error_t
-psm_mq_wait(psm_mq_req_t *request, psm_mq_status_t *status);
+psm2_error_t
+psm2_mq_wait(psm2_mq_req_t *request, psm2_mq_status_t *status);
 
 /** @brief Wait until a non-blocking request completes
  *
@@ -1074,16 +1074,16 @@ psm_mq_wait(psm_mq_req_t *request, psm_mq_status_t *status);
  * @param[in,out] request MQ non-blocking request
  * @param[out] status Updated if non-NULL when request successfully completes
  *
- * @pre The user has obtained a valid MQ request by calling @ref psm_mq_isend
- *      or @ref psm_mq_irecv and passes a pointer to enough storage to write
- *      the output of a @ref psm_mq_status2_t or NULL if status is to be
+ * @pre The user has obtained a valid MQ request by calling @ref psm2_mq_isend
+ *      or @ref psm2_mq_irecv and passes a pointer to enough storage to write
+ *      the output of a @ref psm2_mq_status2_t or NULL if status is to be
  *      ignored.
  *
  * @pre Since MQ will internally ensure progress while the user is
  *      suspended, the user need not ensure that progress is made prior to
  *      calling this function.
  *
- * @post The request is assigned the value @ref PSM_MQ_REQINVALID and all
+ * @post The request is assigned the value @ref PSM2_MQ_REQINVALID and all
  *       associated MQ request storage is released back to the MQ library.
  *
  * @remarks
@@ -1091,23 +1091,23 @@ psm_mq_wait(psm_mq_req_t *request, psm_mq_status_t *status);
  *      is incomplete.
  *  @li @c status can be NULL, in which case no status is written upon
  *      completion.
- *  @li If @c request is @ref PSM_MQ_REQINVALID, the function returns
+ *  @li If @c request is @ref PSM2_MQ_REQINVALID, the function returns
  *      immediately.
  *
  * The following error code is returned.  Other errors are handled by the PSM
- * error handler (@ref psm_error_register_handler).
+ * error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The request is complete or the value of @c was
- *                @ref PSM_MQ_REQINVALID.
+ * @retval PSM2_OK The request is complete or the value of @c was
+ *                @ref PSM2_MQ_REQINVALID.
  *
  */
-psm_error_t
-psm_mq_wait2(psm_mq_req_t *request, psm_mq_status2_t *status);
+psm2_error_t
+psm2_mq_wait2(psm2_mq_req_t *request, psm2_mq_status2_t *status);
 
 /** @brief Test if a non-blocking request is complete
  *
  * Function to test requests created from either preposted receive buffers or
- * non-blocking sends for completion.  Unlike @ref psm_mq_wait, this function
+ * non-blocking sends for completion.  Unlike @ref psm2_mq_wait, this function
  * tests @c request for completion and @e never ensures progress directly or
  * indirectly.  It is up to the user to employ some of the progress functions
  * described in @ref mq_progress to ensure progress if the user chooses to
@@ -1123,47 +1123,47 @@ psm_mq_wait2(psm_mq_req_t *request, psm_mq_status2_t *status);
  * @param[out] status Updated if non-NULL and the request successfully
  * completes
  *
- * @pre The user has obtained a valid MQ request by calling @ref psm_mq_isend
- *      or @ref psm_mq_irecv and passes a pointer to enough storage to write
- *      the output of a @ref psm_mq_status_t or NULL if status is to be
+ * @pre The user has obtained a valid MQ request by calling @ref psm2_mq_isend
+ *      or @ref psm2_mq_irecv and passes a pointer to enough storage to write
+ *      the output of a @ref psm2_mq_status_t or NULL if status is to be
  *      ignored.
  *
  * @pre The user has ensured progress on the Matched Queue if @ref
- *      psm_mq_test is exclusively used for guaranteeing request completions.
+ *      psm2_mq_test is exclusively used for guaranteeing request completions.
  *
  * @post If the request is complete, the request is assigned the value @ref
- *       PSM_MQ_REQINVALID and all associated MQ request storage is released
+ *       PSM2_MQ_REQINVALID and all associated MQ request storage is released
  *       back to the MQ library. If the request is incomplete, the contents of
  *       @c request is unchanged.
  *
  * @post The user will ensure progress on the Matched Queue if @ref
- *       psm_mq_test is exclusively used for guaranteeing request completions.
+ *       psm2_mq_test is exclusively used for guaranteeing request completions.
  *
  * The following two errors are always returned.  Other errors are handled by
- * the PSM error handler (@ref psm_error_register_handler).
+ * the PSM error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The request is complete and @c request is set to @ref
- *                PSM_MQ_REQINVALID or the value of @c was PSM_MQ_REQINVALID
+ * @retval PSM2_OK The request is complete and @c request is set to @ref
+ *                PSM2_MQ_REQINVALID or the value of @c was PSM2_MQ_REQINVALID
  *
- * @retval PSM_MQ_NO_COMPLETIONS The request is not complete and @c request is
+ * @retval PSM2_MQ_NO_COMPLETIONS The request is not complete and @c request is
  *                           unchanged.
  *
  * @verbatim
  * // Function that returns the first completed request in an array
  * // of requests.
  * void *
- * user_testany(psm_mq_t mq, psm_mq_req_t *allreqs, int nreqs)
+ * user_testany(psm2_mq_t mq, psm2_mq_req_t *allreqs, int nreqs)
  * {
  *   int i;
  *   void *context = NULL;
  *
  *   // Ensure progress only once
- *   psm_poll(mq);
+ *   psm2_poll(mq);
  *
  *   // Test for at least one completion and return it's context
- *   psm_mq_status_t stat;
+ *   psm2_mq_status_t stat;
  *   for (i = 0; i < nreqs; i++) {
- *     if (psm_mq_test(&allreqs[i], &stat) == PSM_OK) {
+ *     if (psm2_mq_test(&allreqs[i], &stat) == PSM2_OK) {
  *       context = stat.context;
  *       break;
  *     }
@@ -1172,13 +1172,13 @@ psm_mq_wait2(psm_mq_req_t *request, psm_mq_status2_t *status);
  * }
  * @endverbatim
  */
-psm_error_t
-psm_mq_test(psm_mq_req_t *request, psm_mq_status_t *status);
+psm2_error_t
+psm2_mq_test(psm2_mq_req_t *request, psm2_mq_status_t *status);
 
 /** @brief Test if a non-blocking request is complete
  *
  * Function to test requests created from either preposted receive buffers or
- * non-blocking sends for completion.  Unlike @ref psm_mq_wait, this function
+ * non-blocking sends for completion.  Unlike @ref psm2_mq_wait, this function
  * tests @c request for completion and @e never ensures progress directly or
  * indirectly.  It is up to the user to employ some of the progress functions
  * described in @ref mq_progress to ensure progress if the user chooses to
@@ -1194,47 +1194,47 @@ psm_mq_test(psm_mq_req_t *request, psm_mq_status_t *status);
  * @param[out] status Updated if non-NULL and the request successfully
  * completes
  *
- * @pre The user has obtained a valid MQ request by calling @ref psm_mq_isend
- *      or @ref psm_mq_irecv and passes a pointer to enough storage to write
- *      the output of a @ref psm_mq_status2_t or NULL if status is to be
+ * @pre The user has obtained a valid MQ request by calling @ref psm2_mq_isend
+ *      or @ref psm2_mq_irecv and passes a pointer to enough storage to write
+ *      the output of a @ref psm2_mq_status2_t or NULL if status is to be
  *      ignored.
  *
  * @pre The user has ensured progress on the Matched Queue if @ref
- *      psm_mq_test is exclusively used for guaranteeing request completions.
+ *      psm2_mq_test is exclusively used for guaranteeing request completions.
  *
  * @post If the request is complete, the request is assigned the value @ref
- *       PSM_MQ_REQINVALID and all associated MQ request storage is released
+ *       PSM2_MQ_REQINVALID and all associated MQ request storage is released
  *       back to the MQ library. If the request is incomplete, the contents of
  *       @c request is unchanged.
  *
  * @post The user will ensure progress on the Matched Queue if @ref
- *       psm_mq_test is exclusively used for guaranteeing request completions.
+ *       psm2_mq_test is exclusively used for guaranteeing request completions.
  *
  * The following two errors are always returned.  Other errors are handled by
- * the PSM error handler (@ref psm_error_register_handler).
+ * the PSM error handler (@ref psm2_error_register_handler).
  *
- * @retval PSM_OK The request is complete and @c request is set to @ref
- *                PSM_MQ_REQINVALID or the value of @c was PSM_MQ_REQINVALID
+ * @retval PSM2_OK The request is complete and @c request is set to @ref
+ *                PSM2_MQ_REQINVALID or the value of @c was PSM2_MQ_REQINVALID
  *
- * @retval PSM_MQ_NO_COMPLETIONS The request is not complete and @c request is
+ * @retval PSM2_MQ_NO_COMPLETIONS The request is not complete and @c request is
  *                           unchanged.
  *
  * @verbatim
  * // Function that returns the first completed request in an array
  * // of requests.
  * void *
- * user_testany(psm_mq_t mq, psm_mq_req_t *allreqs, int nreqs)
+ * user_testany(psm2_mq_t mq, psm2_mq_req_t *allreqs, int nreqs)
  * {
  *   int i;
  *   void *context = NULL;
  *
  *   // Ensure progress only once
- *   psm_poll(mq);
+ *   psm2_poll(mq);
  *
  *   // Test for at least one completion and return it's context
- *   psm_mq_status2_t stat;
+ *   psm2_mq_status2_t stat;
  *   for (i = 0; i < nreqs; i++) {
- *     if (psm_mq_test2(&allreqs[i], &stat) == PSM_OK) {
+ *     if (psm2_mq_test2(&allreqs[i], &stat) == PSM2_OK) {
  *       context = stat.context;
  *       break;
  *     }
@@ -1243,40 +1243,40 @@ psm_mq_test(psm_mq_req_t *request, psm_mq_status_t *status);
  * }
  * @endverbatim
  */
-psm_error_t
-psm_mq_test2(psm_mq_req_t *request, psm_mq_status2_t *status);
+psm2_error_t
+psm2_mq_test2(psm2_mq_req_t *request, psm2_mq_status2_t *status);
 
 /** @brief Cancel a preposted request
  *
  * Function to cancel a preposted receive request returned by @ref
- * psm_mq_irecv.  It is currently illegal to cancel a send request initiated
- * with @ref psm_mq_isend.
+ * psm2_mq_irecv.  It is currently illegal to cancel a send request initiated
+ * with @ref psm2_mq_isend.
  *
- * @pre The user has obtained a valid MQ request by calling @ref psm_mq_isend.
+ * @pre The user has obtained a valid MQ request by calling @ref psm2_mq_isend.
  *
  * @post Whether the cancel is successful or not, the user returns the
- *       request to the library by way of @ref psm_mq_test or @ref
- *       psm_mq_wait.
+ *       request to the library by way of @ref psm2_mq_test or @ref
+ *       psm2_mq_wait.
  *
  * Only the two following errors can be returned directly, without being
- * handled by the error handler (@ref psm_error_register_handler):
+ * handled by the error handler (@ref psm2_error_register_handler):
  *
- * @retval PSM_OK The request could be successfully cancelled such that the
+ * @retval PSM2_OK The request could be successfully cancelled such that the
  *                preposted receive buffer could be removed from the preposted
  *                receive queue before a match occured. The associated @c
  *                request remains unchanged and the user must still return
  *                the storage to the MQ library.
  *
- * @retval PSM_MQ_NO_COMPLETIONS The request could not be successfully cancelled
+ * @retval PSM2_MQ_NO_COMPLETIONS The request could not be successfully cancelled
  *                           since the preposted receive buffer has already
  *                           matched an incoming message.  The @c request
  *                           remains unchanged.
  *
  */
-psm_error_t psm_mq_cancel(psm_mq_req_t *req);
+psm2_error_t psm2_mq_cancel(psm2_mq_req_t *req);
 
 /*! @brief MQ statistics structure */
-struct psm_mq_stats {
+struct psm2_mq_stats {
 	/** Bytes received into a matched user buffer */
 	uint64_t rx_user_bytes;
 	/** Messages received into a matched user buffer */
@@ -1310,14 +1310,14 @@ struct psm_mq_stats {
 	uint64_t _reserved[16];
 };
 
-#define PSM_MQ_NUM_STATS    13	/**< How many stats are currently used in @ref psm_mq_stats */
+#define PSM2_MQ_NUM_STATS    13	/**< How many stats are currently used in @ref psm2_mq_stats */
 
-/*! @see psm_mq_stats */
-	typedef struct psm_mq_stats psm_mq_stats_t;
+/*! @see psm2_mq_stats */
+	typedef struct psm2_mq_stats psm2_mq_stats_t;
 
 /** @brief Retrieve statistics from an instantied MQ */
 	void
-	 psm_mq_get_stats(psm_mq_t mq, psm_mq_stats_t *stats);
+	 psm2_mq_get_stats(psm2_mq_t mq, psm2_mq_stats_t *stats);
 
 /*! @} */
 #ifdef __cplusplus

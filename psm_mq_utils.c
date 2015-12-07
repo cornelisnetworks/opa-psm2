@@ -62,9 +62,9 @@
  *
  */
 
-psm_mq_req_t psmi_mq_req_alloc(psm_mq_t mq, uint32_t type)
+psm2_mq_req_t psmi_mq_req_alloc(psm2_mq_t mq, uint32_t type)
 {
-	psm_mq_req_t req;
+	psm2_mq_req_t req;
 
 	psmi_assert(type == MQE_TYPE_RECV || type == MQE_TYPE_SEND);
 
@@ -77,13 +77,13 @@ psm_mq_req_t psmi_mq_req_alloc(psm_mq_t mq, uint32_t type)
 		/* A while ago there were issues about forgetting to zero-out parts of the
 		 * structure, I'm leaving this as a debug-time option */
 #ifdef PSM_DEBUG
-		memset(req, 0, sizeof(struct psm_mq_req));
+		memset(req, 0, sizeof(struct psm2_mq_req));
 #endif
 		req->type = type;
 		req->state = MQ_STATE_FREE;
 		req->next = NULL;
 		req->pprev = NULL;
-		req->error_code = PSM_OK;
+		req->error_code = PSM2_OK;
 		req->mq = mq;
 		req->testwait_callback = NULL;
 		req->rts_peer = NULL;
@@ -96,23 +96,23 @@ psm_mq_req_t psmi_mq_req_alloc(psm_mq_t mq, uint32_t type)
 		psmi_mpool_get_obj_info(issend ? mq->sreq_pool : mq->rreq_pool,
 					&reqchunk, &reqmax);
 
-		psmi_handle_error(PSMI_EP_NORETURN, PSM_PARAM_ERR,
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_PARAM_ERR,
 				  "Exhausted %d MQ %s request descriptors, which usually indicates "
 				  "a user program error or insufficient request descriptors (%s=%d)",
 				  reqmax, issend ? "isend" : "irecv",
-				  issend ? "PSM_MQ_SENDREQS_MAX" :
-				  "PSM_MQ_RECVREQS_MAX", reqmax);
+				  issend ? "PSM2_MQ_SENDREQS_MAX" :
+				  "PSM2_MQ_RECVREQS_MAX", reqmax);
 		return NULL;
 	}
 }
 
-psm_error_t psmi_mq_req_init(psm_mq_t mq)
+psm2_error_t psmi_mq_req_init(psm2_mq_t mq)
 {
-	psm_mq_req_t warmup_req;
-	psm_error_t err = PSM_OK;
+	psm2_mq_req_t warmup_req;
+	psm2_error_t err = PSM2_OK;
 
 	_HFI_VDBG("mq element sizes are %d bytes\n",
-		  (int)sizeof(struct psm_mq_req));
+		  (int)sizeof(struct psm2_mq_req));
 
 	/*
 	 * Send MQ requests
@@ -126,10 +126,10 @@ psm_error_t psmi_mq_req_init(psm_mq_t mq)
 			goto fail;
 
 		if ((mq->sreq_pool =
-		     psmi_mpool_create(sizeof(struct psm_mq_req), chunksz,
+		     psmi_mpool_create(sizeof(struct psm2_mq_req), chunksz,
 				       maxsz, 0, DESCRIPTORS, NULL,
 				       NULL)) == NULL) {
-			err = PSM_NO_MEMORY;
+			err = PSM2_NO_MEMORY;
 			goto fail;
 		}
 	}
@@ -146,10 +146,10 @@ psm_error_t psmi_mq_req_init(psm_mq_t mq)
 			goto fail;
 
 		if ((mq->rreq_pool =
-		     psmi_mpool_create(sizeof(struct psm_mq_req), chunksz,
+		     psmi_mpool_create(sizeof(struct psm2_mq_req), chunksz,
 				       maxsz, 0, DESCRIPTORS, NULL,
 				       NULL)) == NULL) {
-			err = PSM_NO_MEMORY;
+			err = PSM2_NO_MEMORY;
 			goto fail;
 		}
 	}
@@ -167,11 +167,11 @@ fail:
 	return err;
 }
 
-psm_error_t psmi_mq_req_fini(psm_mq_t mq)
+psm2_error_t psmi_mq_req_fini(psm2_mq_t mq)
 {
 	psmi_mpool_destroy(mq->rreq_pool);
 	psmi_mpool_destroy(mq->sreq_pool);
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 
@@ -183,10 +183,10 @@ static
 void psmi_mq_stats_callback(struct mpspawn_stats_req_args *args)
 {
 	uint64_t *entry = args->stats;
-	psm_mq_t mq = (psm_mq_t) args->context;
-	psm_mq_stats_t mqstats;
+	psm2_mq_t mq = (psm2_mq_t) args->context;
+	psm2_mq_stats_t mqstats;
 
-	psm_mq_get_stats(mq, &mqstats);
+	psm2_mq_get_stats(mq, &mqstats);
 
 	if (args->num < 8)
 		return;
@@ -202,7 +202,7 @@ void psmi_mq_stats_callback(struct mpspawn_stats_req_args *args)
 	entry[7] = mqstats.rx_sys_bytes;
 }
 
-void psmi_mq_stats_register(psm_mq_t mq, mpspawn_stats_add_fn add_fn)
+void psmi_mq_stats_register(psm2_mq_t mq, mpspawn_stats_add_fn add_fn)
 {
 	char *desc[8];
 	uint16_t flags[8];

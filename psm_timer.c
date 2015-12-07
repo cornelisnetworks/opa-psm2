@@ -63,7 +63,7 @@
 #  define PSMI_TIMER_STATS_ADD_TRAVERSAL(ctrl)
 #endif
 
-psm_error_t psmi_timer_init(struct psmi_timer_ctrl *ctrl)
+psm2_error_t psmi_timer_init(struct psmi_timer_ctrl *ctrl)
 {
 	ctrl->t_cyc_next_expire = PSMI_TIMER_INFINITE;
 
@@ -73,10 +73,10 @@ psm_error_t psmi_timer_init(struct psmi_timer_ctrl *ctrl)
 #endif
 
 	TAILQ_INIT(&ctrl->timerq);
-	return PSM_OK;
+	return PSM2_OK;
 }
 
-psm_error_t psmi_timer_fini(struct psmi_timer_ctrl *ctrl)
+psm2_error_t psmi_timer_fini(struct psmi_timer_ctrl *ctrl)
 {
 #if PSMI_TIMER_STATS
 	if (ctrl->num_insertions > 0) {
@@ -85,7 +85,7 @@ psm_error_t psmi_timer_fini(struct psmi_timer_ctrl *ctrl)
 			  ctrl->num_insertions);
 	}
 #endif
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 void
@@ -145,17 +145,19 @@ psmi_timer_request_always(struct psmi_timer_ctrl *ctrl,
 	return;
 }
 
-psm_error_t
+psm2_error_t
 psmi_timer_process_expired(struct psmi_timer_ctrl *ctrl, uint64_t t_cyc_expire)
 {
-	psm_error_t err = PSM_OK_NO_PROGRESS;
+	psm2_error_t err = PSM2_OK_NO_PROGRESS;
 	struct psmi_timer *t_cursor = TAILQ_LAST(&ctrl->timerq, timerq);
+
+	PSM2_LOG_MSG("entering");
 
 	while (t_cursor) {
 		if (t_cursor->t_timeout > t_cyc_expire)
 			break;
 
-		err = PSM_OK;
+		err = PSM2_OK;
 		psmi_assert(t_cursor->flags & PSMI_TIMER_FLAG_PENDING);
 		t_cursor->flags &= ~PSMI_TIMER_FLAG_PENDING;
 		TAILQ_REMOVE(&ctrl->timerq, t_cursor, timer);
@@ -169,6 +171,7 @@ psmi_timer_process_expired(struct psmi_timer_ctrl *ctrl, uint64_t t_cyc_expire)
 		ctrl->t_cyc_next_expire =
 		    TAILQ_LAST(&ctrl->timerq, timerq)->t_timeout;
 
+	PSM2_LOG_MSG("leaving");
 	return err;
 }
 

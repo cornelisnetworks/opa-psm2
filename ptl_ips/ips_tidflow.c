@@ -58,7 +58,7 @@
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
 
-psm_error_t ips_tf_init(struct ips_protoexp *protoexp,
+psm2_error_t ips_tf_init(struct ips_protoexp *protoexp,
 			const psmi_context_t *context,
 			struct ips_tf *tfc,
 			ips_tf_avail_cb_fn_t cb)
@@ -90,7 +90,7 @@ psm_error_t ips_tf_init(struct ips_protoexp *protoexp,
 		psmi_calloc(context->ep, UNDEFINED, 1,
 			sizeof(struct ips_tid_recv_desc)*HFI_TF_NFLOWS);
 	if (tfc->tidrecvc == NULL)
-		return PSM_NO_MEMORY;
+		return PSM2_NO_MEMORY;
 
 	for (tf_idx = 0; tf_idx < HFI_TF_NFLOWS; tf_idx++) {
 		tfc->tidrecvc[tf_idx].context = context;
@@ -108,7 +108,7 @@ psm_error_t ips_tf_init(struct ips_protoexp *protoexp,
 		    psmi_calloc(context->ep, UNDEFINED, 1,
 				sizeof(struct ips_tf_ctrl));
 		if (tfc->tf_ctrl == NULL) {
-			return PSM_NO_MEMORY;
+			return PSM2_NO_MEMORY;
 		}
 	}
 
@@ -141,20 +141,20 @@ psm_error_t ips_tf_init(struct ips_protoexp *protoexp,
 					entries,
 					PSMI_STATS_HOWMANY(entries), tidc);
 #else
-	return PSM_OK;
+	return PSM2_OK;
 #endif
 }
 
-psm_error_t ips_tf_fini(struct ips_tf *tfc)
+psm2_error_t ips_tf_fini(struct ips_tf *tfc)
 {
 	if (!tfc->context->tf_ctrl)
 		psmi_free(tfc->tf_ctrl);
 	psmi_free(tfc->tidrecvc);
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 /* Allocate a tidflow */
-psm_error_t ips_tf_allocate(struct ips_tf *tfc,
+psm2_error_t ips_tf_allocate(struct ips_tf *tfc,
 		struct ips_tid_recv_desc **tidrecvc)
 {
 	struct ips_tf_ctrl *ctrl = tfc->tf_ctrl;
@@ -170,7 +170,7 @@ psm_error_t ips_tf_allocate(struct ips_tf *tfc,
 		if (tfc->context->tf_ctrl)
 			pthread_spin_unlock(&ctrl->tf_ctrl_lock);
 
-		return PSM_EP_NO_RESOURCES;
+		return PSM2_EP_NO_RESOURCES;
 	}
 
 	entry = &ctrl->tf[ctrl->tf_head];
@@ -197,11 +197,11 @@ psm_error_t ips_tf_allocate(struct ips_tf *tfc,
 	if (entry->next_gen == tfc->tf_gen_mask)
 		entry->next_gen = 0;
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 /* Deallocate a tidflow */
-psm_error_t ips_tf_deallocate(struct ips_tf *tfc, uint32_t tf_idx)
+psm2_error_t ips_tf_deallocate(struct ips_tf *tfc, uint32_t tf_idx)
 {
 	struct ips_tf_ctrl *ctrl = tfc->tf_ctrl;
 	struct ips_tf_entry *entry;
@@ -212,7 +212,13 @@ psm_error_t ips_tf_deallocate(struct ips_tf *tfc, uint32_t tf_idx)
 	entry = &ctrl->tf[tf_idx];
 	psmi_assert(entry->state == TF_STATE_ALLOCATED);
 	entry->state = TF_STATE_DEALLOCATED;
-	tfc->tidrecvc[tf_idx].rdescid._desc_genc++;
+
+	/*
+	 * The wire protocol only uses 16bits tidrecvc generation
+	 * count in exptid packet, this should be bigger enough,
+	 * u16w3 is the lower 16bits of _desc_genc
+	 */
+	tfc->tidrecvc[tf_idx].rdescid.u16w3++;
 
 	/* Mark invalid generation for flow (stale packets will be dropped) */
 	hfi_tidflow_reset(tfc->context->ctrl, tf_idx, tfc->tf_gen_mask, 0x7FF);
@@ -232,15 +238,15 @@ psm_error_t ips_tf_deallocate(struct ips_tf *tfc, uint32_t tf_idx)
 	if (((tfc->tf_num_inuse + 1) == ctrl->tf_num_max) && tfc->tf_avail_cb)
 		tfc->tf_avail_cb(tfc, tfc->tf_avail_context);
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 /* Allocate a generation for a flow */
-psm_error_t ips_tfgen_allocate(struct ips_tf *tfc,
+psm2_error_t ips_tfgen_allocate(struct ips_tf *tfc,
 			       uint32_t tf_idx, uint32_t *tfgen)
 {
 	struct ips_tf_entry *entry;
-	int ret = PSM_OK;
+	int ret = PSM2_OK;
 
 	psmi_assert(tf_idx < HFI_TF_NFLOWS);
 	psmi_assert(tf_idx >= 0);

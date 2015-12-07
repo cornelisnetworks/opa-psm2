@@ -199,7 +199,7 @@ psmi_mpool_create(size_t obj_size, uint32_t num_obj_per_chunk,
 		mp->mp_elm_offset = 0;
 	}
 
-	if (psmi_mpool_allocate_chunk(mp) != PSM_OK) {
+	if (psmi_mpool_allocate_chunk(mp) != PSM2_OK) {
 		psmi_mpool_destroy(mp);
 		return NULL;
 	}
@@ -226,7 +226,7 @@ void *psmi_mpool_get(mpool_t mp)
 	void *obj;
 
 	if (SLIST_EMPTY(&mp->mp_head)) {
-		if (psmi_mpool_allocate_chunk(mp) != PSM_OK)
+		if (psmi_mpool_allocate_chunk(mp) != PSM2_OK)
 			return NULL;
 	}
 
@@ -421,7 +421,7 @@ static int psmi_mpool_allocate_chunk(mpool_t mp)
 		    mp->mp_num_obj_max_total);
 
 	if (num_to_allocate == 0)
-		return PSM_NO_MEMORY;
+		return PSM2_NO_MEMORY;
 
 	chunk = psmi_malloc(PSMI_EP_NONE, mp->mp_memtype,
 			    num_to_allocate * mp->mp_elm_size);
@@ -429,7 +429,7 @@ static int psmi_mpool_allocate_chunk(mpool_t mp)
 		fprintf(stderr,
 			"Failed to allocate memory for memory pool chunk: %s\n",
 			strerror(errno));
-		return PSM_NO_MEMORY;
+		return PSM2_NO_MEMORY;
 	}
 
 	for (i = 0; i < num_to_allocate; i++) {
@@ -460,7 +460,7 @@ static int psmi_mpool_allocate_chunk(mpool_t mp)
 	mp->mp_elm_vector_free++;
 	mp->mp_num_obj += num_to_allocate;
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 #if 0

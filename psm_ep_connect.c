@@ -55,15 +55,15 @@
 
 #include "psm_user.h"
 
-int psmi_ep_device_is_enabled(const psm_ep_t ep, int devid);
+int psmi_ep_device_is_enabled(const psm2_ep_t ep, int devid);
 
-psm_error_t
-__psm_ep_connect(psm_ep_t ep, int num_of_epid, psm_epid_t const *array_of_epid,
+psm2_error_t
+__psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epid,
 		 int const *array_of_epid_mask,	/* can be NULL */
-		 psm_error_t *array_of_errors, psm_epaddr_t *array_of_epaddr,
+		 psm2_error_t *array_of_errors, psm2_epaddr_t *array_of_epaddr,
 		 int64_t timeout)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	ptl_ctl_t *ptlctl;
 	ptl_t *ptl;
 	int i, j, dup_idx;
@@ -75,6 +75,7 @@ __psm_ep_connect(psm_ep_t ep, int num_of_epid, psm_epid_t const *array_of_epid,
 	uint64_t t_left;
 	union psmi_envvar_val timeout_intval;
 
+	PSM2_LOG_MSG("entering");
 	PSMI_ERR_UNLESS_INITIALIZED(ep);
 
 	PSMI_PLOCK();
@@ -86,13 +87,13 @@ __psm_ep_connect(psm_ep_t ep, int num_of_epid, psm_epid_t const *array_of_epid,
 	 */
 	if (ep == NULL || array_of_epaddr == NULL || array_of_epid == NULL ||
 	    num_of_epid < 1) {
-		err = psmi_handle_error(ep, PSM_PARAM_ERR,
-					"Invalid psm_ep_connect parameters");
+		err = psmi_handle_error(ep, PSM2_PARAM_ERR,
+					"Invalid psm2_ep_connect parameters");
 		goto fail;
 	}
 
 	/* We need two of these masks to detect duplicates */
-	err = PSM_NO_MEMORY;
+	err = PSM2_NO_MEMORY;
 	epid_mask =
 	    (int *)psmi_malloc(ep, UNDEFINED, sizeof(int) * num_of_epid);
 	if (epid_mask == NULL)
@@ -101,7 +102,7 @@ __psm_ep_connect(psm_ep_t ep, int num_of_epid, psm_epid_t const *array_of_epid,
 	    (int *)psmi_malloc(ep, UNDEFINED, sizeof(int) * num_of_epid);
 	if (epid_mask_isdupof == NULL)
 		goto fail;
-	err = PSM_OK;
+	err = PSM2_OK;
 
 	/* Eventually handle timeouts across all connects. */
 	for (j = 0; j < num_of_epid; j++) {
@@ -109,19 +110,19 @@ __psm_ep_connect(psm_ep_t ep, int num_of_epid, psm_epid_t const *array_of_epid,
 			epid_mask[j] = 0;
 		else {
 			epid_mask[j] = 1;
-			array_of_errors[j] = PSM_EPID_UNKNOWN;
+			array_of_errors[j] = PSM2_EPID_UNKNOWN;
 			array_of_epaddr[j] = NULL;
 			num_toconnect++;
 		}
 		epid_mask_isdupof[j] = -1;
 	}
 
-	psmi_getenv("PSM_CONNECT_TIMEOUT",
+	psmi_getenv("PSM2_CONNECT_TIMEOUT",
 		    "End-point connection timeout over-ride. 0 for no time-out.",
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
 		    (union psmi_envvar_val)0, &timeout_intval);
 
-	if (getenv("PSM_CONNECT_TIMEOUT")) {
+	if (getenv("PSM2_CONNECT_TIMEOUT")) {
 		timeout = timeout_intval.e_uint * SEC_ULL;
 	} else if (timeout > 0) {
 		/* The timeout parameter provides the minimum timeout. A heuristic
@@ -171,7 +172,7 @@ __psm_ep_connect(psm_ep_t ep, int num_of_epid, psm_epid_t const *array_of_epid,
 			ptlctl = &ep->ptl_ips;	/*no-unused */
 			ptl = ep->ptl_ips.ptl;	/*no-unused */
 			device = "ips";	/*no-unused */
-			psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 					  "Unknown/unhandled PTL id %d\n",
 					  ep->devid_enabled[i]);
 			break;
@@ -200,7 +201,7 @@ __psm_ep_connect(psm_ep_t ep, int num_of_epid, psm_epid_t const *array_of_epid,
 				epid_mask_isdupof[j] = -1;
 			}
 
-			if (array_of_errors[j] == PSM_OK) {
+			if (array_of_errors[j] == PSM2_OK) {
 				epid_mask[j] = 0;	/* don't try on next ptl */
 				ep->connections++;
 			}
@@ -212,8 +213,8 @@ __psm_ep_connect(psm_ep_t ep, int num_of_epid, psm_epid_t const *array_of_epid,
 		if (array_of_epid_mask != NULL && !array_of_epid_mask[i])
 			continue;
 		/* If we see unreachable here, that means some PTLs were not enabled */
-		if (array_of_errors[i] == PSM_EPID_UNREACHABLE) {
-			err = PSM_EPID_UNREACHABLE;
+		if (array_of_errors[i] == PSM2_EPID_UNREACHABLE) {
+			err = PSM2_EPID_UNREACHABLE;
 			break;
 		}
 
@@ -231,12 +232,12 @@ connect_fail:
 	/* If the error is a timeout (at worse) and the client is OPA MPI,
 	 * just return timeout to let OPA MPI handle the hostnames that
 	 * timed out */
-	if (err != PSM_OK) {
-		char errbuf[PSM_ERRSTRING_MAXLEN];
+	if (err != PSM2_OK) {
+		char errbuf[PSM2_ERRSTRING_MAXLEN];
 		size_t len;
 		int j = 0;
 
-		if (err == PSM_EPID_UNREACHABLE) {
+		if (err == PSM2_EPID_UNREACHABLE) {
 			char *deverr = "of an incorrect setting";
 			char *eperr = " ";
 			char *devname = NULL;
@@ -279,19 +280,19 @@ connect_fail:
 				errbuf[len - 1] = ')';
 		} else
 			len = snprintf(errbuf, sizeof(errbuf) - 1,
-				       "%s", err == PSM_TIMEOUT ?
+				       "%s", err == PSM2_TIMEOUT ?
 				       "Dectected connection timeout" :
-				       psm_error_get_string(err));
+				       psm2_error_get_string(err));
 
 		/* first pass, look for all nodes with the error */
 		for (i = 0; i < num_of_epid && len < sizeof(errbuf) - 1; i++) {
 			if (array_of_epid_mask != NULL
 			    && !array_of_epid_mask[i])
 				continue;
-			if (array_of_errors[i] == PSM_OK)
+			if (array_of_errors[i] == PSM2_OK)
 				continue;
-			if (array_of_errors[i] == PSM_EPID_UNREACHABLE &&
-			    err != PSM_EPID_UNREACHABLE)
+			if (array_of_errors[i] == PSM2_EPID_UNREACHABLE &&
+			    err != PSM2_EPID_UNREACHABLE)
 				continue;
 			if (err == array_of_errors[i]) {
 				len +=
@@ -315,6 +316,7 @@ fail:
 	if (epid_mask_isdupof != NULL)
 		psmi_free(epid_mask_isdupof);
 
+	PSM2_LOG_MSG("leaving");
 	return err;
 }
-PSMI_API_DECL(psm_ep_connect)
+PSMI_API_DECL(psm2_ep_connect)

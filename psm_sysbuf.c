@@ -93,12 +93,12 @@ static struct psmi_sysbuf_allocator psmi_sysbuf;
 
 #if 0
 /* There's a version with a basic wrapper around malloc, as a back up */
-void *psmi_sysbuf_alloc(psm_ep_t ep, uint32_t nbytes)
+void *psmi_sysbuf_alloc(psm2_ep_t ep, uint32_t nbytes)
 {
 	return malloc(nbytes);
 }
 
-void psmi_sysbuf_free(psm_ep_t ep, void *ptr)
+void psmi_sysbuf_free(psm2_ep_t ep, void *ptr)
 {
 	free(ptr);
 }
@@ -113,7 +113,7 @@ int psmi_sysbuf_init(void)
 	uint32_t replenishing_rate[] = { 128, 64, 32, 16, 8, 4, 0 };
 
 	if (psmi_sysbuf.is_initialized)
-		return PSM_OK;
+		return PSM2_OK;
 
 	for (i = 0; i < MM_NUM_OF_POOLS; i++) {
 		psmi_sysbuf.handler_index[i].block_size = block_sizes[i];
@@ -142,10 +142,11 @@ int psmi_sysbuf_init(void)
 		if (block_sizes[i] == -1)
 			continue;
 		ptr = psmi_sysbuf_alloc(block_sizes[i]);
+		psmi_assert(ptr);
 		psmi_sysbuf_free(ptr);
 	}
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 void psmi_sysbuf_fini(void)

@@ -57,15 +57,17 @@
 #include "psm_user.h"
 
 void
-__psm_uuid_generate(psm_uuid_t uuid_out)
+__psm2_uuid_generate(psm2_uuid_t uuid_out)
 {
+	PSM2_LOG_MSG("entering");
 	uuid_generate(uuid_out);
+	PSM2_LOG_MSG("leaving");
 	return;
 }
-PSMI_API_DECL(psm_uuid_generate)
+PSMI_API_DECL(psm2_uuid_generate)
 
 int
-psmi_uuid_compare(const psm_uuid_t uuA, const psm_uuid_t uuB)
+psmi_uuid_compare(const psm2_uuid_t uuA, const psm2_uuid_t uuB)
 {
 	return uuid_compare(uuA, uuB);
 }

@@ -97,21 +97,21 @@ int psmi_diags(void)
 static int psmi_test_epid_table(int numelems)
 {
 	ptl_ctl_t ctl;
-	psm_epaddr_t *ep_array, epaddr, ep_alloc;
-	psm_epid_t *epid_array, epid_tmp;
-	psm_ep_t ep = (psm_ep_t) (uintptr_t) 0xabcdef00;
+	psm2_epaddr_t *ep_array, epaddr, ep_alloc;
+	psm2_epid_t *epid_array, epid_tmp;
+	psm2_ep_t ep = (psm2_ep_t) (uintptr_t) 0xabcdef00;
 	struct psmi_epid_table *tab;
 	int i, j;
 
 	ep_alloc =
-	    (psm_epaddr_t) psmi_calloc(PSMI_EP_NONE, UNDEFINED, numelems,
-				       sizeof(struct psm_epaddr));
+	    (psm2_epaddr_t) psmi_calloc(PSMI_EP_NONE, UNDEFINED, numelems,
+				       sizeof(struct psm2_epaddr));
 	ep_array =
-	    (psm_epaddr_t *) psmi_calloc(PSMI_EP_NONE, UNDEFINED, numelems,
-					 sizeof(struct psm_epaddr *));
+	    (psm2_epaddr_t *) psmi_calloc(PSMI_EP_NONE, UNDEFINED, numelems,
+					 sizeof(struct psm2_epaddr *));
 	epid_array =
-	    (psm_epid_t *) psmi_calloc(PSMI_EP_NONE, UNDEFINED, numelems,
-				       sizeof(psm_epid_t));
+	    (psm2_epid_t *) psmi_calloc(PSMI_EP_NONE, UNDEFINED, numelems,
+				       sizeof(psm2_epid_t));
 	diags_assert(ep_alloc != NULL);
 	diags_assert(ep_array != NULL);
 	diags_assert(epid_array != NULL);

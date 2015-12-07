@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2015 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
 #include "ipserror.h"
@@ -68,10 +68,10 @@
  * Timer callbacks.  When we need work to be done out of the receive process
  * loop, we schedule work on timers to be done at a later time.
  */
-static psm_error_t
+static psm2_error_t
 ips_tid_pendsend_timer_callback(struct psmi_timer *timer, uint64_t current);
 
-static psm_error_t
+static psm2_error_t
 ips_tid_pendtids_timer_callback(struct psmi_timer *timer, uint64_t current);
 
 static void
@@ -91,10 +91,10 @@ static void ips_tidflow_avail_callback(struct ips_tf *tfc, void *context);
  * non-shared contexts */
 extern int ips_ptl_recvq_isempty(const struct ptl *ptl);
 
-static psm_error_t ips_tid_recv_free(struct ips_tid_recv_desc *tidrecvc);
-static psm_error_t ips_tid_send_exp(struct ips_tid_send_desc *tidsendc);
+static psm2_error_t ips_tid_recv_free(struct ips_tid_recv_desc *tidrecvc);
+static psm2_error_t ips_tid_send_exp(struct ips_tid_send_desc *tidsendc);
 
-psm_error_t
+psm2_error_t
 ips_protoexp_init(const psmi_context_t *context,
 		  const struct ips_proto *proto,
 		  uint32_t protoexp_flags,
@@ -103,12 +103,12 @@ ips_protoexp_init(const psmi_context_t *context,
 {
 	struct ips_protoexp *protoexp = NULL;
 	uint32_t tidmtu_max;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	protoexp = (struct ips_protoexp *)
 	    psmi_calloc(context->ep, UNDEFINED, 1, sizeof(struct ips_protoexp));
 	if (protoexp == NULL) {
-		err = PSM_NO_MEMORY;
+		err = PSM2_NO_MEMORY;
 		goto fail;
 	}
 	*protoexp_o = protoexp;
@@ -121,7 +121,7 @@ ips_protoexp_init(const psmi_context_t *context,
 	if (context->runtime_flags & HFI1_CAP_HDRSUPP) {
 		union psmi_envvar_val env_hdrsupp;
 
-		psmi_getenv("PSM_HDRSUPP",
+		psmi_getenv("PSM2_HDRSUPP",
 			"header suppression(0 disables it)",
 			PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
 			(union psmi_envvar_val)1, &env_hdrsupp);
@@ -131,9 +131,6 @@ ips_protoexp_init(const psmi_context_t *context,
 			/* user wants to turn off header suppression */
 			context->ctrl->__hfi_tfvalid = 0;
 	}
-#ifdef PSM_DEBUG
-	protoexp->tid_flags |= IPS_PROTOEXP_FLAG_TID_DEBUG;
-#endif
 
 	/* Must be initialized already */
 	/* Comment out because of Klockwork scanning critical error. CQ 11/16/2012
@@ -166,7 +163,7 @@ ips_protoexp_init(const psmi_context_t *context,
 	/* Initialze tid flow control. */
 	err = ips_tf_init(protoexp, context, &protoexp->tfc,
 			       ips_tidflow_avail_callback);
-	if (err != PSM_OK)
+	if (err != PSM2_OK)
 		goto fail;
 
 	if (proto->flags & IPS_PROTO_FLAG_SPIO)
@@ -176,7 +173,7 @@ ips_protoexp_init(const psmi_context_t *context,
 
 	protoexp->tid_send_fragsize = tidmtu_max;
 
-	if ((err = ips_tid_init(context, &protoexp->tidc,
+	if ((err = ips_tid_init(context, protoexp,
 				ips_tid_avail_callback, protoexp)))
 		goto fail;
 
@@ -225,7 +222,7 @@ ips_protoexp_init(const psmi_context_t *context,
 				      proto->mq->hfi_window_rv /
 				      protoexp->tid_send_fragsize);
 
-		psmi_getenv("PSM_EXPECTED_HEADERS",
+		psmi_getenv("PSM2_EXPECTED_HEADERS",
 			    "Interval to generate expected protocol headers",
 			    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
 			    (union psmi_envvar_val)defval, &env_exp_hdr);
@@ -267,7 +264,7 @@ ips_protoexp_init(const psmi_context_t *context,
 				      maxsz, 0, DESCRIPTORS, NULL, NULL);
 
 		if (protoexp->tid_desc_send_pool == NULL) {
-			err = psmi_handle_error(proto->ep, PSM_NO_MEMORY,
+			err = psmi_handle_error(proto->ep, PSM2_NO_MEMORY,
 						"Couldn't allocate tid descriptor memory pool");
 			goto fail;
 		}
@@ -291,7 +288,7 @@ ips_protoexp_init(const psmi_context_t *context,
 				      NULL, NULL);
 
 		if (protoexp->tid_getreq_pool == NULL) {
-			err = psmi_handle_error(proto->ep, PSM_NO_MEMORY,
+			err = psmi_handle_error(proto->ep, PSM2_NO_MEMORY,
 						"Couldn't allocate getreq descriptor memory pool");
 			goto fail;
 		}
@@ -308,13 +305,22 @@ ips_protoexp_init(const psmi_context_t *context,
 	protoexp->tid_page_offset_mask = PSMI_PAGESIZE - 1;
 	protoexp->tid_page_mask = ~(PSMI_PAGESIZE - 1);
 
+	/*
+	 * After ips_tid_init(), we know if we use tidcache or not.
+	 * if tid cache is used, we can't use tid debug.
+	 */
+#ifdef PSM_DEBUG
+	if (protoexp->tidc.tid_array == NULL)
+		protoexp->tid_flags |= IPS_PROTOEXP_FLAG_TID_DEBUG;
+#endif
+
 	if (protoexp->tid_flags & IPS_PROTOEXP_FLAG_TID_DEBUG) {
 		int i;
 		protoexp->tid_info = (struct ips_tidinfo *)
 		    psmi_calloc(context->ep, UNDEFINED, IPS_TID_MAX_TIDS,
 				sizeof(struct ips_tidinfo));
 		if (protoexp->tid_info == NULL) {
-			err = PSM_NO_MEMORY;
+			err = PSM2_NO_MEMORY;
 			goto fail;
 		}
 		for (i = 0; i < IPS_TID_MAX_TIDS; i++) {
@@ -325,7 +331,7 @@ ips_protoexp_init(const psmi_context_t *context,
 	} else
 		protoexp->tid_info = NULL;
 
-	psmi_assert(err == PSM_OK);
+	psmi_assert(err == PSM2_OK);
 	return err;
 
 fail:
@@ -340,9 +346,9 @@ fail:
 	return err;
 }
 
-psm_error_t ips_protoexp_fini(struct ips_protoexp *protoexp)
+psm2_error_t ips_protoexp_fini(struct ips_protoexp *protoexp)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	psmi_mpool_destroy(protoexp->tid_getreq_pool);
 	psmi_mpool_destroy(protoexp->tid_desc_send_pool);
@@ -402,8 +408,10 @@ void ips_tidflow_avail_callback(struct ips_tf *tfc, void *context)
 	struct ips_protoexp *protoexp = (struct ips_protoexp *)context;
 
 	if (!STAILQ_EMPTY(&protoexp->pend_getreqsq))
+	{
 		psmi_timer_request(protoexp->timerq,
 				   &protoexp->timer_getreqs, PSMI_TIMER_PRIO_1);
+	}
 	return;
 }
 
@@ -415,11 +423,11 @@ void ips_tidflow_avail_callback(struct ips_tf *tfc, void *context)
  * tid_get is issued directly from user code.
  *
  */
-psm_error_t
+psm2_error_t
 ips_protoexp_tid_get_from_token(struct ips_protoexp *protoexp,
 				void *buf,
 				uint32_t length,
-				psm_epaddr_t epaddr,
+				psm2_epaddr_t epaddr,
 				uint32_t remote_tok,
 				uint32_t flags,
 				ips_tid_completion_callback_t callback,
@@ -428,6 +436,7 @@ ips_protoexp_tid_get_from_token(struct ips_protoexp *protoexp,
 	struct ips_tid_get_request *getreq;
 	int count, nbytes, tids, tidflows;
 
+	PSM2_LOG_MSG("entering");
 	psmi_assert((epaddr->proto->mq->hfi_window_rv % PSMI_PAGESIZE) == 0);
 	getreq = (struct ips_tid_get_request *)
 	    psmi_mpool_get(protoexp->tid_getreq_pool);
@@ -435,8 +444,11 @@ ips_protoexp_tid_get_from_token(struct ips_protoexp *protoexp,
 	/* We can't *really* run out of these here because we always allocate as
 	 * much as available receive reqs */
 	if_pf(getreq == NULL)
-	    psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,
+	{
+		PSM2_LOG_MSG("leaving");
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 			      "Ran out of 'getreq' descriptors");
+	}
 
 	getreq->tidgr_protoexp = protoexp;
 	getreq->tidgr_epaddr = epaddr;
@@ -454,17 +466,21 @@ ips_protoexp_tid_get_from_token(struct ips_protoexp *protoexp,
 	nbytes = PSMI_ALIGNUP((length + count - 1) / count, PSMI_PAGESIZE);
 	getreq->tidgr_rndv_winsz =
 	    min(nbytes, epaddr->proto->mq->hfi_window_rv);
+	/* must be within the tid window size */
+	if (getreq->tidgr_rndv_winsz > PSM_TID_WINSIZE)
+		getreq->tidgr_rndv_winsz = PSM_TID_WINSIZE;
 
 	STAILQ_INSERT_TAIL(&protoexp->pend_getreqsq, getreq, tidgr_next);
-
 	tids = ips_tid_num_available(&protoexp->tidc);
 	tidflows = ips_tf_available(&protoexp->tfc);
+
 	if (tids > 0 && tidflows > 0)
 		ips_tid_pendtids_timer_callback(&protoexp->timer_getreqs, 0);
 	else if (tids != -1 && tidflows != -1)
 		psmi_timer_request(protoexp->timerq, &protoexp->timer_getreqs,
 				   PSMI_TIMER_PRIO_1);
-	return PSM_OK;
+	PSM2_LOG_MSG("leaving");
+	return PSM2_OK;
 }
 
 /* List of perf events */
@@ -480,12 +496,12 @@ void ips_logevent_inner(struct ips_proto *proto, int eventid, void *context)
 
 	switch (eventid) {
 	case ips_logevent_id(tid_send_reqs):{
-			psm_epaddr_t epaddr = (psm_epaddr_t) context;
+			psm2_epaddr_t epaddr = (psm2_epaddr_t) context;
 			proto->psmi_logevent_tid_send_reqs.count++;
 
 			if (t_now >=
 			    proto->psmi_logevent_tid_send_reqs.next_warning) {
-				psmi_handle_error(PSMI_EP_LOGEVENT, PSM_OK,
+				psmi_handle_error(PSMI_EP_LOGEVENT, PSM2_OK,
 						  "Non-fatal temporary exhaustion of send tid dma descriptors "
 						  "(elapsed=%.3fs, source LID=0x%x/context=%d, count=%lld)",
 						  (double)
@@ -493,9 +509,9 @@ void ips_logevent_inner(struct ips_proto *proto, int eventid, void *context)
 								     proto->
 								     t_init) /
 						  1.0e9,
-						  (int)psm_epid_nid(epaddr->
+						  (int)psm2_epid_nid(epaddr->
 								    epid),
-						  (int)psm_epid_context(epaddr->
+						  (int)psm2_epid_context(epaddr->
 									epid),
 						  (long long)proto->
 						  psmi_logevent_tid_send_reqs.
@@ -541,13 +557,17 @@ ips_protoexp_send_tid_grant(struct ips_tid_recv_desc *tidrecvc)
 
 	ips_scb_opcode(scb) = OPCODE_LONG_CTS;
 	scb->ips_lrh.khdr.kdeth0 = 0;
-	scb->ips_lrh.misclen = tidrecvc->tsess_tidlist_length;
+	scb->ips_lrh.mdata = tidrecvc->tidflow_genseq.psn_val;
 	scb->ips_lrh.data[0] = tidrecvc->rdescid;
 	scb->ips_lrh.data[1].u32w1 = tidrecvc->getreq->tidgr_sendtoken;
 	scb->ips_lrh.data[1].u32w0 = tidrecvc->getreq->tidgr_length;
 
 	ips_scb_buffer(scb) = (void *)&tidrecvc->tid_list;
 	ips_scb_length(scb) = tidrecvc->tsess_tidlist_length;
+
+	PSM_LOG_EPM(OPCODE_LONG_CTS,PSM_LOG_EPM_TX, proto->ep->epid,
+		    flow->ipsaddr->epaddr.epid ,"tidrecvc->getreq->tidgr_sendtoken; %d",
+		    tidrecvc->getreq->tidgr_sendtoken);
 
 	ips_proto_flow_enqueue(flow, scb);
 	flow->flush(flow, NULL);
@@ -562,6 +582,9 @@ ips_protoexp_send_tid_completion(struct ips_tid_recv_desc *tidrecvc,
 	struct ips_flow *flow = &ipsaddr->flows[proto->msgflowid];
 	ips_scb_t *scb;
 
+	PSM_LOG_EPM(OPCODE_EXPTID_COMPLETION,PSM_LOG_EPM_TX, proto->ep->epid,
+		    flow->ipsaddr->epaddr.epid ,"sdescid._desc_idx: %d",
+		    sdescid._desc_idx);
 	scb = tidrecvc->completescb;
 
 	ips_scb_opcode(scb) = OPCODE_EXPTID_COMPLETION;
@@ -584,8 +607,15 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 	ptl_arg_t desc_id = p_hdr->data[0];
 	struct ips_tid_send_desc *tidsendc;
 
+	PSM2_LOG_MSG("entering");
+	PSM_LOG_EPM(OPCODE_EXPTID_COMPLETION,PSM_LOG_EPM_RX,rcv_ev->ipsaddr->epaddr.epid,
+		    rcv_ev->proto->ep->mq->ep->epid,"desc_id._desc_idx: %d",desc_id._desc_idx);
+
 	if (!ips_proto_is_expected_or_nak(rcv_ev))
+	{
+		PSM2_LOG_MSG("leaving");
 		return IPS_RECVHDRQ_CONTINUE;
+	}
 
 	if (__be32_to_cpu(p_hdr->bth[2]) & IPS_SEND_FLAG_ACKREQ)
 		ips_proto_send_ack((struct ips_recvhdrq *)rcv_ev->recvq,
@@ -604,6 +634,7 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 		_HFI_ERROR
 		    ("exptid comp: Index %d is out of range\n",
 		     desc_id._desc_idx);
+		PSM2_LOG_MSG("leaving");
 		return IPS_RECVHDRQ_CONTINUE;
 	} else {
 		ptl_arg_t desc_tidsendc;
@@ -620,6 +651,7 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 		if (desc_tidsendc.u64 != desc_id.u64) {
 			_HFI_ERROR("exptid comp: Genc %d does not match\n",
 				desc_id._desc_genc);
+			PSM2_LOG_MSG("leaving");
 			return IPS_RECVHDRQ_CONTINUE;
 		}
 	}
@@ -639,10 +671,12 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 		 */
 		ips_proto_process_ack(rcv_ev);
 
+		/* Keep KW happy. */
+		rcv_ev->p_hdr = NULL;
 		psmi_assert(STAILQ_EMPTY(&tidsendc->tidflow.scb_unacked));
 	}
 
-	psm_mq_req_t req = tidsendc->mqreq;
+	psm2_mq_req_t req = tidsendc->mqreq;
 	/* Check if we can complete the send request. */
 	req->send_msgoff += tidsendc->length;
 	if (req->send_msgoff == req->send_msglen) {
@@ -651,6 +685,7 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 
 	psmi_mpool_put(tidsendc);
 
+	PSM2_LOG_MSG("leaving");
 	return IPS_RECVHDRQ_CONTINUE;
 }
 
@@ -665,12 +700,18 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 
 	psmi_assert(_get_proto_hfi_opcode(p_hdr) == OPCODE_EXPTID);
 
+	PSM2_LOG_MSG("entering");
+
 	desc_id._desc_idx = ips_proto_flowid(p_hdr);
+	PSM_LOG_EPM(OPCODE_EXPTID,PSM_LOG_EPM_RX,rcv_ev->ipsaddr->epaddr.epid,
+		    proto->ep->mq->ep->epid,"desc_id._desc_idx: %d", desc_id._desc_idx);
+
 	desc_id._desc_genc = p_hdr->exp_rdescid_genc;
 
 	tidrecvc = &protoexp->tfc.tidrecvc[desc_id._desc_idx];
 
 	if (tidrecvc->rdescid._desc_genc != desc_id._desc_genc) {
+		PSM2_LOG_MSG("leaving");
 		return IPS_RECVHDRQ_CONTINUE;		/* skip */
 	}
 
@@ -693,7 +734,10 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 		 * packets with the old generation.
 		 */
 		if (sequence_num.psn_gen != tidrecvc->tidflow_genseq.psn_gen)
+		{
+			PSM2_LOG_MSG("leaving");
 			return IPS_RECVHDRQ_CONTINUE;
+		}
 
 #ifdef PSM_DEBUG
 		/* Check if new packet falls into expected seq range, we need
@@ -729,6 +773,7 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 		/* Sequence mismatch error */
 			ips_protoexp_do_tf_seqerr(protoexp, tidrecvc, p_hdr);
 
+		PSM2_LOG_MSG("leaving");
 		return IPS_RECVHDRQ_CONTINUE;
 	}
 
@@ -738,7 +783,7 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 	/* Do some sanity checking */
 	psmi_assert_always(tidrecvc->state == TIDRECVC_STATE_BUSY);
 	int recv_completion = (tidrecvc->recv_tidbytes ==
-		(p_hdr->exp_offset + ips_recvhdrq_event_paylen(rcv_ev)));
+			       (p_hdr->exp_offset + ips_recvhdrq_event_paylen(rcv_ev)));
 
 	/* If sender requested an ACK with the packet and it is not the last
 	 * packet, or if the incoming flow faced congestion, respond with an
@@ -772,7 +817,7 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 
 		if (tidrecvc->tid_list.tsess_unaligned_start) {
 			dst = (uint8_t *)tidrecvc->buffer;
-			src = (uint8_t *)&p_hdr->exp_start_end.u32w1;
+			src = (uint8_t *)p_hdr->exp_ustart;
 			ips_protoexp_unaligned_copy(dst, src,
 				tidrecvc->tid_list.tsess_unaligned_start);
 		}
@@ -781,7 +826,7 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 			dst = (uint8_t *)tidrecvc->buffer +
 				tidrecvc->recv_msglen -
 				tidrecvc->tid_list.tsess_unaligned_end;
-			src = (uint8_t *)&p_hdr->exp_start_end.u32w0;
+			src = (uint8_t *)p_hdr->exp_uend;
 			ips_protoexp_unaligned_copy(dst, src,
 				tidrecvc->tid_list.tsess_unaligned_end);
 		}
@@ -792,6 +837,7 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 		/* Mark receive as done */
 		ips_tid_recv_free(tidrecvc);
 	}
+	PSM2_LOG_MSG("leaving");
 
 	return IPS_RECVHDRQ_CONTINUE;
 }
@@ -837,32 +883,37 @@ void ips_expsend_tiderr(struct ips_tid_send_desc *tidsendc)
 		off += snprintf(buf + off, sizeof(buf) - off, "%d,",
 				IPS_TIDINFO_GET_TID(tidsendc->tid_list.
 						    tsess_list[i]));
-	psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,
+	psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 			  "Trying to use tid idx %d and there are %d members: %s\n",
 			  tidsendc->tid_idx, tidsendc->tid_list.tsess_tidcount,
 			  buf);
 	return;
 }
 
-psm_error_t
+psm2_error_t
 ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 			   ips_epaddr_t *ipsaddr,
-			   psm_mq_req_t req,
+			   psm2_mq_req_t req,
 			   ptl_arg_t rdescid,
+			   uint32_t tidflow_genseq,
 			   ips_tid_session_list *tid_list,
 			   uint32_t tid_list_size)
 {
 	struct ips_tid_send_desc *tidsendc;
-	psmi_seqnum_t flowgenseq;
+	uint32_t i, j, *src, *dst;
 
-	psmi_assert(tid_list_size >= sizeof(ips_tid_session_list));
+	PSM2_LOG_MSG("entering");
+	psmi_assert(tid_list_size > sizeof(ips_tid_session_list));
 	psmi_assert(tid_list_size <= sizeof(tidsendc->filler));
+	psmi_assert(tid_list->tsess_tidcount > 0);
+	psmi_assert((rdescid._desc_genc>>16) == 0);
 
 	tidsendc = (struct ips_tid_send_desc *)
 	    psmi_mpool_get(protoexp->tid_desc_send_pool);
 	if (tidsendc == NULL) {
+		PSM2_LOG_MSG("leaving");
 		ips_logevent(protoexp->proto, tid_send_reqs, ipsaddr);
-		return PSM_EP_NO_RESOURCES;
+		return PSM2_EP_NO_RESOURCES;
 	}
 
 	req->ptl_req_ptr = (void *)tidsendc;
@@ -875,16 +926,50 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 	tidsendc->ipsaddr = ipsaddr;
 	tidsendc->mqreq = req;
 
-	psmi_mq_mtucpy(&tidsendc->tid_list, tid_list, tid_list_size);
+	/*
+	 * Copy received tidinfo to local tidsendc buffer.
+	 * while doing the copy, we try to merge the tids based on
+	 * following rules:
+	 * 1. both tids are virtually contiguous(i and i+1 in the array);
+	 * 2. both tids have the same tidpair value;
+	 * 3. first tid (i) has tidctrl=1;
+	 * 4. second tid (i+1) has tidctrl=2;
+	 * 5. total length does not exceed 512 pages (2M);
+	 */
+	psmi_mq_mtucpy(&tidsendc->tid_list, tid_list,
+			sizeof(ips_tid_session_list));
+	ips_dump_tids(tid_list, "Received %d tids: ",
+				tid_list->tsess_tidcount);
+
+	src = tid_list->tsess_list;
+	dst = tidsendc->tid_list.tsess_list;
+	dst[0] = src[0];
+	j = 0; i = 1;
+	while (i < tid_list->tsess_tidcount) {
+		if ((((dst[j]>>IPS_TIDINFO_TIDCTRL_SHIFT)+1) ==
+		      (src[i]>>IPS_TIDINFO_TIDCTRL_SHIFT)) &&
+		    (((dst[j]&IPS_TIDINFO_LENGTH_MASK)+
+		      (src[i]&IPS_TIDINFO_LENGTH_MASK)) <= 512)) {
+			/* merge 'i' to 'j' */
+			dst[j] += (2 << IPS_TIDINFO_TIDCTRL_SHIFT) +
+				(src[i] & IPS_TIDINFO_LENGTH_MASK);
+			i++;
+			if (i == tid_list->tsess_tidcount) break;
+		}
+		j++;
+		/* copy 'i' to 'j' */
+		dst[j] = src[i];
+		i++;
+	}
+	tidsendc->tid_list.tsess_tidcount = j + 1;
 	tid_list = &tidsendc->tid_list;
 
 	/* Initialize tidflow for window. Use path requested by remote endpoint */
 	ips_flow_init(&tidsendc->tidflow, protoexp->proto, ipsaddr,
 		      protoexp->tid_xfer_type, PSM_PROTOCOL_TIDFLOW,
 		      IPS_PATH_LOW_PRIORITY, EP_FLOW_TIDFLOW);
-	flowgenseq.psn_val = tid_list->tsess_genseq;
-	tidsendc->tidflow.xmit_seq_num = flowgenseq;
-	tidsendc->tidflow.xmit_ack_num = flowgenseq;
+	tidsendc->tidflow.xmit_seq_num.psn_val = tidflow_genseq;
+	tidsendc->tidflow.xmit_ack_num.psn_val = tidflow_genseq;
 
 	tidsendc->userbuf =
 	    (void *)((uintptr_t) req->buf + tid_list->tsess_srcoff);
@@ -906,10 +991,6 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 	tidsendc->is_complete = 0;
 	tidsendc->tid_idx = 0;
 	tidsendc->frame_send = 0;
-
-	psmi_assert(tid_list->tsess_tidcount > 0);
-	ips_dump_tids(&tidsendc->tid_list,
-		      "Received %d tids: ", tidsendc->tid_list.tsess_tidcount);
 
 	tidsendc->tidbytes = 0;
 	tidsendc->remaining_tidbytes = tid_list->tsess_length -
@@ -934,8 +1015,9 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 			   PSMI_TIMER_PRIO_1);
 	}
 
+	PSM2_LOG_MSG("leaving");
 	/* Consider breaking out of progress engine here */
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 static
@@ -947,10 +1029,15 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 	uint32_t *tsess_list = tidsendc->tid_list.tsess_list;
 	uint32_t tid, omode, offset, chunk_size;
 	uint32_t startidx, endidx;
+	uint32_t frame_len, nfrag;
 	uint8_t *bufptr = tidsendc->buffer;
-	uint16_t frame_len, nfrag;
 	ips_scb_t *scb;
-
+	uint8_t is_payload_per_frag_leq_8dw = 0;
+	 /* If payload in the first and last nfrag is less then or equal
+	  * to 8DW we disable header suppression so as to detect uncorrectable
+	  * errors which will otherwise be non-detectable(since header is
+	  * suppressed we lose RHF.EccErr)
+	  */
 	if ((scb = ips_scbctrl_alloc(&protoexp->tid_scbc_rv, 1, 0, 0)) == NULL)
 		return NULL;
 
@@ -963,6 +1050,14 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 		frame_len =
 		    tidsendc->frag_size - (tidsendc->offset_in_tid & 63);
 	}
+	/*
+	 * Frame length is the amount of payload to be included in a particular
+	 * frag of the scb, so we check if frame len is less than or equal
+	 * to 8DW. If length is less then then or equal to 8DW for the first
+	 * frag then we avoid header suppression
+	 */
+	if (frame_len <= 32)
+		is_payload_per_frag_leq_8dw = 1;
 
 	/*
 	 * Using large offset mode based on offset length.
@@ -996,9 +1091,13 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 	/*
 	 * Other packet fields.
 	 */
+	PSM_LOG_EPM(OPCODE_EXPTID,PSM_LOG_EPM_TX, protoexp->proto->ep->epid,
+		    flow->ipsaddr->epaddr.epid,
+		    "psmi_mpool_get_obj_index(tidsendc->mqreq): %d, tidsendc->rdescid._desc_idx: %d, tidsendc->sdescid._desc_idx: %d",
+		    psmi_mpool_get_obj_index(tidsendc->mqreq),tidsendc->rdescid._desc_idx,tidsendc->sdescid._desc_idx);
 	ips_scb_opcode(scb) = OPCODE_EXPTID;
 	scb->ips_lrh.exp_sdescid = tidsendc->sdescid;
-	scb->ips_lrh.exp_rdescid_genc = tidsendc->rdescid._desc_genc;
+	scb->ips_lrh.exp_rdescid_genc = (uint16_t)tidsendc->rdescid._desc_genc;
 	scb->ips_lrh.exp_offset = tidsendc->tidbytes;
 
 	scb->tidsendc = tidsendc;
@@ -1015,6 +1114,9 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 		/* Check if all tidbytes are done */
 		tidsendc->remaining_tidbytes -= frame_len;
 		if (!tidsendc->remaining_tidbytes) {
+			/* We do another frame length check for the last frag */
+			if (frame_len <= 32)
+				is_payload_per_frag_leq_8dw = 1;
 			break;
 		}
 
@@ -1066,22 +1168,25 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 		uint8_t *dst, *src;
 
 		if (tidsendc->tid_list.tsess_unaligned_start) {
-			dst = (uint8_t *)&scb->ips_lrh.exp_start_end.u32w1;
+			dst = (uint8_t *)scb->ips_lrh.exp_ustart;
 			src = (uint8_t *)tidsendc->userbuf;
 			ips_protoexp_unaligned_copy(dst, src,
 				tidsendc->tid_list.tsess_unaligned_start);
 		}
 
 		if (tidsendc->tid_list.tsess_unaligned_end) {
-			dst = (uint8_t *)&scb->ips_lrh.exp_start_end.u32w0;
+			dst = (uint8_t *)&scb->ips_lrh.exp_uend;
 			src = (uint8_t *)tidsendc->userbuf +
 				tidsendc->length -
 				tidsendc->tid_list.tsess_unaligned_end;
 			ips_protoexp_unaligned_copy(dst, src,
 				tidsendc->tid_list.tsess_unaligned_end);
 		}
-
-		if (scb->nfrag > 1)
+		/*
+		 * If the number of fragments is greater then one and
+		 * "no header suppression" flag is unset then we go
+		 * ahead and suppress the header */
+		if ((scb->nfrag > 1) && (!is_payload_per_frag_leq_8dw))
 			scb->flags |= IPS_SEND_FLAG_HDRSUPP;
 		else
 			scb->flags |= IPS_SEND_FLAG_ACKREQ;
@@ -1093,10 +1198,12 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 				protoexp->hdr_pkt_interval) == 0)
 			/* Request an ACK */
 			scb->flags |= IPS_SEND_FLAG_ACKREQ;
-		else
-			/* Request hdr supp */
-			scb->flags |= IPS_SEND_FLAG_HDRSUPP;
-
+		else {
+			if (!is_payload_per_frag_leq_8dw) {
+				/* Request hdr supp */
+				scb->flags |= IPS_SEND_FLAG_HDRSUPP;
+			}
+		}
 		/* assert only single packet per scb */
 		psmi_assert(scb->nfrag == 1);
 	}
@@ -1107,24 +1214,24 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 /*
  * Returns:
  *
- * PSM_OK: scb was allocated for at least one frame, the packet may be queued
+ * PSM2_OK: scb was allocated for at least one frame, the packet may be queued
  *         or actually sent.
  *
- * PSM_OK_NO_PROGRESS: Reached a limit on the maximum number of sends we allow
+ * PSM2_OK_NO_PROGRESS: Reached a limit on the maximum number of sends we allow
  *		       to be enqueued before polling receive queue.
  *
- * PSM_EP_NO_RESOURCES: No scbs, available, a callback will be issued when more
+ * PSM2_EP_NO_RESOURCES: No scbs, available, a callback will be issued when more
  *                      scbs become available.
  *
- * PSM_TIMEOUT: PIO-busy or DMA-busy, stop trying to send for now.
+ * PSM2_TIMEOUT: PIO-busy or DMA-busy, stop trying to send for now.
  *
  */
 
 static
-psm_error_t ips_tid_send_exp(struct ips_tid_send_desc *tidsendc)
+psm2_error_t ips_tid_send_exp(struct ips_tid_send_desc *tidsendc)
 {
 	ips_scb_t *scb = NULL;
-	psm_error_t err = PSM_OK, err_f;
+	psm2_error_t err = PSM2_OK, err_f;
 	struct ips_protoexp *protoexp = tidsendc->protoexp;
 	struct ips_proto *proto = protoexp->proto;
 	struct ips_flow *flow = &tidsendc->tidflow;
@@ -1143,7 +1250,7 @@ psm_error_t ips_tid_send_exp(struct ips_tid_send_desc *tidsendc)
 		if ((scb =
 		     ips_scb_prepare_tid_sendctrl(flow, tidsendc)) == NULL) {
 			proto->stats.scb_exp_unavail_cnt++;
-			err = PSM_EP_NO_RESOURCES;
+			err = PSM2_EP_NO_RESOURCES;
 			break;
 		} else {
 			ips_proto_flow_enqueue(flow, scb);
@@ -1155,27 +1262,28 @@ psm_error_t ips_tid_send_exp(struct ips_tid_send_desc *tidsendc)
 
 		err_f = flow->flush(flow, &num_sent);
 
-		if (err != PSM_EP_NO_RESOURCES) {
-			/* PSM_EP_NO_RESOURCES is reserved for out-of-scbs */
-			if (err_f == PSM_EP_NO_RESOURCES)
-				err = PSM_TIMEOUT;	/* force a resend reschedule */
-			else if (err_f == PSM_OK && num_sent > 0 &&
+		if (err != PSM2_EP_NO_RESOURCES) {
+			/* PSM2_EP_NO_RESOURCES is reserved for out-of-scbs */
+			if (err_f == PSM2_EP_NO_RESOURCES)
+				err = PSM2_TIMEOUT;	/* force a resend reschedule */
+			else if (err_f == PSM2_OK && num_sent > 0 &&
 				 !ips_ptl_recvq_isempty(protoexp->ptl))
-				err = PSM_OK_NO_PROGRESS;	/* force a rcvhdrq service */
+				err = PSM2_OK_NO_PROGRESS;	/* force a rcvhdrq service */
 		}
 	}
 
+	PSM2_LOG_MSG("leaving");
 	return err;
 }
 
 static
-psm_error_t
+psm2_error_t
 ips_tid_pendsend_timer_callback(struct psmi_timer *timer, uint64_t current)
 {
 	struct ips_protoexp *protoexp = (struct ips_protoexp *)timer->context;
 	struct ips_tid_send_pend *phead = &protoexp->pend_sendq;
 	struct ips_tid_send_desc *tidsendc;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	while (!STAILQ_EMPTY(phead)) {
 		tidsendc = STAILQ_FIRST(phead);
@@ -1185,13 +1293,13 @@ ips_tid_pendsend_timer_callback(struct psmi_timer *timer, uint64_t current)
 		if (tidsendc->is_complete)
 			STAILQ_REMOVE_HEAD(phead, next);
 
-		if (err == PSM_OK) {
+		if (err == PSM2_OK) {
 			/* Was able to complete the send, keep going */
-		} else if (err == PSM_EP_NO_RESOURCES) {
+		} else if (err == PSM2_EP_NO_RESOURCES) {
 			/* No more sendbufs available, sendbuf callback will requeue this
 			 * timer */
 			break;
-		} else if (err == PSM_TIMEOUT) {
+		} else if (err == PSM2_TIMEOUT) {
 			/* Always a case of try later:
 			 * On PIO flow, means no send pio bufs available
 			 * On DMA flow, means kernel can't queue request or would have to block
@@ -1203,7 +1311,7 @@ ips_tid_pendsend_timer_callback(struct psmi_timer *timer, uint64_t current)
 			break;
 		} else {
 			/* Forced to reschedule later so we can check receive queue */
-			psmi_assert(err == PSM_OK_NO_PROGRESS);
+			psmi_assert(err == PSM2_OK_NO_PROGRESS);
 			psmi_timer_request(protoexp->proto->timerq,
 					   &protoexp->timer_send,
 					   PSMI_TIMER_PRIO_1);
@@ -1211,7 +1319,7 @@ ips_tid_pendsend_timer_callback(struct psmi_timer *timer, uint64_t current)
 		}
 	}
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 /* Right now, in the kernel we are allowing for virtually non-contiguous pages,
@@ -1224,7 +1332,7 @@ ips_tid_pendsend_timer_callback(struct psmi_timer *timer, uint64_t current)
    rather than one per page, definitely improving performance. */
 
 static
-psm_error_t
+psm2_error_t
 ips_tid_recv_alloc_frag(struct ips_protoexp *protoexp,
 			struct ips_tid_recv_desc *tidrecvc,
 			uint32_t nbytes_this)
@@ -1232,9 +1340,9 @@ ips_tid_recv_alloc_frag(struct ips_protoexp *protoexp,
 	ips_tid_session_list *tid_list = &tidrecvc->tid_list;
 	uintptr_t bufptr = (uintptr_t) tidrecvc->buffer;
 	uint32_t size = nbytes_this;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	uintptr_t pageaddr;
-	uint32_t pageoff, pagelen, reglen, num_tids;
+	uint32_t tidoff, pageoff, pagelen, reglen, num_tids;
 
 	psmi_assert(size >= 4);
 
@@ -1252,25 +1360,33 @@ ips_tid_recv_alloc_frag(struct ips_protoexp *protoexp,
 	psmi_assert(size > 0);
 
 	pageaddr = bufptr & protoexp->tid_page_mask;
-	pageoff = (uint32_t) (bufptr & protoexp->tid_page_offset_mask);
 	pagelen = (uint32_t) (PSMI_PAGESIZE +
-			      ((bufptr + size - 1) & protoexp->tid_page_mask) -
-			      (bufptr & protoexp->tid_page_mask));
+			    ((bufptr + size - 1) & protoexp->tid_page_mask) -
+			    (bufptr & protoexp->tid_page_mask));
+	tidoff = pageoff = (uint32_t) (bufptr & protoexp->tid_page_offset_mask);
 
 	reglen = pagelen;
-	if ((err = ips_tid_acquire(&protoexp->tidc,
-				   (void *)pageaddr, &reglen,
-				   (uint32_t *) tid_list->tsess_list, &num_tids,
-				   tidrecvc->ts_map)))
-		goto fail;
+	if (protoexp->tidc.tid_array) {
+		if ((err = ips_tidcache_acquire(&protoexp->tidc,
+			    (void *)pageaddr, &reglen,
+			    (uint32_t *) tid_list->tsess_list, &num_tids,
+			    &tidoff)))
+			goto fail;
+	} else {
+		if ((err = ips_tid_acquire(&protoexp->tidc,
+			    (void *)pageaddr, &reglen,
+			    (uint32_t *) tid_list->tsess_list, &num_tids)))
+			goto fail;
+	}
 
 	/* PSM only provides max 512 tid-pair storage. */
-	psmi_assert_always(num_tids > 0 && num_tids <= 512);
+	psmi_assert(num_tids > 0);
+	psmi_assert(num_tids <= 512);
 	if (reglen > pagelen) {
 		err = psmi_handle_error(protoexp->tidc.context->ep,
-					PSM_EP_DEVICE_FAILURE,
-					"HFI driver bug on tid "
-					"registration: register more pages than asked");
+			    PSM2_EP_DEVICE_FAILURE,
+			    "PSM tid registration: "
+			    "register more pages than asked");
 		goto fail;
 	} else if (reglen < pagelen) {
 		/*
@@ -1286,7 +1402,7 @@ ips_tid_recv_alloc_frag(struct ips_protoexp *protoexp,
 	}
 
 	tid_list->tsess_tidcount = num_tids;
-	tid_list->tsess_tidoffset = pageoff;
+	tid_list->tsess_tidoffset = tidoff;
 
 	ips_dump_tids(tid_list, "Registered %d tids: ", num_tids);
 
@@ -1295,23 +1411,25 @@ fail:
 }
 
 static
-psm_error_t
+psm2_error_t
 ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 		   ips_epaddr_t *ipsaddr,
 		   const struct ips_tid_get_request *getreq,
 		   uint32_t nbytes_this, struct ips_tid_recv_desc **ptidrecvc)
 {
-	psm_error_t err;
+	psm2_error_t err;
 	ips_scb_t *grantscb, *completescb;
 	struct ips_tid_recv_desc *tidrecvc;
 
+	PSM2_LOG_MSG("entering");
 	/* Allocate all necessary resources. */
 
 	/* 1. allocate a tid grant scb. */
 	grantscb = ips_scbctrl_alloc(&protoexp->tid_scbc_rv, 1, 0, 0);
 	if (grantscb == NULL) {
 		/* ips_tid_scbavail_callback() will reschedule */
-		return PSM_EP_NO_RESOURCES;
+		PSM2_LOG_MSG("leaving");
+		return PSM2_EP_NO_RESOURCES;
 	}
 
 	/* 2. allocate a tid complete scb. */
@@ -1319,17 +1437,19 @@ ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 	if (completescb == NULL) {
 		ips_scbctrl_free(grantscb);
 		/* ips_tid_scbavail_callback() will reschedule */
-		return PSM_EP_NO_RESOURCES;
+		PSM2_LOG_MSG("leaving");
+		return PSM2_EP_NO_RESOURCES;
 	}
 
 	/* 3. allocate a tid flow entry. */
 	err = ips_tf_allocate(&protoexp->tfc, &tidrecvc);
-	if (err != PSM_OK) {
+	if (err != PSM2_OK) {
 		ips_scbctrl_free(completescb);
 		ips_scbctrl_free(grantscb);
 		/* Unable to get a tidflow for expected protocol. */
 		psmi_timer_request(protoexp->timerq,
 			&protoexp->timer_getreqs, PSMI_TIMER_PRIO_1);
+		PSM2_LOG_MSG("leaving");
 		return err;
 	}
 
@@ -1337,13 +1457,14 @@ ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 	tidrecvc->buffer =
 	    (void *)((uintptr_t) getreq->tidgr_lbuf + getreq->tidgr_offset);
 	err = ips_tid_recv_alloc_frag(protoexp, tidrecvc, nbytes_this);
-	if (err != PSM_OK) {
+	if (err != PSM2_OK) {
 		ips_tf_deallocate(&protoexp->tfc, tidrecvc->rdescid._desc_idx);
 		ips_scbctrl_free(completescb);
 		ips_scbctrl_free(grantscb);
 		/* Unable to register tids */
 		psmi_timer_request(protoexp->timerq,
 			&protoexp->timer_getreqs, PSMI_TIMER_PRIO_1);
+		PSM2_LOG_MSG("leaving");
 		return err;
 	}
 
@@ -1353,7 +1474,9 @@ ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 		for (i = 0; i < num_tids; i++) {
 			tid =
 			    IPS_TIDINFO_GET_TID(tidrecvc->tid_list.
-						tsess_list[i]);
+					tsess_list[i]) * 2 +
+			    IPS_TIDINFO_GET_TIDCTRL(tidrecvc->tid_list.
+					tsess_list[i]) - 1;
 			psmi_assert(protoexp->tid_info[tid].state ==
 				    TIDSTATE_FREE);
 			psmi_assert(protoexp->tid_info[tid].tidrecvc == NULL);
@@ -1386,7 +1509,6 @@ ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 			      tidrecvc->tidflow_genseq.psn_gen,
 			      tidrecvc->tidflow_genseq.psn_seq);
 
-	tidrecvc->tid_list.tsess_genseq = tidrecvc->tidflow_genseq.psn_val;
 	tidrecvc->tid_list.tsess_srcoff = getreq->tidgr_offset;
 	tidrecvc->tid_list.tsess_length = tidrecvc->recv_msglen;
 
@@ -1414,12 +1536,12 @@ ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 	tidrecvc->completescb = completescb;
 
 	*ptidrecvc = tidrecvc; /* return to caller */
-
-	return PSM_OK;
+	PSM2_LOG_MSG("leaving");
+	return PSM2_OK;
 }
 
 static
-psm_error_t
+psm2_error_t
 ips_tid_pendtids_timer_callback(struct psmi_timer *timer, uint64_t current)
 {
 	struct ips_tid_get_pend *phead =
@@ -1428,10 +1550,10 @@ ips_tid_pendtids_timer_callback(struct psmi_timer *timer, uint64_t current)
 	struct ips_tid_get_request *getreq;
 	struct ips_tid_recv_desc *tidrecvc;
 	ips_epaddr_t *ipsaddr;
-	int ret;
-	uintptr_t bufptr;
 	uint32_t nbytes_this, count;
+	int ret;
 
+	PSM2_LOG_MSG("entering");
 	while (!STAILQ_EMPTY(phead)) {
 		getreq = STAILQ_FIRST(phead);
 		ipsaddr = (ips_epaddr_t *) (getreq->tidgr_epaddr);
@@ -1440,7 +1562,7 @@ ips_tid_pendtids_timer_callback(struct psmi_timer *timer, uint64_t current)
 ipsaddr_next:
 		ipsaddr = ipsaddr->msgctl->ipsaddr_next;
 		ipsaddr->msgctl->ipsaddr_next = ipsaddr->next;
-		protoexp = ((psm_epaddr_t) ipsaddr)->proto->protoexp;
+		protoexp = ((psm2_epaddr_t) ipsaddr)->proto->protoexp;
 
 		/*
 		 * Calculate the next window size, avoid the last
@@ -1456,36 +1578,41 @@ ipsaddr_next:
 		 * If there is a next window, make sure the window
 		 * starts on a page boundary.
 		 */
-		bufptr = (uintptr_t) getreq->tidgr_lbuf +
-		    getreq->tidgr_offset + nbytes_this;
-		bufptr = PSMI_ALIGNUP(bufptr, PSMI_PAGESIZE);
-		if (bufptr < ((uintptr_t) getreq->tidgr_lbuf +
-			      getreq->tidgr_length)) {
-			nbytes_this = bufptr -
-			    (uintptr_t) getreq->tidgr_lbuf -
-			    getreq->tidgr_offset;
+		if ((getreq->tidgr_offset + nbytes_this) <
+					getreq->tidgr_length) {
+			uint32_t pageoff =
+				(((uintptr_t)getreq->tidgr_lbuf) &
+					(PSMI_PAGESIZE - 1)) +
+				getreq->tidgr_offset + nbytes_this;
+
+			nbytes_this -= pageoff & (PSMI_PAGESIZE - 1);
 		}
 
 		psmi_assert(nbytes_this >= 4);
+		psmi_assert(nbytes_this <= PSM_TID_WINSIZE);
 
 		if ((ret = ips_tid_num_available(&protoexp->tidc)) <= 0) {
 			/* We're out of tids. If this process used all the resource,
 			 * the free callback will reschedule the operation, otherwise,
 			 * we reschedule it here */
 			if (ret == 0)
+			{
 				psmi_timer_request(protoexp->timerq,
 						   &protoexp->timer_getreqs,
 						   PSMI_TIMER_PRIO_1);
+			}
 		} else if ((ret = ips_tf_available(&protoexp->tfc)) <= 0) {
 			/* We're out of tidflow. If this process used all the resource,
 			 * the free callback will reschedule the operation, otherwise,
 			 * we reschedule it here */
 			if (ret == 0)
+			{
 				psmi_timer_request(protoexp->timerq,
 						   &protoexp->timer_getreqs,
 						   PSMI_TIMER_PRIO_1);
+			}
 		} else if (ips_tid_recv_alloc(protoexp, ipsaddr,
-			      getreq, nbytes_this, &tidrecvc) == PSM_OK) {
+			      getreq, nbytes_this, &tidrecvc) == PSM2_OK) {
 			ips_protoexp_send_tid_grant(tidrecvc);
 
 			/*
@@ -1507,7 +1634,7 @@ ipsaddr_next:
 				STAILQ_REMOVE_HEAD(phead, tidgr_next);
 				continue;	/* try next grant request */
 			}
-
+				
 			/* created a tidrecvc, reset count */
 			count = ipsaddr->msgctl->ipsaddr_count;
 			goto ipsaddr_next;	/* try next fragment on next ipsaddr */
@@ -1524,47 +1651,54 @@ ipsaddr_next:
 			goto ipsaddr_next;
 		break;
 	}
-	return PSM_OK;		/* XXX err-broken */
+	PSM2_LOG_MSG("leaving");
+	return PSM2_OK;		/* XXX err-broken */
 }
 
 static
-psm_error_t ips_tid_recv_free(struct ips_tid_recv_desc *tidrecvc)
+psm2_error_t ips_tid_recv_free(struct ips_tid_recv_desc *tidrecvc)
 {
 	struct ips_protoexp *protoexp = tidrecvc->protoexp;
 	struct ips_tid_get_request *getreq = tidrecvc->getreq;
 	int tidcount = tidrecvc->tid_list.tsess_tidcount;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	psmi_assert(getreq != NULL);
-	psmi_assert_always(tidrecvc->state == TIDRECVC_STATE_BUSY);
+	psmi_assert(tidcount > 0);
+	psmi_assert(tidrecvc->state == TIDRECVC_STATE_BUSY);
 
-	if (tidcount > 0) {
-		if (protoexp->tid_flags & IPS_PROTOEXP_FLAG_TID_DEBUG) {
-			int num_tids = tidrecvc->tid_list.tsess_tidcount;
-			int tid, i;
-			for (i = 0; i < num_tids; i++) {
-				tid =
-				    IPS_TIDINFO_GET_TID(tidrecvc->tid_list.
-							tsess_list[i]);
-				psmi_assert(protoexp->tid_info[tid].state ==
-					    TIDSTATE_USED);
-				psmi_assert(protoexp->tid_info[tid].tidrecvc ==
-					    tidrecvc);
-				psmi_assert(protoexp->tid_info[tid].tid ==
-					    tidrecvc->tid_list.tsess_list[i]);
-				protoexp->tid_info[tid].state = TIDSTATE_FREE;
-				protoexp->tid_info[tid].tidrecvc = NULL;
-				protoexp->tid_info[tid].tid = 0xFFFFFFFF;
-			}
+	if (protoexp->tid_flags & IPS_PROTOEXP_FLAG_TID_DEBUG) {
+		int tid, i;
+
+		for (i = 0; i < tidcount; i++) {
+			tid =
+			    IPS_TIDINFO_GET_TID(tidrecvc->tid_list.
+					tsess_list[i]) * 2 +
+			    IPS_TIDINFO_GET_TIDCTRL(tidrecvc->tid_list.
+					tsess_list[i]) - 1;
+			psmi_assert(protoexp->tid_info[tid].state ==
+				    TIDSTATE_USED);
+			psmi_assert(protoexp->tid_info[tid].tidrecvc ==
+				    tidrecvc);
+			psmi_assert(protoexp->tid_info[tid].tid ==
+				    tidrecvc->tid_list.tsess_list[i]);
+			protoexp->tid_info[tid].state = TIDSTATE_FREE;
+			protoexp->tid_info[tid].tidrecvc = NULL;
+			protoexp->tid_info[tid].tid = 0xFFFFFFFF;
 		}
+	}
 
-		ips_dump_tids(&tidrecvc->tid_list, "Deregistered %d tids: ",
-			      tidrecvc->tid_list.tsess_tidcount);
+	ips_dump_tids(&tidrecvc->tid_list, "Deregistered %d tids: ",
+		      tidrecvc->tid_list.tsess_tidcount);
 
-		if ((err = ips_tid_release(&tidrecvc->protoexp->tidc,
-					   tidrecvc->ts_map, tidcount)))
+	if (protoexp->tidc.tid_array) {
+		if ((err = ips_tidcache_release(&protoexp->tidc,
+			tidrecvc->tid_list.tsess_list, tidcount)))
 			goto fail;
-
+	} else {
+		if ((err = ips_tid_release(&protoexp->tidc,
+			tidrecvc->tid_list.tsess_list, tidcount)))
+			goto fail;
 	}
 
 	getreq->tidgr_bytesdone += tidrecvc->recv_msglen;
@@ -1582,27 +1716,22 @@ psm_error_t ips_tid_recv_free(struct ips_tid_recv_desc *tidrecvc)
 		if (getreq->tidgr_callback)
 			getreq->tidgr_callback(getreq->tidgr_ucontext);
 		psmi_mpool_put(getreq);
-	}
+	} else {
 
-	/* We just released some tids.  If requests are waiting on tids to be
-	 * freed, queue up the timer */
-	if (tidcount > 0) {
+		/* We just released some tids.
+		 * If requests are waiting on tids to be
+		 * freed, queue up the timer */
 		if (getreq->tidgr_offset < getreq->tidgr_length) {
-#if 0
-			psmi_timer_request(getreq->tidgr_protoexp->timerq,
-					   &getreq->tidgr_protoexp->
-					   timer_getreqs, PSMI_TIMER_PRIO_1);
-#endif
 			ips_tid_pendtids_timer_callback(&getreq->
 							tidgr_protoexp->
 							timer_getreqs, 0);
 		}
+	}
 
-		if (!STAILQ_EMPTY(&protoexp->pend_getreqsq)) {
-			psmi_timer_request(protoexp->timerq,
-					   &protoexp->timer_getreqs,
-					   PSMI_TIMER_PRIO_1);
-		}
+	if (!STAILQ_EMPTY(&protoexp->pend_getreqsq)) {
+		psmi_timer_request(protoexp->timerq,
+				   &protoexp->timer_getreqs,
+				   PSMI_TIMER_PRIO_1);
 	}
 
 fail:
@@ -1617,8 +1746,11 @@ ips_protoexp_handle_tiderr(const struct ips_recvhdrq_event *rcv_ev)
 	struct ips_message_header *p_hdr = rcv_ev->p_hdr;
 
 	ptl_arg_t desc_id;
-	int tid = (__le32_to_cpu(p_hdr->khdr.kdeth0) >>
+	int tidpair = (__le32_to_cpu(p_hdr->khdr.kdeth0) >>
 		   HFI_KHDR_TID_SHIFT) & HFI_KHDR_TID_MASK;
+	int tidctrl = (__le32_to_cpu(p_hdr->khdr.kdeth0) >>
+		   HFI_KHDR_TIDCTRL_SHIFT) & HFI_KHDR_TIDCTRL_MASK;
+	int tid0, tid1, tid;
 
 	psmi_assert(_get_proto_hfi_opcode(p_hdr) == OPCODE_EXPTID);
 
@@ -1642,7 +1774,17 @@ ips_protoexp_handle_tiderr(const struct ips_recvhdrq_event *rcv_ev)
 
 	tidrecvc = &protoexp->tfc.tidrecvc[desc_id._desc_idx];
 
-	if (protoexp->tid_info[tid].state != TIDSTATE_USED) {
+	if (tidctrl != 3)
+		tid0 = tid1 = tidpair * 2 + tidctrl - 1;
+	else {
+		tid0 = tidpair * 2;
+		tid1 = tid0 + 1;
+	}
+
+	for (tid = tid0; tid <= tid1; tid++) {
+		if (protoexp->tid_info[tid].state == TIDSTATE_USED)
+			continue;
+
 		char buf[128];
 		char *s = "invalid (not even in table)";
 
@@ -1748,7 +1890,7 @@ ips_protoexp_handle_data_err(const struct ips_recvhdrq_event *rcv_ev)
 
 }
 
-psm_error_t
+psm2_error_t
 ips_protoexp_flow_newgen(struct ips_tid_recv_desc *tidrecvc)
 {
 	psmi_assert_always(tidrecvc->state == TIDRECVC_STATE_BUSY);
@@ -1765,7 +1907,7 @@ ips_protoexp_flow_newgen(struct ips_tid_recv_desc *tidrecvc)
 
 	/* Increment swapped generation count for tidflow */
 	tidrecvc->tidflow_nswap_gen++;
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 void
@@ -1843,10 +1985,12 @@ void ips_protoexp_do_tf_seqerr(struct ips_protoexp *protoexp,
 	 * has received it successfully.
 	 */
 	if (!tidrecvc->context->tf_ctrl)
-		tidrecvc->tidflow_genseq.psn_seq =
-		hfi_tidflow_get_seqnum(
-		hfi_tidflow_get(tidrecvc->context->ctrl,
-		tidrecvc->rdescid._desc_idx));
+	{
+ 		tidrecvc->tidflow_genseq.psn_seq =
+			hfi_tidflow_get_seqnum(
+				hfi_tidflow_get(tidrecvc->context->ctrl,
+						tidrecvc->rdescid._desc_idx));
+	}
 
 	/* Swap generation for the flow. */
 	ips_protoexp_flow_newgen(tidrecvc);

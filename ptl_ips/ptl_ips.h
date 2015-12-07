@@ -104,9 +104,9 @@ struct ptl_shared;
 /* Updates to this struct must be reflected in PTL_IPS_SIZE in ptl_fwd.h */
 /* IPS knows it functions as a PTL whenever ptl->ep is non-NULL */
 struct ptl {
-	psm_ep_t ep;		/* back ptr */
-	psm_epid_t epid;	/* cached from ep */
-	psm_epaddr_t epaddr;	/* cached from ep */
+	psm2_ep_t ep;		/* back ptr */
+	psm2_epid_t epid;	/* cached from ep */
+	psm2_epaddr_t epaddr;	/* cached from ep */
 	ips_epaddr_t *ipsaddr;	/* cached from epaddr */
 	ptl_ctl_t *ctl;		/* cached from init */
 	const psmi_context_t *context;	/* cached from init */
@@ -132,7 +132,11 @@ struct ptl {
 
 	/* Rcv thread context */
 	struct ptl_rcvthread *rcvthread;
-} __attribute__ ((aligned(16)));
+}
+#ifndef PACK_STRUCT_STL
+#define PACK_STRUCT_STL /* nothing */
+#endif
+ __attribute__ ((PACK_STRUCT_STL aligned(16)));
 
 /*
  * Sample implementation of shared contexts context.
@@ -162,29 +166,29 @@ struct ptl_shared {
  * Connect/disconnect are wrappers around psm proto's connect/disconnect,
  * mostly to abstract away PSM-specific stuff from ips internal structures
  */
-psm_error_t ips_ptl_connect(ptl_t *ptl, int numep,
-			    const psm_epid_t *array_of_epid,
+psm2_error_t ips_ptl_connect(ptl_t *ptl, int numep,
+			    const psm2_epid_t *array_of_epid,
 			    const int *array_of_epid_mask,
-			    psm_error_t *array_of_errors,
-			    psm_epaddr_t *array_of_epaddr,
+			    psm2_error_t *array_of_errors,
+			    psm2_epaddr_t *array_of_epaddr,
 			    uint64_t timeout_in);
 
-psm_error_t ips_ptl_disconnect(ptl_t *ptl, int force, int numep,
-			       const psm_epaddr_t array_of_epaddr[],
+psm2_error_t ips_ptl_disconnect(ptl_t *ptl, int force, int numep,
+			       const psm2_epaddr_t array_of_epaddr[],
 			       const int array_of_epaddr_mask[],
-			       psm_error_t array_of_errors[],
+			       psm2_error_t array_of_errors[],
 			       uint64_t timeout_in);
 
 /*
  * Generic Poll function for ips-level ptl
  */
-psm_error_t ips_ptl_poll(ptl_t *ptl, int _ignored);
-psm_error_t ips_ptl_shared_poll(ptl_t *ptl, int _ignored);
+psm2_error_t ips_ptl_poll(ptl_t *ptl, int _ignored);
+psm2_error_t ips_ptl_shared_poll(ptl_t *ptl, int _ignored);
 
 /*
  * Support for receive thread
  */
-psm_error_t ips_ptl_rcvthread_init(ptl_t *ptl, struct ips_recvhdrq *recvq);
-psm_error_t ips_ptl_rcvthread_fini(ptl_t *ptl);
+psm2_error_t ips_ptl_rcvthread_init(ptl_t *ptl, struct ips_recvhdrq *recvq);
+psm2_error_t ips_ptl_rcvthread_fini(ptl_t *ptl);
 
 #endif /* _IPS_PTL_H */

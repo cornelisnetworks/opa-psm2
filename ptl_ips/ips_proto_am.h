@@ -65,26 +65,26 @@ struct ips_proto_am {
 	struct ips_scbctrl scbc_reply;
 };
 
-psm_error_t
-ips_am_get_parameters(psm_ep_t ep, struct psm_am_parameters *parameters);
+psm2_error_t
+ips_am_get_parameters(psm2_ep_t ep, struct psm2_am_parameters *parameters);
 
-psm_error_t
-ips_am_short_reply(psm_am_token_t tok,
-		   psm_handler_t handler, psm_amarg_t *args, int nargs,
+psm2_error_t
+ips_am_short_reply(psm2_am_token_t tok,
+		   psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 		   void *src, size_t len, int flags,
-		   psm_am_completion_fn_t completion_fn, void *completion_ctxt);
+		   psm2_am_completion_fn_t completion_fn, void *completion_ctxt);
 
-psm_error_t
-ips_am_short_request(psm_epaddr_t epaddr,
-		     psm_handler_t handler, psm_amarg_t *args, int nargs,
+psm2_error_t
+ips_am_short_request(psm2_epaddr_t epaddr,
+		     psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 		     void *src, size_t len, int flags,
-		     psm_am_completion_fn_t completion_fn,
+		     psm2_am_completion_fn_t completion_fn,
 		     void *completion_ctxt);
 
-psm_error_t ips_proto_am_init(struct ips_proto *proto, int num_of_send_bufs,
+psm2_error_t ips_proto_am_init(struct ips_proto *proto, int num_of_send_bufs,
 			      int num_of_send_desc, uint32_t imm_size,
 			      struct ips_proto_am *proto_am);
 
-psm_error_t ips_proto_am_fini(struct ips_proto_am *proto_am);
+psm2_error_t ips_proto_am_fini(struct ips_proto_am *proto_am);
 
 #endif /* _IPS_PROTO_AM_H */

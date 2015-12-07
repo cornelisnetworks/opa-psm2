@@ -62,19 +62,19 @@
 #define PSMI_SHARED_CONTEXTS_ENABLED_BY_DEFAULT   1
 static int psmi_sharedcontext_params(int *nranks, int *rankid);
 static int psmi_get_hfi_selection_algorithm(void);
-static psm_error_t psmi_init_userinfo_params(psm_ep_t ep,
+static psm2_error_t psmi_init_userinfo_params(psm2_ep_t ep,
 					     int unit_id,
-					     psm_uuid_t const unique_job_key,
+					     psm2_uuid_t const unique_job_key,
 					     struct hfi1_user_info *user_info);
 
-psm_error_t psmi_context_interrupt_set(psmi_context_t *context, int enable)
+psm2_error_t psmi_context_interrupt_set(psmi_context_t *context, int enable)
 {
 	int poll_type;
 	int ret;
 
 	if ((enable && (context->runtime_flags & PSMI_RUNTIME_INTR_ENABLED)) ||
 	    (!enable && !(context->runtime_flags & PSMI_RUNTIME_INTR_ENABLED)))
-		return PSM_OK;
+		return PSM2_OK;
 
 	if (enable)
 		poll_type = HFI1_POLL_TYPE_URGENT;
@@ -84,14 +84,14 @@ psm_error_t psmi_context_interrupt_set(psmi_context_t *context, int enable)
 	ret = hfi_poll_type(context->ctrl, poll_type);
 
 	if (ret != 0)
-		return PSM_EP_NO_RESOURCES;
+		return PSM2_EP_NO_RESOURCES;
 	else {
 		if (enable)
 			context->runtime_flags |= PSMI_RUNTIME_INTR_ENABLED;
 		else
 			context->runtime_flags &= ~PSMI_RUNTIME_INTR_ENABLED;
 
-		return PSM_OK;
+		return PSM2_OK;
 	}
 }
 
@@ -100,16 +100,16 @@ int psmi_context_interrupt_isenabled(psmi_context_t *context)
 	return context->runtime_flags & PSMI_RUNTIME_INTR_ENABLED;
 }
 
-psm_error_t
-psmi_context_open(const psm_ep_t ep, long unit_id, long port,
-		  psm_uuid_t const job_key, int64_t timeout_ns,
+psm2_error_t
+psmi_context_open(const psm2_ep_t ep, long unit_id, long port,
+		  psm2_uuid_t const job_key, int64_t timeout_ns,
 		  psmi_context_t *context)
 {
 	long open_timeout = 0;
 	int lid, sc, vl;
 	uint64_t gid_hi, gid_lo;
 	char dev_name[MAXPATHLEN];
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	uint32_t hfi_type;
 	int retry_delay = 0;
 
@@ -128,7 +128,7 @@ psmi_context_open(const psm_ep_t ep, long unit_id, long port,
 
 	context->fd = hfi_context_open(unit_id, port, open_timeout);
 	if (context->fd == -1) {
-		err = psmi_handle_error(NULL, PSM_EP_DEVICE_FAILURE,
+		err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
 					"PSM can't open %s for reading and writing",
 					dev_name);
 		goto bail;
@@ -170,7 +170,7 @@ retry_open:
 			goto retry_open;
 		}
 
-		err = psmi_handle_error(NULL, PSM_EP_NO_NETWORK,
+		err = psmi_handle_error(NULL, PSM2_EP_NO_NETWORK,
 					"can't open %s, network down",
 					dev_name);
 		goto bail;
@@ -178,19 +178,28 @@ retry_open:
 
 	_HFI_VDBG("hfi_userinit() passed.\n");
 
-	if ((lid = hfi_get_port_lid(context->ctrl->__hfi_unit,
-				    context->ctrl->__hfi_port)) == -1) {
+	if (hfi_get_port_active(context->ctrl->__hfi_unit,
+				    context->ctrl->__hfi_port) != 1) {
 		err = psmi_handle_error(NULL,
-					PSM_EP_DEVICE_FAILURE,
-					"Can't get HFI LID in psm_ep_open: is SMA running?");
+					PSM2_EP_DEVICE_FAILURE,
+					"Unit/port: %d/%d is not active.",
+					context->ctrl->__hfi_unit,
+					context->ctrl->__hfi_port);
+		goto bail;
+	}
+	if ((lid = hfi_get_port_lid(context->ctrl->__hfi_unit,
+				    context->ctrl->__hfi_port)) <= 0) {
+		err = psmi_handle_error(NULL,
+					PSM2_EP_DEVICE_FAILURE,
+					"Can't get HFI LID in psm2_ep_open: is SMA running?");
 		goto bail;
 	}
 	if (hfi_get_port_gid(context->ctrl->__hfi_unit,
 			     context->ctrl->__hfi_port, &gid_hi,
 			     &gid_lo) == -1) {
 		err =
-		    psmi_handle_error(NULL, PSM_EP_DEVICE_FAILURE,
-				      "Can't get HFI GID in psm_ep_open: is SMA running?");
+		    psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
+				      "Can't get HFI GID in psm2_ep_open: is SMA running?");
 		goto bail;
 	}
 	ep->unit_id = context->ctrl->__hfi_unit;
@@ -198,7 +207,7 @@ retry_open:
 	ep->gid_hi = gid_hi;
 	ep->gid_lo = gid_lo;
 
-	context->ep = (psm_ep_t) ep;
+	context->ep = (psm2_ep_t) ep;
 	context->runtime_flags = context->ctrl->ctxt_info.runtime_flags;
 
 	/* Get type of hfi assigned to context */
@@ -216,7 +225,7 @@ retry_open:
 		vl = PSMI_VL_DEFAULT;
 	}
 	if (sc == PSMI_SC_ADMIN || vl == PSMI_VL_ADMIN) {
-		err = psmi_handle_error(NULL, PSM_INTERNAL_ERR,
+		err = psmi_handle_error(NULL, PSM2_INTERNAL_ERR,
 			"Invalid sl: %d, please specify correct sl via HFI_SL",
 			ep->out_sl);
 		goto bail;
@@ -226,7 +235,7 @@ retry_open:
 					   context->ctrl->__hfi_port,
 					   vl)) < 0) {
 		err =
-		    psmi_handle_error(NULL, PSM_EP_DEVICE_FAILURE,
+		    psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
 				      "Can't get MTU for VL %d", vl);
 		goto bail;
 	}
@@ -235,7 +244,7 @@ retry_open:
 	context->epid = PSMI_EPID_PACK(lid, context->ctrl->ctxt_info.ctxt,
 				       context->ctrl->ctxt_info.subctxt,
 				       context->ctrl->__hfi_unit,
-				       hfi_type, ep->mtu, 0x3ffffff);
+				       hfi_type, 0x3ffffff);
 
 	_HFI_VDBG
 	    ("construct epid: lid %d ctxt %d subctxt %d hcatype %d mtu %d\n",
@@ -248,20 +257,20 @@ fail:
 	switch (errno) {
 	case ENOENT:
 	case ENODEV:
-		err = psmi_handle_error(NULL, PSM_EP_NO_DEVICE,
+		err = psmi_handle_error(NULL, PSM2_EP_NO_DEVICE,
 					"%s not found", dev_name);
 		break;
 	case ENXIO:
-		err = psmi_handle_error(NULL, PSM_EP_DEVICE_FAILURE,
+		err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
 					"%s failure", dev_name);
 		break;
 	case EBUSY:
-		err = psmi_handle_error(NULL, PSM_EP_NO_PORTS_AVAIL,
+		err = psmi_handle_error(NULL, PSM2_EP_NO_PORTS_AVAIL,
 					"No free opa contexts available on %s",
 					dev_name);
 		break;
 	default:
-		err = psmi_handle_error(NULL, PSM_EP_DEVICE_FAILURE,
+		err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
 					"Driver initialization failure on %s",
 					dev_name);
 		break;
@@ -278,32 +287,32 @@ ret:
 	return err;
 }
 
-psm_error_t psmi_context_close(psmi_context_t *context)
+psm2_error_t psmi_context_close(psmi_context_t *context)
 {
 	if (context->fd >= 0) {
 		hfi_context_close(context->fd);
 		context->fd = -1;
 	}
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 /*
- * This function works whether a context is intiialized or not in a psm_ep.
+ * This function works whether a context is intiialized or not in a psm2_ep.
  *
  * Returns one of
  *
- * PSM_OK: Port status is ok (or context not intialized yet but still "ok")
- * PSM_OK_NO_PROGRESS: Cable pulled
- * PSM_EP_NO_NETWORK: No network, no lid, ...
- * PSM_EP_DEVICE_FAILURE: Chip failures, rxe/txe parity, etc.
+ * PSM2_OK: Port status is ok (or context not intialized yet but still "ok")
+ * PSM2_OK_NO_PROGRESS: Cable pulled
+ * PSM2_EP_NO_NETWORK: No network, no lid, ...
+ * PSM2_EP_DEVICE_FAILURE: Chip failures, rxe/txe parity, etc.
  * The message follows the per-port status
  * As of 7322-ready driver, need to check port-specific qword for IB
  * as well as older unit-only.  For now, we don't have the port interface
  * defined, so just check port 0 qword for spi_status
  */
-psm_error_t psmi_context_check_status(const psmi_context_t *contexti)
+psm2_error_t psmi_context_check_status(const psmi_context_t *contexti)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	psmi_context_t *context = (psmi_context_t *) contexti;
 	struct hfi1_status *status =
 	    (struct hfi1_status *)context->ctrl->base_info.status_bufbase;
@@ -314,7 +323,7 @@ psm_error_t psmi_context_check_status(const psmi_context_t *contexti)
 	    !(status->dev & HFI1_STATUS_INITTED) ||
 	    (status->dev & HFI1_STATUS_HWERROR)) {
 
-		err = PSM_EP_DEVICE_FAILURE;
+		err = PSM2_EP_DEVICE_FAILURE;
 		if (err != context->status_lasterr) {	/* report once */
 			volatile char *errmsg_sp =
 			    (volatile char *)status->freezemsg;
@@ -332,23 +341,33 @@ psm_error_t psmi_context_check_status(const psmi_context_t *contexti)
 			}
 		}
 	}
-
-	/* Fatal network-related errors */
+	/* Fatal network-related errors with timeout: */
 	else if (!(status->port & HFI1_STATUS_IB_CONF) ||
 		 !(status->port & HFI1_STATUS_IB_READY)) {
-		err = PSM_EP_NO_NETWORK;
+		err = PSM2_EP_NO_NETWORK;
 		if (err != context->status_lasterr) {	/* report once */
-			volatile char *errmsg_sp =
-			    (volatile char *)status->freezemsg;
-			psmi_handle_error(context->ep, err, "%s",
-					  *errmsg_sp ? errmsg_sp :
-					  "Network down");
+			context->networkLostTime = time(NULL);
+		}
+		else
+		{
+			time_t now = time(NULL);
+			static const double thirtySeconds = 30.0;
+
+			if (difftime(now,context->networkLostTime) > thirtySeconds)
+			{
+				volatile char *errmsg_sp =
+					(volatile char *)status->freezemsg;
+
+				psmi_handle_error(context->ep, err, "%s",
+						  *errmsg_sp ? errmsg_sp :
+						  "Network down");
+			}
 		}
 	}
 
-	if (err == PSM_OK && context->status_lasterr != PSM_OK)
-		context->status_lasterr = PSM_OK;	/* clear error */
-	else if (err != PSM_OK)
+	if (err == PSM2_OK && context->status_lasterr != PSM2_OK)
+		context->status_lasterr = PSM2_OK;	/* clear error */
+	else if (err != PSM2_OK)
 		context->status_lasterr = err;	/* record error */
 
 	return err;
@@ -358,9 +377,9 @@ psm_error_t psmi_context_check_status(const psmi_context_t *contexti)
  * Prepare user_info params for driver open, used only in psmi_context_open
  */
 static
-psm_error_t
-psmi_init_userinfo_params(psm_ep_t ep, int unit_id,
-			  psm_uuid_t const unique_job_key,
+psm2_error_t
+psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
+			  psm2_uuid_t const unique_job_key,
 			  struct hfi1_user_info *user_info)
 {
 	/* static variables, shared among rails */
@@ -368,7 +387,7 @@ psmi_init_userinfo_params(psm_ep_t ep, int unit_id,
 
 	int avail_contexts = 0, max_contexts, ask_contexts;
 	int ranks_per_context = 0;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	union psmi_envvar_val env_maxctxt, env_ranks_per_context;
 	static int subcontext_id_start;
 
@@ -391,13 +410,13 @@ psmi_init_userinfo_params(psm_ep_t ep, int unit_id,
 	avail_contexts = hfi_get_num_contexts(unit_id);
 
 	if (avail_contexts == 0) {
-		err = psmi_handle_error(NULL, PSM_EP_NO_DEVICE,
+		err = psmi_handle_error(NULL, PSM2_EP_NO_DEVICE,
 					"PSM found 0 available contexts on opa device(s).");
 		goto fail;
 	}
 
 	/* See if the user wants finer control over context assignments */
-	if (!psmi_getenv("PSM_SHAREDCONTEXTS_MAX",
+	if (!psmi_getenv("PSM2_SHAREDCONTEXTS_MAX",
 			 "Maximum number of contexts for this PSM job",
 			 PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
 			 (union psmi_envvar_val)avail_contexts, &env_maxctxt)) {
@@ -406,7 +425,7 @@ psmi_init_userinfo_params(psm_ep_t ep, int unit_id,
 	} else
 		ask_contexts = max_contexts = avail_contexts;
 
-	if (!psmi_getenv("PSM_RANKS_PER_CONTEXT",
+	if (!psmi_getenv("PSM2_RANKS_PER_CONTEXT",
 			 "Number of ranks per context",
 			 PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
 			 (union psmi_envvar_val)1, &env_ranks_per_context)) {
@@ -440,7 +459,7 @@ psmi_init_userinfo_params(psm_ep_t ep, int unit_id,
 		int contexts =
 		    (nranks + ranks_per_context - 1) / ranks_per_context;
 		if (contexts > ask_contexts) {
-			err = psmi_handle_error(NULL, PSM_EP_NO_DEVICE,
+			err = psmi_handle_error(NULL, PSM2_EP_NO_DEVICE,
 						"Incompatible settings for "
 						"PSM_SHAREDCONTEXTS_MAX and PSM_RANKS_PER_CONTEXT");
 			goto fail;
@@ -471,7 +490,7 @@ psmi_init_userinfo_params(psm_ep_t ep, int unit_id,
 		if (user_info->subctxt_cnt == 1)
 			user_info->subctxt_cnt = 0;
 		if (user_info->subctxt_cnt > HFI1_MAX_SHARED_CTXTS) {
-			err = psmi_handle_error(NULL, PSM_INTERNAL_ERR,
+			err = psmi_handle_error(NULL, PSM2_INTERNAL_ERR,
 						"Calculation of subcontext count exceeded maximum supported");
 			goto fail;
 		}
@@ -507,7 +526,7 @@ int psmi_sharedcontext_params(int *nranks, int *rankid)
 #endif
 
 	/* New name in 2.0.1, keep observing old name */
-	psmi_getenv("PSM_SHAREDCONTEXTS", "Enable shared contexts",
+	psmi_getenv("PSM2_SHAREDCONTEXTS", "Enable shared contexts",
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_YESNO,
 		    (union psmi_envvar_val)
 		    PSMI_SHARED_CONTEXTS_ENABLED_BY_DEFAULT,

@@ -53,8 +53,8 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
-#ifndef PSM_AM_H
-#define PSM_AM_H
+#ifndef PSM2_AM_H
+#define PSM2_AM_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -65,17 +65,17 @@ extern "C" {
 #endif
 
 /*!
- * @file psm_am.h
- * @brief PSM Active Message.
+ * @file psm2_am.h
+ * @brief PSM2 Active Message.
  *
- * @page psm_am Active Message Interface
+ * @page psm2_am Active Message Interface
  *
- * PSM implements an Active Message (AM) component that lives alongside the
+ * PSM2 implements an Active Message (AM) component that lives alongside the
  * Matched Queues (MQ) component. The active message interface essentially
- * provides a remote procedure call mechanism. A PSM process can generate a
- * request to run an active message handler on a remote PSM process
+ * provides a remote procedure call mechanism. A PSM2 process can generate a
+ * request to run an active message handler on a remote PSM2 process
  * identified by its end-point address (epaddr). End-point address values
- * are returned by PSM when connecting end-points using the psm_ep_connect()
+ * are returned by PSM2 when connecting end-points using the psm2_ep_connect()
  * function.
  *
  * An AM handler may make local state updates, and may generate at most
@@ -91,21 +91,21 @@ extern "C" {
  * short request/reply mechanism by fragmentation and reassembly, or
  * transported by some other means.
  *
- * Handlers are run in the process context of the targeted PSM process,
+ * Handlers are run in the process context of the targeted PSM2 process,
  * either in its main thread of execution or in a progress thread. A handler
  * may therefore be executed concurrently with the main thread of execution
- * of the PSM process. PSM ensures that its own state is protected against this
+ * of the PSM2 process. PSM2 ensures that its own state is protected against this
  * concurrent execution. However, a handler must make its own arrangements to
- * protect its own state. Alternatively, the PSM progress thread can be
+ * protect its own state. Alternatively, the PSM2 progress thread can be
  * disabled using the PSM_RCVTHREAD environment variable if this is too
  * onerous for the handler.
  *
- * PSM has an active progress model and requires that the PSM library is
- * called in order to make progress. This can be achieved using the psm_poll()
- * function. A PSM implementatation may provide passive progress through some
- * other mechanism (e.g. a receive thread), but a PSM consumer must not assume
+ * PSM2 has an active progress model and requires that the PSM2 library is
+ * called in order to make progress. This can be achieved using the psm2_poll()
+ * function. A PSM2 implementatation may provide passive progress through some
+ * other mechanism (e.g. a receive thread), but a PSM2 consumer must not assume
  * this and must arrange to make active progress through calls into the PSM
- * library. Note that the PSM AM interface is not MTsafe, same as the other PSM
+ * library. Note that the PSM2 AM interface is not MTsafe, same as the other PSM
  * interfaces, and that MTsafety must be provided by the consumer if required.
  *
  * The order in which AM requests are issued by an initiator to a particular
@@ -117,32 +117,32 @@ extern "C" {
  * consistent ordering.
  */
 
-/*! @defgroup am PSM Active Message
+/*! @defgroup am PSM2 Active Message
  *
  * @{
  */
 
 /** @brief Datatype for an index representing an active message handler */
-typedef uint32_t psm_handler_t;
+typedef uint32_t psm2_handler_t;
 
 /** @brief Datatype for a token for an active message handler.*/
-typedef void *psm_am_token_t;
+typedef void *psm2_am_token_t;
 
-/* PSM AM flags
+/* PSM2 AM flags
  * These flags may be combined using bitwise-or.
  */
-#define PSM_AM_FLAG_NONE    0 /**< No other PSM AM flags are needed. */
-#define PSM_AM_FLAG_ASYNC   1 /**< No need to copy source data. */
-#define PSM_AM_FLAG_NOREPLY 2 /**< The handler for this AM request is
+#define PSM2_AM_FLAG_NONE    0 /**< No other PSM2 AM flags are needed. */
+#define PSM2_AM_FLAG_ASYNC   1 /**< No need to copy source data. */
+#define PSM2_AM_FLAG_NOREPLY 2 /**< The handler for this AM request is
 				   guaranteed not to generate a reply. */
 
-/** @brief The psm_amarg type represents the type of an AM argument. This is
+/** @brief The psm2_amarg type represents the type of an AM argument. This is
  *  a 64-bit type and is broken down into four 16-bit fields, two 32-bit
- *  fields or one 64-bit field for the convenience of code using the PSM AM
+ *  fields or one 64-bit field for the convenience of code using the PSM2 AM
  *  interface.
  */
 typedef
-struct psm_amarg {
+struct psm2_amarg {
 	union {
 		struct {
 			uint16_t u16w3;
@@ -157,18 +157,18 @@ struct psm_amarg {
 		uint64_t u64w0;
 		uint64_t u64;
 	};
-} psm_amarg_t;
+} psm2_amarg_t;
 
 /** @brief The AM handler function type
  *
- * psm_am_handler_fm_t is the datatype for an AM handler. PSM AM will call-back
+ * psm2_am_handler_fm_t is the datatype for an AM handler. PSM2 AM will call-back
  * into an AM handler using this function prototype. The parameters and result
  * of these handler functions are described here.
  *
  * @param[in] token This is an opaque token value passed into a handler.
  *                  A request handler may send at most one reply back to the
  *                  original requestor, and must pass this value as the token
- *                  parameter to the psm_am_reply_short() function. A reply
+ *                  parameter to the psm2_am_reply_short() function. A reply
  *                  handler is also passed a token value, but must not attempt
  *                  to reply.
  * @param[in] args A pointer to the arguments provided to this handler.
@@ -179,8 +179,8 @@ struct psm_amarg {
  * @returns 0 The handler should always return a result of 0.
  */
 typedef
-int (*psm_am_handler_fn_t) (psm_am_token_t token,
-			    psm_amarg_t *args, int nargs,
+int (*psm2_am_handler_fn_t) (psm2_am_token_t token,
+			    psm2_amarg_t *args, int nargs,
 			    void *src, uint32_t len);
 
 /** @brief Type for a completion call-back handler.
@@ -198,19 +198,19 @@ int (*psm_am_handler_fn_t) (psm_am_token_t token,
  * @returns void This handler has no return result.
  */
 typedef
-void (*psm_am_completion_fn_t) (void *context);
+void (*psm2_am_completion_fn_t) (void *context);
 
 /** @brief Register AM call-back handlers at the specified end-point.
  *
  * This function is used to register an array of handlers, and may be called
  * multiple times to register additonal handlers. The maximum number of
  * handlers that can be registered is limited to the max_handlers value
- * returned by psm_am_get_parameters(). Handlers are associated with a PSM
+ * returned by psm2_am_get_parameters(). Handlers are associated with a PSM
  * end-point. The handlers are allocated index numbers in the the handler table
  * for that end-point.  The allocated index for the handler function in
  * handlers[i] is returned in handlers_idx[i] for i in (0, num_handlers]. These
- * handler index values are used in the psm_am_request_short() and
- * psm_am_reply_short() functions.
+ * handler index values are used in the psm2_am_request_short() and
+ * psm2_am_reply_short() functions.
  *
  * @param[in] ep End-point value
  * @param[in] handlers Array of handler functions
@@ -218,20 +218,20 @@ void (*psm_am_completion_fn_t) (void *context);
  *                         handlers_idx arrays)
  * @param[out] handlers_idx Used to return handler index mapping table
  *
- * @returns PSM_OK Indicates success
- * @returns PSM_EP_NO_RESOURCES Insufficient slots in the AM handler table
+ * @returns PSM2_OK Indicates success
+ * @returns PSM2_EP_NO_RESOURCES Insufficient slots in the AM handler table
  */
-psm_error_t psm_am_register_handlers(psm_ep_t ep,
-				     const psm_am_handler_fn_t *
+psm2_error_t psm2_am_register_handlers(psm2_ep_t ep,
+				     const psm2_am_handler_fn_t *
 				     handlers, int num_handlers,
 				     int *handlers_idx);
 
 /** @brief Generate an AM request.
  *
  * This function generates an AM request causing an AM handler function to be
- * called in the PSM process associated with the specified end-point address.
+ * called in the PSM2 process associated with the specified end-point address.
  * The number of arguments is limited to max_nargs and the payload length in
- * bytes to max_request_short returned by the psm_am_get_parameters() function.
+ * bytes to max_request_short returned by the psm2_am_get_parameters() function.
  * If arguments are not required, set the number of arguments to 0 and the
  * argument pointer will not be dereferenced. If payload is not required, set
  * the payload size to 0 and the payload pointer will not be dereferenced.
@@ -244,22 +244,22 @@ psm_error_t psm_am_register_handlers(psm_ep_t ep,
  *
  * The allowed flags are any combination of the following combined with
  * bitwise-or:
- *   PSM_AM_FLAG_NONE    - No flags
- *   PSM_AM_FLAG_ASYNC   - Indicates no need to copy source data
- *   PSM_AM_FLAG_NOREPLY - The handler for this AM request is guaranteed not to
+ *   PSM2_AM_FLAG_NONE    - No flags
+ *   PSM2_AM_FLAG_ASYNC   - Indicates no need to copy source data
+ *   PSM2_AM_FLAG_NOREPLY - The handler for this AM request is guaranteed not to
  *                         generate a reply
  *
- * The PSM AM implementation will not dereference the args pointer after return
- * from this function. If PSM_AM_FLAG_ASYNC is not provided, the PSM AM
+ * The PSM2 AM implementation will not dereference the args pointer after return
+ * from this function. If PSM2_AM_FLAG_ASYNC is not provided, the PSM2 AM
  * implementation will not dereference the src pointer after return from this
  * function. This may require the implementation to take a copy of the payload
- * if the request cannot be issued immediately.  However, if PSM_AM_FLAG_ASYNC
- * is provided then a copy will not be taken and the PSM AM implementation
+ * if the request cannot be issued immediately.  However, if PSM2_AM_FLAG_ASYNC
+ * is provided then a copy will not be taken and the PSM2 AM implementation
  * retains ownership of the payload src memory until the request is locally
  * complete. Local completion can be determined using the completion handler
  * call-back, or through an AM handler associated with an AM reply.
  *
- * The PSM_AM_FLAG_NOREPLY flag indicates ahead of time to the AM handler that
+ * The PSM2_AM_FLAG_NOREPLY flag indicates ahead of time to the AM handler that
  * a reply will not be generated. Use of this flag is optional, but it may
  * enable a performance optimization in this case by indicating that reply
  * state is not required.
@@ -270,34 +270,34 @@ psm_error_t psm_am_register_handlers(psm_ep_t ep,
  * @param[in] nargs Number of arguments to be provided to the handler
  * @param[in] src Pointer to the payload to be delivered to the handler
  * @param[in] len Length of the payload in bytes
- * @param[in] flags These are PSM AM flags and may be combined together with
+ * @param[in] flags These are PSM2 AM flags and may be combined together with
  *                  bitwise-or
  * @param[in] completion_fn The completion function to called locally when
  *                          remote handler is complete
  * @param[in] completion_ctxt User-provided context pointer to be passed to the
  *                            completion handler
  *
- * @returns PSM_OK indicates success.
+ * @returns PSM2_OK indicates success.
  */
-psm_error_t
-psm_am_request_short(psm_epaddr_t epaddr, psm_handler_t handler,
-		     psm_amarg_t *args, int nargs, void *src,
+psm2_error_t
+psm2_am_request_short(psm2_epaddr_t epaddr, psm2_handler_t handler,
+		     psm2_amarg_t *args, int nargs, void *src,
 		     size_t len, int flags,
-		     psm_am_completion_fn_t completion_fn,
+		     psm2_am_completion_fn_t completion_fn,
 		     void *completion_ctxt);
 
 /** @brief Generate an AM reply.
  *
  * This function may only be called from an AM handler called due to an AM
- * request.  If the AM request uses the PSM_AM_FLAG_NOREPLY flag, the AM
+ * request.  If the AM request uses the PSM2_AM_FLAG_NOREPLY flag, the AM
  * handler must not call this function. Otherwise, the AM request handler may
- * call psm_am_reply_short() at most once, and must pass in the token value
+ * call psm2_am_reply_short() at most once, and must pass in the token value
  * that it received in its own handler call-back.
  *
  * This function generates an AM reply causing an AM handler function to be
- * called in the PSM process associated with the specified end-point address.
+ * called in the PSM2 process associated with the specified end-point address.
  * The number of arguments is limited to max_nargs and the payload length in
- * bytes to max_reply_short returned by the psm_am_get_parameters() function.
+ * bytes to max_reply_short returned by the psm2_am_get_parameters() function.
  * If arguments are not required, set the number of arguments to 0 and the
  * argument pointer will not be dereferenced. If payload is not required, set
  * the payload size to 0 and the payload pointer will not be dereferenced.
@@ -310,15 +310,15 @@ psm_am_request_short(psm_epaddr_t epaddr, psm_handler_t handler,
  *
  * The allowed flags are any combination of the following combined with
  * bitwise-or:
- *   PSM_AM_FLAG_NONE    - No flags
- *   PSM_AM_FLAG_ASYNC   - Indicates no need to copy source data
+ *   PSM2_AM_FLAG_NONE    - No flags
+ *   PSM2_AM_FLAG_ASYNC   - Indicates no need to copy source data
  *
- * The PSM AM implementation will not dereference the args pointer after return
- * from this function. If PSM_AM_FLAG_ASYNC is not provided, the PSM AM
+ * The PSM2 AM implementation will not dereference the args pointer after return
+ * from this function. If PSM2_AM_FLAG_ASYNC is not provided, the PSM2 AM
  * implementation will not dereference the src pointer after return from this
  * function. This may require the implementation to take a copy of the payload
- * if the reply cannot be issued immediately.  However, if PSM_AM_FLAG_ASYNC is
- * provided then a copy will not be taken and the PSM AM implementation retains
+ * if the reply cannot be issued immediately.  However, if PSM2_AM_FLAG_ASYNC is
+ * provided then a copy will not be taken and the PSM2 AM implementation retains
  * ownership of the payload src memory until the reply is locally complete.
  * Local completion can be determined using the completion handler call-back.
  *
@@ -329,41 +329,41 @@ psm_am_request_short(psm_epaddr_t epaddr, psm_handler_t handler,
  * @param[in] nargs Number of arguments to be provided to the handler
  * @param[in] src Pointer to the payload to be delivered to the handler
  * @param[in] len Length of the payload in bytes
- * @param[in] flags These are PSM AM flags and may be combined together with
+ * @param[in] flags These are PSM2 AM flags and may be combined together with
  *                  bitwise-or
  * @param[in] completion_fn The completion function to called locally when
  *                          remote handler is complete
  * @param[in] completion_ctxt User-provided context pointer to be passed to the
  *                            completion handler
  *
- * @returns PSM_OK indicates success.
+ * @returns PSM2_OK indicates success.
  */
-psm_error_t
-psm_am_reply_short(psm_am_token_t token, psm_handler_t handler,
-		   psm_amarg_t *args, int nargs, void *src,
+psm2_error_t
+psm2_am_reply_short(psm2_am_token_t token, psm2_handler_t handler,
+		   psm2_amarg_t *args, int nargs, void *src,
 		   size_t len, int flags,
-		   psm_am_completion_fn_t completion_fn,
+		   psm2_am_completion_fn_t completion_fn,
 		   void *completion_ctxt);
 
 /** @brief Return the source end-point address for a token.
  *
  * This function is used to obtain the epaddr object representing the message
- * initiator from a token passed by PSM to a message handler.
+ * initiator from a token passed by PSM2 to a message handler.
  *
  * @param[in] token Token value provided to the AM handler that is generating
  *                  the reply.
  * @param[out] epaddr_out Pointer to the where the epaddr should be returned.
  *
- * @returns PSM_OK indicates success.
- * @returns PSM_PARAM_ERR token is invalid or epaddr_out is NULL.
+ * @returns PSM2_OK indicates success.
+ * @returns PSM2_PARAM_ERR token is invalid or epaddr_out is NULL.
  */
-psm_error_t psm_am_get_source(psm_am_token_t token,
-			      psm_epaddr_t *epaddr_out);
+psm2_error_t psm2_am_get_source(psm2_am_token_t token,
+			      psm2_epaddr_t *epaddr_out);
 
 /** @brief AM parameters
  *
- * This structure is used to return PSM AM implementation-specific parameter
- * values back to the caller of the psm_am_get_parameters() function. This
+ * This structure is used to return PSM2 AM implementation-specific parameter
+ * values back to the caller of the psm2_am_get_parameters() function. This
  * API also specifies the minimum values for these parameters that an
  * implementation must at least provide:
  *   max_handlers >= 64,
@@ -371,7 +371,7 @@ psm_error_t psm_am_get_source(psm_am_token_t token,
  *   max_request_short >= 256 and
  *   max_reply_short >= 256.
  */
-struct psm_am_parameters {
+struct psm2_am_parameters {
 	/** Maximum number of handlers that can be registered. */
 	uint32_t max_handlers;
 	/** Maximum number of arguments to an AM handler. */
@@ -387,7 +387,7 @@ struct psm_am_parameters {
  * This function retrieves the implementation-specific AM parameter values for
  * the specified end-point.
  *
- * @param[in] ep The end-point value returned by psm_ep_open().
+ * @param[in] ep The end-point value returned by psm2_ep_open().
  * @param[out] parameters Pointer to the struct where the parameters will be
  *                        returned.
  * @param[in] sizeof_parameters_in The size in bytes of the struct provided by
@@ -395,11 +395,11 @@ struct psm_am_parameters {
  * @param[out] sizeof_parameters_out The size in bytes of the struct returned
  *                                   by PSM.
  *
- * @returns PSM_OK indicates success.
+ * @returns PSM2_OK indicates success.
  */
-psm_error_t
-psm_am_get_parameters(psm_ep_t ep,
-		      struct psm_am_parameters *parameters,
+psm2_error_t
+psm2_am_get_parameters(psm2_ep_t ep,
+		      struct psm2_am_parameters *parameters,
 		      size_t sizeof_parameters_in,
 		      size_t *sizeof_parameters_out);
 

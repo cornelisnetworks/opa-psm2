@@ -55,7 +55,7 @@
 
 #ifndef _PSM_UUID_H
 #define _PSM_UUID_H
-int	    psmi_uuid_parse(const char *in, psm_uuid_t uu);
-void	    psmi_uuid_unparse(const psm_uuid_t uuid, char *out);
-int	    psmi_uuid_compare(const psm_uuid_t uuA, const psm_uuid_t uuB);
+int	    psmi_uuid_parse(const char *in, psm2_uuid_t uu);
+void	    psmi_uuid_unparse(const psm2_uuid_t uuid, char *out);
+int	    psmi_uuid_compare(const psm2_uuid_t uuA, const psm2_uuid_t uuB);
 #endif

@@ -63,7 +63,7 @@
 typedef
 struct am_epaddr {
 	/* must be the first field to be the same address */
-	struct psm_epaddr epaddr;
+	struct psm2_epaddr epaddr;
 	union {
 		uint16_t _ptladdr_u16[4];
 		uint32_t _ptladdr_u32[2];
@@ -83,11 +83,11 @@ struct amsh_am_token {
 	struct psmi_am_token tok;
 
 	ptl_t *ptl;	  /**> What PTL was it received on */
-	psm_mq_t mq;	  /**> What matched queue is this for ? */
+	psm2_mq_t mq;	  /**> What matched queue is this for ? */
 	uint16_t shmidx;  /**> what shmidx sent this */
 } amsh_am_token_t;
 
-typedef void (*psmi_handler_fn_t) (void *token, psm_amarg_t *args, int nargs,
+typedef void (*psmi_handler_fn_t) (void *token, psm2_amarg_t *args, int nargs,
 				   void *src, size_t len);
 
 typedef struct psmi_handlertab {
@@ -119,7 +119,7 @@ typedef struct psmi_handlertab {
 #define PSMI_KASSIST_MODE_DEFAULT PSMI_KASSIST_CMA_GET
 #define PSMI_KASSIST_MODE_DEFAULT_STRING  "cma-get"
 
-int psmi_epaddr_pid(psm_epaddr_t epaddr);
+int psmi_epaddr_pid(psm2_epaddr_t epaddr);
 
 /*
  * Eventually, we will allow users to register handlers as "don't reply", which
@@ -132,57 +132,57 @@ int psmi_amsh_poll(ptl_t *ptl, int replyonly);
 
 /* Shared memory AM, forward decls */
 int
-psmi_amsh_short_request(ptl_t *ptl, psm_epaddr_t epaddr,
-			psm_handler_t handler, psm_amarg_t *args, int nargs,
+psmi_amsh_short_request(ptl_t *ptl, psm2_epaddr_t epaddr,
+			psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 			const void *src, size_t len, int flags);
 
 void
 psmi_amsh_short_reply(amsh_am_token_t *tok,
-		      psm_handler_t handler, psm_amarg_t *args, int nargs,
+		      psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 		      const void *src, size_t len, int flags);
 
 int
-psmi_amsh_long_request(ptl_t *ptl, psm_epaddr_t epaddr,
-		       psm_handler_t handler, psm_amarg_t *args, int nargs,
+psmi_amsh_long_request(ptl_t *ptl, psm2_epaddr_t epaddr,
+		       psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 		       const void *src, size_t len, void *dest, int flags);
 
 void
 psmi_amsh_long_reply(amsh_am_token_t *tok,
-		     psm_handler_t handler, psm_amarg_t *args, int nargs,
+		     psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 		     const void *src, size_t len, void *dest, int flags);
 
-void psmi_am_mq_handler(void *toki, psm_amarg_t *args, int narg, void *buf,
+void psmi_am_mq_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			size_t len);
 
-void psmi_am_mq_handler(void *toki, psm_amarg_t *args, int narg, void *buf,
+void psmi_am_mq_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			size_t len);
-void psmi_am_mq_handler_data(void *toki, psm_amarg_t *args, int narg,
+void psmi_am_mq_handler_data(void *toki, psm2_amarg_t *args, int narg,
 			     void *buf, size_t len);
-void psmi_am_mq_handler_complete(void *toki, psm_amarg_t *args, int narg,
+void psmi_am_mq_handler_complete(void *toki, psm2_amarg_t *args, int narg,
 				 void *buf, size_t len);
-void psmi_am_mq_handler_rtsmatch(void *toki, psm_amarg_t *args, int narg,
+void psmi_am_mq_handler_rtsmatch(void *toki, psm2_amarg_t *args, int narg,
 				 void *buf, size_t len);
-void psmi_am_mq_handler_rtsdone(void *toki, psm_amarg_t *args, int narg,
+void psmi_am_mq_handler_rtsdone(void *toki, psm2_amarg_t *args, int narg,
 				void *buf, size_t len);
-void psmi_am_handler(void *toki, psm_amarg_t *args, int narg, void *buf,
+void psmi_am_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 		     size_t len);
 
 /* AM over shared memory (forward decls) */
-psm_error_t
-psmi_amsh_am_get_parameters(psm_ep_t ep, struct psm_am_parameters *parameters);
+psm2_error_t
+psmi_amsh_am_get_parameters(psm2_ep_t ep, struct psm2_am_parameters *parameters);
 
-psm_error_t
-psmi_amsh_am_short_request(psm_epaddr_t epaddr,
-			   psm_handler_t handler, psm_amarg_t *args, int nargs,
+psm2_error_t
+psmi_amsh_am_short_request(psm2_epaddr_t epaddr,
+			   psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 			   void *src, size_t len, int flags,
-			   psm_am_completion_fn_t completion_fn,
+			   psm2_am_completion_fn_t completion_fn,
 			   void *completion_ctxt);
 
-psm_error_t
-psmi_amsh_am_short_reply(psm_am_token_t tok,
-			 psm_handler_t handler, psm_amarg_t *args, int nargs,
+psm2_error_t
+psmi_amsh_am_short_reply(psm2_am_token_t tok,
+			 psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 			 void *src, size_t len, int flags,
-			 psm_am_completion_fn_t completion_fn,
+			 psm2_am_completion_fn_t completion_fn,
 			 void *completion_ctxt);
 
 #define amsh_conn_handler_hidx	 1
@@ -212,10 +212,10 @@ struct am_reqq {
 	struct am_reqq *next;
 
 	ptl_t *ptl;
-	psm_epaddr_t epaddr;
+	psm2_epaddr_t epaddr;
 	int amtype;
-	psm_handler_t handler;
-	psm_amarg_t args[8];
+	psm2_handler_t handler;
+	psm2_amarg_t args[8];
 	int nargs;
 	uint32_t len;
 	void *src;
@@ -229,9 +229,9 @@ struct am_reqq_fifo_t {
 	am_reqq_t **lastp;
 };
 
-psm_error_t psmi_am_reqq_drain(ptl_t *ptl);
-void psmi_am_reqq_add(int amtype, ptl_t *ptl, psm_epaddr_t epaddr,
-		      psm_handler_t handler, psm_amarg_t *args, int nargs,
+psm2_error_t psmi_am_reqq_drain(ptl_t *ptl);
+void psmi_am_reqq_add(int amtype, ptl_t *ptl, psm2_epaddr_t epaddr,
+		      psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 		      void *src, size_t len, void *dest, int flags);
 
 /*
@@ -282,7 +282,6 @@ void psmi_am_reqq_add(int amtype, ptl_t *ptl, psm_epaddr_t epaddr,
 #define _shmidx		_ptladdr_u16[0]
 #define _return_shmidx	_ptladdr_u16[1]
 #define _cstate		_ptladdr_u16[2]
-#define _peer_pid	_ptladdr_u16[3]
 
 #define AMSH_CMASK_NONE    0
 #define AMSH_CMASK_PREREQ  1
@@ -323,7 +322,7 @@ struct am_pkt_short {
 	uint16_t nargs;
 	uint16_t handleridx;
 
-	psm_amarg_t args[NSHORT_ARGS];	/* AM arguments */
+	psm2_amarg_t args[NSHORT_ARGS];	/* AM arguments */
 
 	/* We eventually will expose up to 8 arguments, but this isn't implemented
 	 * For now.  >6 args will probably require a medium instead of a short */
@@ -337,7 +336,7 @@ typedef struct am_pkt_bulk {
 	uintptr_t dest;		/* Destination pointer in "longs" */
 	uint32_t dest_off;	/* Destination pointer offset */
 	uint32_t len;		/* Destination length within offset */
-	psm_amarg_t args[NBULK_ARGS];	/* Additional "spillover" for >6 args */
+	psm2_amarg_t args[NBULK_ARGS];	/* Additional "spillover" for >6 args */
 	uint8_t payload[0];
 } am_pkt_bulk_t;
 /* No strict size decl, used for mediums and longs */
@@ -429,21 +428,19 @@ struct amsh_qinfo {
 struct am_ctl_nodeinfo {
 	uint16_t psm_verno;
 	volatile uint16_t is_init;
-	uint32_t amsh_features;
-	psm_epid_t epid;
-	psm_epaddr_t epaddr;
-	int pid;
-	int shmfd;
-	char *amsh_keyname;
+	volatile pid_t pid;
+	psm2_epid_t epid;
+	psm2_epaddr_t epaddr;
 	uintptr_t amsh_shmbase;
 	amsh_qinfo_t amsh_qsizes;
+	uint32_t amsh_features;
 	struct amsh_qdirectory qdir;
 } __attribute__((aligned(64)));
 
 struct ptl {
-	psm_ep_t ep;
-	psm_epid_t epid;
-	psm_epaddr_t epaddr;
+	psm2_ep_t ep;
+	psm2_epid_t epid;
+	psm2_epaddr_t epaddr;
 	ptl_ctl_t *ctl;
 
 	int connect_phase;
@@ -454,6 +451,7 @@ struct ptl {
 	int amsh_only_polls;
 	int max_ep_idx, am_ep_size;
 	int psmi_kassist_mode;
+	char *amsh_keyname;
 
 	/* These three items carefully picked to fit in one cache line. */
 	am_ctl_qshort_cache_t reqH;

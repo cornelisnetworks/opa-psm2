@@ -65,11 +65,11 @@ ips_proto_process_unknown_opcode,	/* 0xC0 */
 ips_proto_mq_handle_tiny,		/* OPCODE_TINY */
 ips_proto_mq_handle_short,
 ips_proto_mq_handle_eager,
-ips_proto_mq_handle_rts,
-ips_proto_mq_handle_cts,
-ips_proto_mq_handle_data,
-ips_protoexp_data,
-ips_protoexp_recv_tid_completion,
+ips_proto_mq_handle_rts,                /* RTS */
+ips_proto_mq_handle_cts,                /* CTS */
+ips_proto_mq_handle_data,               /* DATA */
+ips_protoexp_data,                      /* EXPTID */
+ips_protoexp_recv_tid_completion,       /* EXPTID_COMPLETION */
 ips_proto_process_ack,
 ips_proto_process_nak,
 ips_proto_process_becn,
@@ -89,12 +89,12 @@ static void ips_report_strays(struct ips_proto *proto);
 
 #define INC_TIME_SPEND(timer)
 
-psm_error_t ips_proto_recv_init(struct ips_proto *proto)
+psm2_error_t ips_proto_recv_init(struct ips_proto *proto)
 {
 	uint32_t interval_secs;
 	union psmi_envvar_val env_stray;
 
-	psmi_getenv("PSM_STRAY_WARNINTERVAL",
+	psmi_getenv("PSM2_STRAY_WARNINTERVAL",
 		    "min secs between stray process warnings",
 		    PSMI_ENVVAR_LEVEL_HIDDEN,
 		    PSMI_ENVVAR_TYPE_UINT,
@@ -106,20 +106,20 @@ psm_error_t ips_proto_recv_init(struct ips_proto *proto)
 	else
 		proto->stray_warn_interval = 0;
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
-psm_error_t ips_proto_recv_fini(struct ips_proto *proto)
+psm2_error_t ips_proto_recv_fini(struct ips_proto *proto)
 {
 	ips_report_strays(proto);
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 #define cycles_to_sec_f(cycles)		    \
 	(((double)cycles_to_nanosecs(cycles)) / 1000000000.0)
 
 struct ips_stray_epid {
-	psm_epid_t epid;
+	psm2_epid_t epid;
 	uint32_t err_check_bad_sent;
 	uint32_t ipv4_addr;
 	uint32_t pid;
@@ -140,7 +140,7 @@ void ips_report_strays(struct ips_proto *proto)
 	while ((sepid = psmi_epid_itor_next(&itor))) {
 		char ipbuf[INET_ADDRSTRLEN], *ip = NULL;
 		char bufpid[32];
-		uint32_t lid = psm_epid_nid(sepid->epid);
+		uint32_t lid = psm2_epid_nid(sepid->epid);
 		double t_first =
 		    cycles_to_sec_f(sepid->t_first - proto->t_init);
 		double t_last = cycles_to_sec_f(sepid->t_last - proto->t_init);
@@ -184,10 +184,10 @@ void ips_proto_rv_scbavail_callback(struct ips_scbctrl *scbc, void *context)
 	return;
 }
 
-psm_error_t
+psm2_error_t
 ips_proto_timer_pendq_callback(struct psmi_timer *timer, uint64_t current)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	struct ips_pend_sends *pend_sends =
 	    (struct ips_pend_sends *)timer->context;
 	struct ips_pendsendq *phead = &pend_sends->pendq;
@@ -205,12 +205,12 @@ ips_proto_timer_pendq_callback(struct psmi_timer *timer, uint64_t current)
 			break;
 
 		default:
-			psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 					  "Unknown pendq state %d\n",
 					  sreq->type);
 		}
 
-		if (err == PSM_OK) {
+		if (err == PSM2_OK) {
 			STAILQ_REMOVE_HEAD(phead, next);
 			psmi_mpool_put(sreq);
 		} else {	/* out of scbs. wait for the next scb_avail callback */
@@ -353,7 +353,7 @@ void ips_tidflow_nak_post_process(struct ips_proto *proto,
 		/* packet length in current header */
 		pktlen = scb->payload_size;
 		psmi_assert(min(remaining_bytes_in_tid,
-			scb->frag_size) == pktlen);
+			scb->frag_size) >= pktlen);
 		psmi_assert((((__be16_to_cpu(scb->ips_lrh.lrh[2]) &
 			HFI_LRH_PKTLEN_MASK) << BYTE2DWORD_SHIFT) -
 			sizeof(struct ips_message_header) -
@@ -543,6 +543,7 @@ ips_proto_process_ack(struct ips_recvhdrq_event *rcv_ev)
 	if (!tidctrl && ((flowid = ips_proto_flowid(p_hdr)) < EP_FLOW_TIDFLOW)) {
 		ack_seq_num.psn_num =
 		    (ack_seq_num.psn_num - 1) & proto->psn_mask;
+		psmi_assert(flowid < EP_FLOW_LAST);
 		flow = &ipsaddr->flows[flowid];
 		if (!pio_dma_ack_valid(proto, flow, ack_seq_num))
 			goto ret;
@@ -556,6 +557,10 @@ ips_proto_process_ack(struct ips_recvhdrq_event *rcv_ev)
 
 	unackedq = &flow->scb_unacked;
 	scb_pend = &flow->scb_pend;
+
+	if (STAILQ_EMPTY(unackedq))
+		goto ret;
+
 	last_seq_num = STAILQ_LAST(unackedq, ips_scb, nextq)->seq_num;
 
 	INC_TIME_SPEND(TIME_SPEND_USER2);
@@ -671,6 +676,7 @@ int ips_proto_process_nak(struct ips_recvhdrq_event *rcv_ev)
 	tidctrl = GET_HFI_KHDR_TIDCTRL(__le32_to_cpu(p_hdr->khdr.kdeth0));
 	if (!tidctrl && ((flowid = ips_proto_flowid(p_hdr)) < EP_FLOW_TIDFLOW)) {
 		protocol = PSM_PROTOCOL_GO_BACK_N;
+		psmi_assert(flowid < EP_FLOW_LAST);
 		flow = &ipsaddr->flows[flowid];
 		if (!pio_dma_ack_valid(proto, flow, ack_seq_num))
 			goto ret;
@@ -696,6 +702,10 @@ int ips_proto_process_nak(struct ips_recvhdrq_event *rcv_ev)
 
 	unackedq = &flow->scb_unacked;
 	scb_pend = &flow->scb_pend;
+
+	if (STAILQ_EMPTY(unackedq))
+		goto ret;
+
 	last_seq_num = STAILQ_LAST(unackedq, ips_scb, nextq)->seq_num;
 
 	proto->epaddr_stats.nak_recv++;
@@ -840,14 +850,15 @@ ips_proto_process_err_chk(struct ips_recvhdrq_event *rcv_ev)
 	struct ips_message_header *p_hdr = rcv_ev->p_hdr;
 	ips_epaddr_t *ipsaddr = rcv_ev->ipsaddr;
 	ips_epaddr_flow_t flowid = ips_proto_flowid(p_hdr);
-	struct ips_flow *flow = &ipsaddr->flows[flowid];
+	struct ips_flow *flow;
 	psmi_seqnum_t seq_num;
 	int16_t seq_off;
 
 	INC_TIME_SPEND(TIME_SPEND_USER4);
-
+	PSM2_LOG_MSG("entering");
+	psmi_assert(flowid < EP_FLOW_LAST);
+	flow = &ipsaddr->flows[flowid];
 	recvq->proto->epaddr_stats.err_chk_recv++;
-
 	/* Ignore FECN bit since this is the control path */
 	rcv_ev->is_congested &= ~IPS_RECV_EVENT_FECN;
 
@@ -875,6 +886,7 @@ ips_proto_process_err_chk(struct ips_recvhdrq_event *rcv_ev)
 					    &ctrlscb, ctrlscb.cksum, 0);
 	}
 
+	PSM2_LOG_MSG("leaving");
 	return IPS_RECVHDRQ_CONTINUE;
 }
 
@@ -893,7 +905,7 @@ ips_proto_process_err_chk_gen(struct ips_recvhdrq_event *rcv_ev)
 	uint8_t ack_type;
 
 	INC_TIME_SPEND(TIME_SPEND_USER4);
-
+	PSM2_LOG_MSG("entering");
 	recvq->proto->epaddr_stats.err_chk_recv++;
 
 	/* Ignore FECN bit since this is the control path */
@@ -913,6 +925,7 @@ ips_proto_process_err_chk_gen(struct ips_recvhdrq_event *rcv_ev)
 		_HFI_DBG
 		    ("ERR_CHK_GEN: gen mismatch Pkt: 0x%x, Current: 0x%x\n",
 		     desc_id._desc_genc, tidrecvc->rdescid._desc_genc);
+		PSM2_LOG_MSG("leaving");
 		return IPS_RECVHDRQ_CONTINUE;
 	}
 	psmi_assert(tidrecvc->state == TIDRECVC_STATE_BUSY);
@@ -995,6 +1008,7 @@ ips_proto_process_err_chk_gen(struct ips_recvhdrq_event *rcv_ev)
 	if (ack_type == OPCODE_NAK)
 		tidrecvc->stats.nReXmit++;	/* Update stats for retransmit (Sent a NAK) */
 
+	PSM2_LOG_MSG("leaving");
 	return IPS_RECVHDRQ_CONTINUE;
 }
 
@@ -1004,8 +1018,11 @@ ips_proto_process_becn(struct ips_recvhdrq_event *rcv_ev)
 	struct ips_proto *proto = rcv_ev->proto;
 	struct ips_message_header *p_hdr = rcv_ev->p_hdr;
 	ips_epaddr_t *ipsaddr = rcv_ev->ipsaddr;
-	struct ips_flow *flow = &ipsaddr->flows[ips_proto_flowid(p_hdr)];
+	int flowid = ips_proto_flowid(p_hdr);
+	struct ips_flow *flow;
 
+	psmi_assert(flowid < EP_FLOW_LAST);
+	flow = &ipsaddr->flows[flowid];
 	if ((flow->path->pr_ccti +
 	proto->cace[flow->path->pr_sl].ccti_increase) <= proto->ccti_limit) {
 		ips_cca_adjust_rate(flow->path,
@@ -1043,15 +1060,18 @@ ips_proto_process_unknown_opcode(struct ips_recvhdrq_event *rcv_ev)
 int
 ips_proto_connect_disconnect(struct ips_recvhdrq_event *rcv_ev)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
+	char *payload = ips_recvhdrq_event_payload(rcv_ev);
+	uint32_t paylen = ips_recvhdrq_event_paylen(rcv_ev);
 
+	psmi_assert(payload);
 	err = ips_proto_process_connect(rcv_ev->proto,
-					 _get_proto_hfi_opcode(rcv_ev->p_hdr),
-					 rcv_ev->p_hdr,
-					 ips_recvhdrq_event_payload(rcv_ev),
-					 ips_recvhdrq_event_paylen(rcv_ev));
-	if (err != PSM_OK)
-		psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,
+					_get_proto_hfi_opcode(rcv_ev->p_hdr),
+					rcv_ev->p_hdr,
+					payload,
+					paylen);
+	if (err != PSM2_OK)
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 			"Process connect/disconnect error: %d, opcode %d\n",
 			err, _get_proto_hfi_opcode(rcv_ev->p_hdr));
 
@@ -1065,7 +1085,7 @@ int ips_proto_process_unknown(const struct ips_recvhdrq_event *rcv_ev)
 	struct ips_message_header *p_hdr = rcv_ev->p_hdr;
 	uint8_t ptype = rcv_ev->ptype;
 	struct ips_proto *proto = rcv_ev->proto;
-	psm_ep_t ep_err;
+	psm2_ep_t ep_err;
 	char *pkt_type;
 	int opcode = (int)_get_proto_hfi_opcode(p_hdr);
 
@@ -1127,9 +1147,9 @@ int ips_proto_process_unknown(const struct ips_recvhdrq_event *rcv_ev)
 		ips_proto_show_header(p_hdr, "invalid connidx");
 
 	/* At this point we are out of luck. */
-	psmi_handle_error(ep_err, PSM_EPID_NETWORK_ERROR,
-			  "Received out-of-context %s message(s) ptype=0x%x opcode=0x%x"
-			  " from a stray process", pkt_type, ptype, opcode);
+	psmi_handle_error(ep_err, PSM2_EPID_NETWORK_ERROR,
+			  "Received %s message(s) ptype=0x%x opcode=0x%x"
+			  " from an unknown process", pkt_type, ptype, opcode);
 
 	return 0;		/* Always skip this packet unless the above call was a noreturn
 				 * call */
@@ -1218,6 +1238,8 @@ int ips_proto_process_packet_error(struct ips_recvhdrq_event *rcv_ev)
 				    return 0;	/* Unknown packet - drop */
 
 				rcv_ev->ipsaddr = epstaddr->ipsaddr;
+
+				psmi_assert(flowid < EP_FLOW_LAST);
 				flow = &rcv_ev->ipsaddr->flows[flowid];
 				sequence_num.psn_val =
 				    __be32_to_cpu(p_hdr->bth[2]);
@@ -1251,7 +1273,7 @@ int ips_proto_process_packet_error(struct ips_recvhdrq_event *rcv_ev)
 	else if (tf_seqerr)
 		ips_protoexp_handle_tf_seqerr(rcv_ev);
 	else if (tiderr) {	/* tid error, but not on an eager pkt */
-		psm_ep_t ep_err = PSMI_EP_LOGEVENT;
+		psm2_ep_t ep_err = PSMI_EP_LOGEVENT;
 		uint16_t tid, offset;
 		uint64_t t_now = get_cycles();
 
@@ -1277,7 +1299,7 @@ int ips_proto_process_packet_error(struct ips_recvhdrq_event *rcv_ev)
 			offset = __le32_to_cpu(rcv_ev->p_hdr->khdr.kdeth0) &
 			    HFI_KHDR_OFFSET_MASK;
 
-			psmi_handle_error(ep_err, PSM_EP_DEVICE_FAILURE,
+			psmi_handle_error(ep_err, PSM2_EP_DEVICE_FAILURE,
 					  "%s with tid=%d,offset=%d,count=%d: %s %s",
 					  "TID Error",
 					  tid, offset, proto->tiderr_cnt,

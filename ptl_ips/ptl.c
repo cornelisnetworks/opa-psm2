@@ -164,8 +164,8 @@ recvhdrq_hw_params(const psmi_context_t *context,
 	}
 }
 
-static psm_error_t shrecvq_init(ptl_t *ptl, const psmi_context_t *context);
-static psm_error_t shrecvq_fini(ptl_t *ptl);
+static psm2_error_t shrecvq_init(ptl_t *ptl, const psmi_context_t *context);
+static psm2_error_t shrecvq_fini(ptl_t *ptl);
 
 static size_t ips_ptl_sizeof(void)
 {
@@ -204,7 +204,7 @@ int ips_ptl_epaddr_stats_init(char **desc, uint16_t *flags)
 	return num_stats;
 }
 
-int ips_ptl_epaddr_stats_get(psm_epaddr_t epaddr, uint64_t *stats_o)
+int ips_ptl_epaddr_stats_get(psm2_epaddr_t epaddr, uint64_t *stats_o)
 {
 	int i, num_stats =
 	    sizeof(struct ips_proto_epaddr_stats) / sizeof(uint64_t);
@@ -217,16 +217,16 @@ int ips_ptl_epaddr_stats_get(psm_epaddr_t epaddr, uint64_t *stats_o)
 }
 
 static
-psm_error_t
+psm2_error_t
 psmi_context_check_status_callback(struct psmi_timer *t, uint64_t current)
 {
 	struct ptl *ptl = (struct ptl *)t->context;
 	const uint64_t current_count = get_cycles();
-	psm_error_t err;
+	psm2_error_t err;
 
 	err = psmi_context_check_status(ptl->context);
-	if (err == PSM_OK || err == PSM_OK_NO_PROGRESS)
-		err = ips_spio_process_events(&ptl->spioc);
+	if (err == PSM2_OK || err == PSM2_OK_NO_PROGRESS)
+		err = ips_spio_process_events(ptl);
 
 	psmi_timer_request_always(&ptl->timerq, &ptl->status_timer,
 				  current_count + ptl->status_cyc_timeout);
@@ -235,9 +235,9 @@ psmi_context_check_status_callback(struct psmi_timer *t, uint64_t current)
 }
 
 static
-psm_error_t ips_ptl_init(const psm_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
+psm2_error_t ips_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	uint32_t num_of_send_bufs = ep->hfi_num_sendbufs;
 	uint32_t num_of_send_desc = ep->hfi_num_descriptors;
 	uint32_t imm_size = ep->hfi_imm_size;
@@ -332,7 +332,7 @@ psm_error_t ips_ptl_init(const psm_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 		recvshc = (struct ptl_shared *)
 		    psmi_calloc(ep, UNDEFINED, 1, sizeof(struct ptl_shared));
 		if (recvshc == NULL) {
-			err = PSM_NO_MEMORY;
+			err = PSM2_NO_MEMORY;
 			goto fail;
 		}
 
@@ -365,7 +365,7 @@ psm_error_t ips_ptl_init(const psm_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 					      PTHREAD_PROCESS_SHARED) != 0) {
 				err =
 				    psmi_handle_error(ptl->ep,
-						      PSM_EP_DEVICE_FAILURE,
+						      PSM2_EP_DEVICE_FAILURE,
 						      "Couldn't initialize process-shared spin lock");
 				goto fail;
 			}
@@ -424,11 +424,11 @@ fail:
 	return err;
 }
 
-static psm_error_t ips_ptl_fini(ptl_t *ptl, int force, uint64_t timeout_in)
+static psm2_error_t ips_ptl_fini(ptl_t *ptl, int force, uint64_t timeout_in)
 {
 	const struct hfi1_user_info *user_info = &ptl->context->user_info;
 	const int enable_shcontexts = (user_info->subctxt_cnt > 0);
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	if ((err = ips_proto_fini(&ptl->proto, force, timeout_in)))
 		goto fail;
@@ -459,17 +459,17 @@ fail:
 }
 
 static
-psm_error_t
+psm2_error_t
 ips_ptl_optctl(const void *core_obj, int optname,
 	       void *optval, uint64_t *optlen, int get)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	switch (optname) {
-	case PSM_IB_OPT_EP_SL:
+	case PSM2_IB_OPT_EP_SL:
 		{
-			/* Core object is psm_epaddr */
-			psm_epaddr_t epaddr = (psm_epaddr_t) core_obj;
+			/* Core object is psm2_epaddr */
+			psm2_epaddr_t epaddr = (psm2_epaddr_t) core_obj;
 			ips_epaddr_t *ipsaddr = (ips_epaddr_t *) epaddr;
 
 			/* If endpoint does not use IB ignore for set, complain for get */
@@ -477,7 +477,7 @@ ips_ptl_optctl(const void *core_obj, int optname,
 				if (get)
 					err =
 					    psmi_handle_error(PSMI_EP_LOGEVENT,
-							      PSM_PARAM_ERR,
+							      PSM2_PARAM_ERR,
 							      "Invalid EP transport");
 				goto exit_fn;
 			}
@@ -486,7 +486,7 @@ ips_ptl_optctl(const void *core_obj, int optname,
 			if (*optlen < sizeof(uint8_t)) {
 				err =
 				    psmi_handle_error(PSMI_EP_LOGEVENT,
-						      PSM_PARAM_ERR,
+						      PSM2_PARAM_ERR,
 						      "Option value length error");
 				*optlen = sizeof(unsigned);
 				goto exit_fn;
@@ -505,7 +505,7 @@ ips_ptl_optctl(const void *core_obj, int optname,
 				if (new_sl > PSMI_SL_MAX) {
 					err =
 					    psmi_handle_error(PSMI_EP_LOGEVENT,
-						      PSM_PARAM_ERR,
+						      PSM2_PARAM_ERR,
 						      "Invalid SL value %u. %d<= SL <=%d.",
 						      new_sl, PSMI_SL_MIN, PSMI_SL_MAX);
 					goto exit_fn;
@@ -519,17 +519,17 @@ ips_ptl_optctl(const void *core_obj, int optname,
 			}
 		}
 		break;
-	case PSM_IB_OPT_DF_SL:
+	case PSM2_IB_OPT_DF_SL:
 		{
 			/* Set default SL to be used by an endpoint for all communication */
-			/* Core object is psm_epaddr */
-			psm_ep_t ep = (psm_ep_t) core_obj;
+			/* Core object is psm2_epaddr */
+			psm2_ep_t ep = (psm2_ep_t) core_obj;
 
 			/* Make sure ep is specified */
 			if (!ep) {
 				err =
 				    psmi_handle_error(PSMI_EP_LOGEVENT,
-						      PSM_PARAM_ERR,
+						      PSM2_PARAM_ERR,
 						      "Invalid PSM Endpoint");
 				goto exit_fn;
 			}
@@ -538,7 +538,7 @@ ips_ptl_optctl(const void *core_obj, int optname,
 			if (*optlen < sizeof(uint8_t)) {
 				err =
 				    psmi_handle_error(PSMI_EP_LOGEVENT,
-						      PSM_PARAM_ERR,
+						      PSM2_PARAM_ERR,
 						      "Option value length error");
 				*optlen = sizeof(uint8_t);
 				goto exit_fn;
@@ -555,7 +555,7 @@ ips_ptl_optctl(const void *core_obj, int optname,
 				if (new_sl > PSMI_SL_MAX) {
 					err =
 					    psmi_handle_error(PSMI_EP_LOGEVENT,
-						      PSM_PARAM_ERR,
+						      PSM2_PARAM_ERR,
 						      "Invalid SL value %u. %d<= SL <=%d.",
 						      new_sl, PSMI_SL_MIN, PSMI_SL_MAX);
 					goto exit_fn;
@@ -568,7 +568,7 @@ ips_ptl_optctl(const void *core_obj, int optname,
 		break;
 	default:
 		err =
-		    psmi_handle_error(NULL, PSM_PARAM_ERR,
+		    psmi_handle_error(NULL, PSM2_PARAM_ERR,
 				      "Unknown PSM_IB option %u.", optname);
 	}
 
@@ -577,7 +577,7 @@ exit_fn:
 }
 
 static
-psm_error_t
+psm2_error_t
 ips_ptl_setopt(const void *component_obj, int optname,
 	       const void *optval, uint64_t optlen)
 {
@@ -586,20 +586,20 @@ ips_ptl_setopt(const void *component_obj, int optname,
 }
 
 static
-psm_error_t
+psm2_error_t
 ips_ptl_getopt(const void *component_obj, int optname,
 	       void *optval, uint64_t *optlen)
 {
 	return ips_ptl_optctl(component_obj, optname, optval, optlen, 1);
 }
 
-psm_error_t ips_ptl_poll(ptl_t *ptl, int _ignored)
+psm2_error_t ips_ptl_poll(ptl_t *ptl, int _ignored)
 {
 	const uint64_t current_count = get_cycles();
 	const int do_lock = PSMI_PLOCK_DISABLED &&
 	    (ptl->runtime_flags & PSMI_RUNTIME_RCVTHREAD);
-	psm_error_t err = PSM_OK_NO_PROGRESS;
-	psm_error_t err2;
+	psm2_error_t err = PSM2_OK_NO_PROGRESS;
+	psm2_error_t err2;
 
 	if (!ips_recvhdrq_isempty(&ptl->recvq)) {
 		if (do_lock && !ips_recvhdrq_trylock(&ptl->recvq))
@@ -607,12 +607,12 @@ psm_error_t ips_ptl_poll(ptl_t *ptl, int _ignored)
 		err = ips_recvhdrq_progress(&ptl->recvq);
 		if (do_lock)
 			ips_recvhdrq_unlock(&ptl->recvq);
-		if_pf(err > PSM_OK_NO_PROGRESS)
+		if_pf(err > PSM2_OK_NO_PROGRESS)
 		    return err;
 		err2 =
 		    psmi_timer_process_if_expired(&(ptl->timerq),
 						  current_count);
-		if (err2 != PSM_OK_NO_PROGRESS)
+		if (err2 != PSM2_OK_NO_PROGRESS)
 			return err2;
 		else
 			return err;
@@ -651,11 +651,11 @@ PSMI_INLINE(void ips_unlock_shared_context(struct ptl_shared *recvshc))
 	pthread_spin_unlock(recvshc->context_lock);
 }
 
-psm_error_t ips_ptl_shared_poll(ptl_t *ptl, int _ignored)
+psm2_error_t ips_ptl_shared_poll(ptl_t *ptl, int _ignored)
 {
 	const uint64_t current_count = get_cycles();
-	psm_error_t err = PSM_OK_NO_PROGRESS;
-	psm_error_t err2;
+	psm2_error_t err = PSM2_OK_NO_PROGRESS;
+	psm2_error_t err2;
 	struct ptl_shared *recvshc = ptl->recvshc;
 	psmi_assert(recvshc != NULL);
 
@@ -676,17 +676,17 @@ psm_error_t ips_ptl_shared_poll(ptl_t *ptl, int _ignored)
 		}
 	}
 
-	if_pf(err > PSM_OK_NO_PROGRESS)
+	if_pf(err > PSM2_OK_NO_PROGRESS)
 	    return err;
 
 	if (!ips_recvhdrq_isempty(&recvshc->recvq)) {
 		err2 = ips_recvhdrq_progress(&recvshc->recvq);
-		if (err2 != PSM_OK_NO_PROGRESS) {
+		if (err2 != PSM2_OK_NO_PROGRESS) {
 			err = err2;
 		}
 	}
 
-	if_pf(err > PSM_OK_NO_PROGRESS)
+	if_pf(err > PSM2_OK_NO_PROGRESS)
 	    return err;
 
 	/*
@@ -694,7 +694,7 @@ psm_error_t ips_ptl_shared_poll(ptl_t *ptl, int _ignored)
 	 * may have been acked, some requests-to-send may have been queued).
 	 */
 	err2 = psmi_timer_process_if_expired(&(ptl->timerq), current_count);
-	if (err2 != PSM_OK_NO_PROGRESS)
+	if (err2 != PSM2_OK_NO_PROGRESS)
 		err = err2;
 
 	return err;
@@ -712,18 +712,18 @@ int ips_ptl_recvq_isempty(const ptl_t *ptl)
 /*
  * Legacy ips_get_stat -- do nothing.
  */
-int ips_get_stat(psm_epaddr_t epaddr, ips_sess_stat *stats)
+int ips_get_stat(psm2_epaddr_t epaddr, ips_sess_stat *stats)
 {
 	memset(stats, 0, sizeof(ips_sess_stat));
 	return 0;
 }
 
-static psm_error_t shrecvq_init(ptl_t *ptl, const psmi_context_t *context)
+static psm2_error_t shrecvq_init(ptl_t *ptl, const psmi_context_t *context)
 {
 	struct ptl_shared *recvshc = ptl->recvshc;
 	struct ips_recvhdrq_callbacks recvq_callbacks;
 	struct ips_recvq_params hdrq, egrq;
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	int i;
 
 	/* Initialize (shared) hardware context recvq (ptl->recvq) */
@@ -763,18 +763,18 @@ static psm_error_t shrecvq_init(ptl_t *ptl, const psmi_context_t *context)
 		}
 	}
 
-	if (err == PSM_OK)
+	if (err == PSM2_OK)
 		_HFI_DBG
 		    ("Context sharing in use: lid %d, context %d, sub-context %d\n",
-		     (int)psm_epid_nid(ptl->epid), recvshc->context,
+		     (int)psm2_epid_nid(ptl->epid), recvshc->context,
 		     recvshc->subcontext);
 fail:
 	return err;
 }
 
-static psm_error_t shrecvq_fini(ptl_t *ptl)
+static psm2_error_t shrecvq_fini(ptl_t *ptl)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	int i;
 
 	/* disable my write header queue before deallocation */
@@ -799,16 +799,16 @@ fail:
 	return err;
 }
 
-psm_error_t
-ips_ptl_connect(ptl_t *ptl, int numep, const psm_epid_t *array_of_epid,
-		const int *array_of_epid_mask, psm_error_t *array_of_errors,
-		psm_epaddr_t *array_of_epaddr, uint64_t timeout_in)
+psm2_error_t
+ips_ptl_connect(ptl_t *ptl, int numep, const psm2_epid_t *array_of_epid,
+		const int *array_of_epid_mask, psm2_error_t *array_of_errors,
+		psm2_epaddr_t *array_of_epaddr, uint64_t timeout_in)
 {
-	psm_error_t err;
-	psm_ep_t ep;
-	psm_epid_t *epid_array = NULL;
-	psm_error_t *error_array = NULL;
-	psm_epaddr_t *epaddr_array = NULL;
+	psm2_error_t err;
+	psm2_ep_t ep;
+	psm2_epid_t *epid_array = NULL;
+	psm2_error_t *error_array = NULL;
+	psm2_epaddr_t *epaddr_array = NULL;
 	ips_epaddr_t *ipsaddr_master, *ipsaddr;
 	int *mask_array = NULL;
 	int i;
@@ -825,14 +825,14 @@ ips_ptl_connect(ptl_t *ptl, int numep, const psm_epid_t *array_of_epid,
 		return err;
 
 	/* make the additional mutil-context connections. */
-	epid_array = (psm_epid_t *)
-	    psmi_malloc(ptl->ep, UNDEFINED, sizeof(psm_epid_t) * numep);
+	epid_array = (psm2_epid_t *)
+	    psmi_malloc(ptl->ep, UNDEFINED, sizeof(psm2_epid_t) * numep);
 	mask_array = (int *)
 	    psmi_malloc(ptl->ep, UNDEFINED, sizeof(int) * numep);
-	error_array = (psm_error_t *)
-	    psmi_malloc(ptl->ep, UNDEFINED, sizeof(psm_error_t) * numep);
-	epaddr_array = (psm_epaddr_t *)
-	    psmi_malloc(ptl->ep, UNDEFINED, sizeof(psm_epaddr_t) * numep);
+	error_array = (psm2_error_t *)
+	    psmi_malloc(ptl->ep, UNDEFINED, sizeof(psm2_error_t) * numep);
+	epaddr_array = (psm2_epaddr_t *)
+	    psmi_malloc(ptl->ep, UNDEFINED, sizeof(psm2_epaddr_t) * numep);
 	if (!epid_array || !mask_array || !error_array || !epaddr_array) {
 		goto fail;
 	}
@@ -843,17 +843,17 @@ ips_ptl_connect(ptl_t *ptl, int numep, const psm_epid_t *array_of_epid,
 		/* Setup the mask array and epid array. */
 		for (i = 0; i < numep; i++) {
 			if (array_of_epid_mask[i]
-			    && array_of_errors[i] == PSM_OK) {
+			    && array_of_errors[i] == PSM2_OK) {
 				ipsaddr_master =
 				    (ips_epaddr_t *) array_of_epaddr[i];
 				ipsaddr = ipsaddr_master->next;
 				mask_array[i] = 0;
 				while (ipsaddr != ipsaddr_master) {
-					if (((psm_epaddr_t) ipsaddr)->proto->
+					if (((psm2_epaddr_t) ipsaddr)->proto->
 					    ep == ep) {
 						mask_array[i] = 1;
 						epid_array[i] =
-						    ((psm_epaddr_t) ipsaddr)->
+						    ((psm2_epaddr_t) ipsaddr)->
 						    epid;
 						break;
 					}
@@ -888,13 +888,13 @@ fail:
 	return err;
 }
 
-psm_error_t
+psm2_error_t
 ips_ptl_disconnect(ptl_t *ptl, int force, int numep,
-		   const psm_epaddr_t array_of_epaddr[],
+		   const psm2_epaddr_t array_of_epaddr[],
 		   const int array_of_epaddr_mask[],
-		   psm_error_t array_of_errors[], uint64_t timeout_in)
+		   psm2_error_t array_of_errors[], uint64_t timeout_in)
 {
-	psm_error_t err;
+	psm2_error_t err;
 
 	fprintf(stderr, "Aiee! ips_proto_disconnect() called.\n");
 	PSMI_PLOCK_ASSERT();

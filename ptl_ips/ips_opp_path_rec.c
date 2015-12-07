@@ -63,13 +63,16 @@
 #define DATA_VFABRIC_OFFSET 8
 
 /* SLID and DLID are in network byte order */
-static psm_error_t
+static psm2_error_t
 ips_opp_get_path_rec(ips_path_type_t type, struct ips_proto *proto,
 		     uint16_t slid, uint16_t dlid, uint16_t desthfi_type,
 		     ips_path_rec_t **ppath_rec)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	ibta_path_rec_t query, opp_response;
+#ifdef _HFI_DEBUGGING
+	int opp_response_set = 0;
+#endif
 	ips_path_rec_t *path_rec;
 	int opp_err;
 	ENTRY elid, *epath = NULL;
@@ -112,7 +115,7 @@ ips_opp_get_path_rec(ips_path_type_t type, struct ips_proto *proto,
 				psmi_free(elid.key);
 			if (path_rec)
 				psmi_free(path_rec);
-			err = PSM_NO_MEMORY;
+			err = PSM2_NO_MEMORY;
 			goto fail;
 		}
 
@@ -124,10 +127,12 @@ ips_opp_get_path_rec(ips_path_type_t type, struct ips_proto *proto,
 		if (opp_err) {
 			psmi_free(path_rec);
 			psmi_free(elid.key);
-			err = PSM_EPID_PATH_RESOLUTION;
+			err = PSM2_EPID_PATH_RESOLUTION;
 			goto fail;
 		}
-
+#ifdef _HFI_DEBUGGING
+		opp_response_set = 1;
+#endif
 		/* Create path record */
 		path_rec->pr_slid = opp_response.slid;
 		path_rec->pr_dlid = opp_response.dlid;
@@ -143,7 +148,7 @@ ips_opp_get_path_rec(ips_path_type_t type, struct ips_proto *proto,
 		if (path_rec->pr_sl > PSMI_SL_MAX) {
 			psmi_free(path_rec);
 			psmi_free(elid.key);
-			err = PSM_INTERNAL_ERR;
+			err = PSM2_INTERNAL_ERR;
 			goto fail;
 		}
 		if (!(proto->ccti_ctrlmap & (1 << path_rec->pr_sl))) {
@@ -195,20 +200,24 @@ ips_opp_get_path_rec(ips_path_type_t type, struct ips_proto *proto,
 	} else			/* Path record found in cache */
 		path_rec = (ips_path_rec_t *) epath->data;
 
+#ifdef _HFI_DEBUGGING
 	/* Dump path record stats */
 	_HFI_PRDBG("Path Record ServiceID: %" PRIx64 " %x -----> %x\n",
 		   (uint64_t) __be64_to_cpu(query.service_id),
 		   __be16_to_cpu(slid), __be16_to_cpu(dlid));
-	_HFI_PRDBG("MTU: %x, %x\n", (opp_response.mtu & 0x3f),
-		   path_rec->pr_mtu);
-	_HFI_PRDBG("PKEY: 0x%04x\n", ntohs(opp_response.pkey));
-	_HFI_PRDBG("SL: 0x%04x\n", ntohs(opp_response.qos_class_sl));
-	_HFI_PRDBG("Rate: %x, IPD: %x\n", (opp_response.rate & 0x3f),
-		   path_rec->pr_static_ipd);
+	if (opp_response_set)
+	{
+		_HFI_PRDBG("MTU: %x, %x\n", (opp_response.mtu & 0x3f),
+			   path_rec->pr_mtu);
+		_HFI_PRDBG("PKEY: 0x%04x\n", ntohs(opp_response.pkey));
+		_HFI_PRDBG("SL: 0x%04x\n", ntohs(opp_response.qos_class_sl));
+		_HFI_PRDBG("Rate: %x, IPD: %x\n", (opp_response.rate & 0x3f),
+			   path_rec->pr_static_ipd);
+	}
 	_HFI_PRDBG("Timeout Init.: 0x%" PRIx64 " Max: 0x%" PRIx64 "\n",
 		   proto->epinfo.ep_timeout_ack,
 		   proto->epinfo.ep_timeout_ack_max);
-
+#endif
 	/* Return the IPS path record */
 	*ppath_rec = path_rec;
 
@@ -216,12 +225,12 @@ fail:
 	return err;
 }
 
-static psm_error_t
+static psm2_error_t
 ips_opp_path_rec(struct ips_proto *proto,
 		 uint16_t slid, uint16_t dlid, uint16_t desthfi_type,
 		 unsigned long timeout, ips_path_grp_t **ppathgrp)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	uint16_t pidx, cpath, num_path = (1 << proto->epinfo.ep_lmc);
 	ips_path_type_t path_type = IPS_PATH_NORMAL_PRIORITY;
 	ips_path_rec_t *path;
@@ -320,7 +329,7 @@ ips_opp_path_rec(struct ips_proto *proto,
 			psmi_free(elid.key);
 		if (pathgrp)
 			psmi_free(pathgrp);
-		err = PSM_NO_MEMORY;
+		err = PSM2_NO_MEMORY;
 		goto fail;
 	}
 
@@ -340,7 +349,7 @@ ips_opp_path_rec(struct ips_proto *proto,
 					   path_slid, path_dlid,
 					   desthfi_type, &path);
 
-		if (err == PSM_OK) {	/* Valid high priority path found */
+		if (err == PSM2_OK) {	/* Valid high priority path found */
 			/* Resolved high priority path successfully */
 			pathgrp->pg_num_paths[IPS_PATH_HIGH_PRIORITY]++;
 			pathgrp->pg_path[cpath][IPS_PATH_HIGH_PRIORITY] = path;
@@ -354,7 +363,7 @@ ips_opp_path_rec(struct ips_proto *proto,
 	if (pathgrp->pg_num_paths[IPS_PATH_HIGH_PRIORITY] == 0) {
 		psmi_free(elid.key);
 		psmi_free(pathgrp);
-		err = psmi_handle_error(NULL, PSM_EPID_PATH_RESOLUTION,
+		err = psmi_handle_error(NULL, PSM2_EPID_PATH_RESOLUTION,
 					"OFEF Plus path lookup failed. Unable to resolve high priority network path for LID 0x%x <---> 0x%x. Is the SM running or service ID %"
 					PRIx64 " defined?", ntohs(slid),
 					ntohs(dlid),
@@ -376,7 +385,7 @@ retry_normal_path_res:
 		err = ips_opp_get_path_rec(path_type, proto,
 					   path_slid, path_dlid, desthfi_type,
 					   &path);
-		if (err != PSM_OK) {
+		if (err != PSM2_OK) {
 			if (path_type == IPS_PATH_NORMAL_PRIORITY) {
 				/* Subnet may only be configured for one service ID/vFabric. Default
 				 * to using the control vFabric/service ID for bulk data as well.
@@ -388,7 +397,7 @@ retry_normal_path_res:
 			/* Unable to resolve path for <path_slid, path_dline>. This is possible
 			 * for disrupted fabrics using DOR routing so continue to acquire paths
 			 */
-			err = PSM_OK;
+			err = PSM2_OK;
 			continue;
 		}
 
@@ -402,7 +411,7 @@ retry_normal_path_res:
 	if (pathgrp->pg_num_paths[IPS_PATH_NORMAL_PRIORITY] == 0) {
 		psmi_free(elid.key);
 		psmi_free(pathgrp);
-		err = psmi_handle_error(NULL, PSM_EPID_PATH_RESOLUTION,
+		err = psmi_handle_error(NULL, PSM2_EPID_PATH_RESOLUTION,
 					"OFED Plus path lookup failed. Unable to resolve normal priority network path for LID 0x%x <---> 0x%x. Is the SM running or service ID %"
 					PRIx64 " defined?", ntohs(slid),
 					ntohs(dlid),
@@ -419,7 +428,7 @@ retry_low_path_res:
 		err = ips_opp_get_path_rec(path_type, proto,
 					   path_slid, path_dlid, desthfi_type,
 					   &path);
-		if (err != PSM_OK) {
+		if (err != PSM2_OK) {
 			if (path_type == IPS_PATH_LOW_PRIORITY) {
 				/* Subnet may only be configured for one service ID/vFabric. Default
 				 * to using the control vFabric/service ID for bulk data as well.
@@ -431,7 +440,7 @@ retry_low_path_res:
 			/* Unable to resolve path for <path_slid, path_dline>. This is possible
 			 * for disrupted fabrics using DOR routing so continue to acquire paths
 			 */
-			err = PSM_OK;
+			err = PSM2_OK;
 			continue;
 		}
 
@@ -445,7 +454,7 @@ retry_low_path_res:
 	if (pathgrp->pg_num_paths[IPS_PATH_LOW_PRIORITY] == 0) {
 		psmi_free(elid.key);
 		psmi_free(pathgrp);
-		err = psmi_handle_error(NULL, PSM_EPID_PATH_RESOLUTION,
+		err = psmi_handle_error(NULL, PSM2_EPID_PATH_RESOLUTION,
 					"OFED Plus path lookup failed. Unable to resolve low priority network path for LID 0x%x <---> 0x%x. Is the SM running or service ID %"
 					PRIx64 " defined?", ntohs(slid),
 					ntohs(dlid),
@@ -470,16 +479,16 @@ retry_low_path_res:
 	*ppathgrp = pathgrp;
 
 fail:
-	if (err != PSM_OK)
+	if (err != PSM2_OK)
 		_HFI_PRDBG
 		    ("Unable to get path record for LID 0x%x <---> DLID 0x%x.\n",
 		     slid, dlid);
 	return err;
 }
 
-static psm_error_t ips_opp_fini(struct ips_proto *proto)
+static psm2_error_t ips_opp_fini(struct ips_proto *proto)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	if (proto->opp_lib)
 		dlclose(proto->opp_lib);
@@ -487,9 +496,9 @@ static psm_error_t ips_opp_fini(struct ips_proto *proto)
 	return err;
 }
 
-psm_error_t ips_opp_init(struct ips_proto *proto)
+psm2_error_t ips_opp_init(struct ips_proto *proto)
 {
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 	char hfiName[32];
 
 	proto->opp_lib = dlopen(DF_OPP_LIBRARY, RTLD_NOW);
@@ -519,7 +528,7 @@ psm_error_t ips_opp_init(struct ips_proto *proto)
 	}
 
 	/* If PSM_IDENTIFY is set display the OPP library location being used. */
-	if (getenv("PSM_IDENTIFY")) {
+	if (getenv("PSM2_IDENTIFY")) {
 		Dl_info info_opp;
 		_HFI_INFO
 		    ("PSM path record queries using OFED Plus Plus (%s) from %s\n",
@@ -568,7 +577,7 @@ fail:
 	_HFI_ERROR("to start dist_sa: service dist_sa start\n");
 	_HFI_ERROR("or enable it at boot time: iba_config -E dist_sa\n\n");
 
-	err = psmi_handle_error(NULL, PSM_EPID_PATH_RESOLUTION,
+	err = psmi_handle_error(NULL, PSM2_EPID_PATH_RESOLUTION,
 				"Unable to initialize OFED Plus library successfully.\n");
 
 	if (proto->opp_lib)

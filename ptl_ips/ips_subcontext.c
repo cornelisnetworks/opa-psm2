@@ -59,7 +59,7 @@
 #include "ips_tidflow.h"
 #include "ptl_ips.h"
 
-psm_error_t
+psm2_error_t
 ips_subcontext_ureg_get(ptl_t *ptl, uint32_t subcontext_cnt,
 			psmi_context_t *context,
 			struct ips_subcontext_ureg **uregp)
@@ -93,5 +93,5 @@ ips_subcontext_ureg_get(ptl_t *ptl, uint32_t subcontext_cnt,
 	psmi_assert((all_subcontext_uregbase -
 		     (uintptr_t) base_info->subctxt_uregbase) <= PSMI_PAGESIZE);
 
-	return PSM_OK;
+	return PSM2_OK;
 }

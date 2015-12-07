@@ -77,14 +77,14 @@ struct ips_epstate {
 	struct ips_epstate_entry *eps_tab;
 };
 
-psm_error_t ips_epstate_init(struct ips_epstate *eps,
+psm2_error_t ips_epstate_init(struct ips_epstate *eps,
 			     const psmi_context_t *contextj);
-psm_error_t ips_epstate_fini(struct ips_epstate *eps);
+psm2_error_t ips_epstate_fini(struct ips_epstate *eps);
 
-psm_error_t ips_epstate_add(struct ips_epstate *eps,
+psm2_error_t ips_epstate_add(struct ips_epstate *eps,
 			    struct ips_epaddr *ipsaddr,
 			    ips_epstate_idx *connidx);
-psm_error_t ips_epstate_del(struct ips_epstate *eps, ips_epstate_idx connidx);
+psm2_error_t ips_epstate_del(struct ips_epstate *eps, ips_epstate_idx connidx);
 
 PSMI_INLINE(
 struct ips_epstate_entry *

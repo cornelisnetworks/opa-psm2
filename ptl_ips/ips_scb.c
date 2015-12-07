@@ -57,7 +57,7 @@
 #include "ips_proto.h"
 #include "ips_scb.h"
 
-psm_error_t
+psm2_error_t
 ips_scbctrl_init(const psmi_context_t *context,
 		 uint32_t numscb, uint32_t numbufs,
 		 uint32_t imm_size, uint32_t bufsize,
@@ -69,9 +69,9 @@ ips_scbctrl_init(const psmi_context_t *context,
 	size_t scb_size;
 	size_t alloc_sz;
 	uintptr_t base, imm_base;
-	psm_ep_t ep = context->ep;
+	psm2_ep_t ep = context->ep;
 	/* scbc->context = context; */
-	psm_error_t err = PSM_OK;
+	psm2_error_t err = PSM2_OK;
 
 	psmi_assert_always(numscb > 0);
 	scbc->sbuf_num = scbc->sbuf_num_cur = numbufs;
@@ -102,7 +102,7 @@ ips_scbctrl_init(const psmi_context_t *context,
 		scbc->sbuf_buf_alloc =
 		    psmi_calloc(ep, NETWORK_BUFFERS, 1, alloc_sz);
 		if (scbc->sbuf_buf_alloc == NULL) {
-			err = PSM_NO_MEMORY;
+			err = PSM2_NO_MEMORY;
 			goto fail;
 		}
 		base = (uintptr_t) scbc->sbuf_buf_alloc;
@@ -134,7 +134,7 @@ ips_scbctrl_init(const psmi_context_t *context,
 		scbc->scb_imm_buf =
 		    psmi_calloc(ep, NETWORK_BUFFERS, 1, alloc_sz);
 		if (scbc->scb_imm_buf == NULL) {
-			err = PSM_NO_MEMORY;
+			err = PSM2_NO_MEMORY;
 			goto fail;
 		}
 		imm_base = PSMI_ALIGNUP(scbc->scb_imm_buf, 64);
@@ -149,7 +149,7 @@ ips_scbctrl_init(const psmi_context_t *context,
 	scbc->scb_base = (void *)
 	    psmi_calloc(ep, NETWORK_BUFFERS, 1, alloc_sz);
 	if (scbc->scb_base == NULL) {
-		err = PSM_NO_MEMORY;
+		err = PSM2_NO_MEMORY;
 		goto fail;
 	}
 	base = (uintptr_t) scbc->scb_base;
@@ -178,7 +178,7 @@ fail:
 	return err;
 }
 
-psm_error_t ips_scbctrl_fini(struct ips_scbctrl *scbc)
+psm2_error_t ips_scbctrl_fini(struct ips_scbctrl *scbc)
 {
 	if (scbc->scb_base != NULL) {
 		psmi_free(scbc->scb_base);
@@ -188,7 +188,7 @@ psm_error_t ips_scbctrl_fini(struct ips_scbctrl *scbc)
 		VALGRIND_DESTROY_MEMPOOL(scbc->sbuf_buf_alloc);
 		psmi_free(scbc->sbuf_buf_alloc);
 	}
-	return PSM_OK;
+	return PSM2_OK;
 }
 
 int ips_scbctrl_bufalloc(ips_scb_t *scb)

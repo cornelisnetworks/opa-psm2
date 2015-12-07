@@ -79,28 +79,6 @@
 /* keep track whether we disabled mmap in malloc */
 int __hfi_malloc_no_mmap = 0;
 
-/* This exists as a separate routine called on (very rare)
-   hfi_update_tid() errors, so as to avoid pulling unnecessary code
-   into the instruction cache, keeping the fast path code as fast possible. */
-int hfi_update_tid_err(void)
-{
-	int ret = errno;	/* preserve errno for return */
-
-	_HFI_INFO("failed: %s\n", strerror(errno));
-	return ret;
-}
-
-/* This exists as a separate routine called on (very rare)
-   hfi_free_tid() errors, so as to avoid pulling unnecessary code
-   into the instruction cache, keeping the fast path code as fast possible. */
-int hfi_free_tid_err(void)
-{
-	int ret = errno;	/* preserve errno for return */
-
-	_HFI_INFO("failed: %s\n", strerror(errno));
-	return ret;
-}
-
 /* touch the pages, with a 32 bit read */
 void hfi_touch_mmap(void *m, size_t bytes)
 {

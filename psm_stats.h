@@ -109,12 +109,12 @@ struct psmi_stats_entry {
 /*
  * Copy the array of entries and keep track of the context
  */
-psm_error_t
+psm2_error_t
 psmi_stats_register_type(const char *heading,
 			 uint32_t statstype,
 			 const struct psmi_stats_entry *entries,
 			 int num_entries, void *context);
 
-psm_error_t psmi_stats_deregister_all(void);
+psm2_error_t psmi_stats_deregister_all(void);
 
 #endif /* PSM_STATS_H */

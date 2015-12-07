@@ -64,8 +64,10 @@
 #include "opa_udebug.h"
 #include "opa_byteorder.h"
 
-/* max # ports for HFI */
+/* upper and lower bounds for HFI port numbers */
+#define HFI_MIN_PORT 1
 #define HFI_MAX_PORT 1
+#define HFI_NUM_PORTS (HFI_MAX_PORT - HFI_MIN_PORT + 1)
 /* any unit id to match. */
 #define HFI_UNIT_ID_ANY ((long)-1)
 /* any port num to match. */
@@ -75,9 +77,13 @@
 #define HFI_DEVICE_PATH "/dev/hfi1"
 #define HFI_CLASS_PATH "/sys/class/infiniband/hfi1"
 
+/* Given a unit number and port number, returns 1 if the unit and port are active.
+   returns 0 if the unit and port are not active. returns -1 when an error occurred. */
+int hfi_get_port_active(int, int);
+
 /* Given the unit number and port, return an error, or the corresponding LID */
-/* Returns an int, so -1 indicates an error.  0 indicates that
-   the unit is valid, but no LID has been assigned. */
+/* Returns an int, so -1 indicates a general error.  -2 indicates that the unit/port
+   are not active.  0 indicates that the unit is valid, but no LID has been assigned. */
 int hfi_get_port_lid(int, int);
 
 /* Given the unit number and port, return an error, or the corresponding GID */

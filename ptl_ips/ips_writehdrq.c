@@ -55,7 +55,7 @@
 
 #include "ips_writehdrq.h"
 
-psm_error_t
+psm2_error_t
 ips_writehdrq_init(const psmi_context_t *context,
 		   const struct ips_recvq_params *hdrq_params,
 		   const struct ips_recvq_params *egrq_params,
@@ -100,11 +100,11 @@ ips_writehdrq_init(const psmi_context_t *context,
 						  writeq->hdrq_rhf_off) & 0x7));
 	}
 	writeq->state->enabled = 1;
-	return PSM_OK;
+	return PSM2_OK;
 }
 
-psm_error_t ips_writehdrq_fini(struct ips_writehdrq *writeq)
+psm2_error_t ips_writehdrq_fini(struct ips_writehdrq *writeq)
 {
 	ips_recvq_egrbuf_table_free(writeq->egrq_buftable);
-	return PSM_OK;
+	return PSM2_OK;
 }

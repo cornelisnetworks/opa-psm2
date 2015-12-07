@@ -57,12 +57,12 @@
 #include "psm2_am.h"
 #include "psm_am_internal.h"
 
-int psmi_ep_device_is_enabled(const psm_ep_t ep, int devid);
+int psmi_ep_device_is_enabled(const psm2_ep_t ep, int devid);
 
 /* AM capabilities parameters are initialized once in psmi_am_init_internal
-   and copied out in __psm_am_get_parameters.  When debugging is enabled,
+   and copied out in __psm2_am_get_parameters.  When debugging is enabled,
    various assertions reference these parameters for sanity checking. */
-struct psm_am_parameters psmi_am_parameters = { 0 };
+struct psm2_am_parameters psmi_am_parameters = { 0 };
 
 static int _ignore_handler(PSMI_AM_ARGS_DEFAULT)
 {
@@ -75,8 +75,8 @@ int psmi_abort_handler(PSMI_AM_ARGS_DEFAULT)
 	return 0;
 }
 
-static void psmi_am_min_parameters(struct psm_am_parameters *dest,
-				   struct psm_am_parameters *src)
+static void psmi_am_min_parameters(struct psm2_am_parameters *dest,
+				   struct psm2_am_parameters *src)
 {
 	dest->max_handlers = min(dest->max_handlers, src->max_handlers);
 	dest->max_nargs = min(dest->max_nargs, src->max_nargs);
@@ -86,11 +86,11 @@ static void psmi_am_min_parameters(struct psm_am_parameters *dest,
 	    min(dest->max_reply_short, src->max_reply_short);
 }
 
-psm_error_t psmi_am_init_internal(psm_ep_t ep)
+psm2_error_t psmi_am_init_internal(psm2_ep_t ep)
 {
 	int i;
-	psm_am_handler_fn_t *am_htable;
-	struct psm_am_parameters params;
+	psm2_am_handler_fn_t *am_htable;
+	struct psm2_am_parameters params;
 
 	psmi_am_parameters.max_handlers = INT_MAX;
 	psmi_am_parameters.max_nargs = INT_MAX;
@@ -114,24 +114,25 @@ psm_error_t psmi_am_init_internal(psm_ep_t ep)
 
 	ep->am_htable =
 	    psmi_malloc(ep, UNDEFINED,
-			sizeof(psm_am_handler_fn_t) * PSMI_AM_NUM_HANDLERS);
+			sizeof(psm2_am_handler_fn_t) * PSMI_AM_NUM_HANDLERS);
 	if (ep->am_htable == NULL)
-		return PSM_NO_MEMORY;
+		return PSM2_NO_MEMORY;
 
-	am_htable = (psm_am_handler_fn_t *) ep->am_htable;
+	am_htable = (psm2_am_handler_fn_t *) ep->am_htable;
 	for (i = 0; i < PSMI_AM_NUM_HANDLERS; i++)
 		am_htable[i] = _ignore_handler;
 
-	return PSM_OK;
+	return PSM2_OK;
 }
 
-psm_error_t
-__psm_am_register_handlers(psm_ep_t ep,
-			   const psm_am_handler_fn_t *handlers,
+psm2_error_t
+__psm2_am_register_handlers(psm2_ep_t ep,
+			   const psm2_am_handler_fn_t *handlers,
 			   int num_handlers, int *handlers_idx)
 {
 	int i, j;
 
+	PSM2_LOG_MSG("entering");
 	/* For now just assign any free one */
 	for (i = 0, j = 0; i < PSMI_AM_NUM_HANDLERS; i++) {
 		if (ep->am_htable[i] == _ignore_handler) {
@@ -146,25 +147,29 @@ __psm_am_register_handlers(psm_ep_t ep,
 		/* Not enough free handlers, restore unused handlers */
 		for (i = 0; i < j; i++)
 			ep->am_htable[handlers_idx[i]] = _ignore_handler;
-
-		return psmi_handle_error(ep, PSM_EP_NO_RESOURCES,
+		PSM2_LOG_MSG("leaving");
+		return psmi_handle_error(ep, PSM2_EP_NO_RESOURCES,
 					 "Insufficient "
 					 "available AM handlers: registered %d of %d requested handlers",
 					 j, num_handlers);
-	} else
-		return PSM_OK;
+	}
+	else {
+		PSM2_LOG_MSG("leaving");
+		return PSM2_OK;
+	}
 }
-PSMI_API_DECL(psm_am_register_handlers)
+PSMI_API_DECL(psm2_am_register_handlers)
 
-psm_error_t
-__psm_am_request_short(psm_epaddr_t epaddr, psm_handler_t handler,
-		       psm_amarg_t *args, int nargs, void *src, size_t len,
-		       int flags, psm_am_completion_fn_t completion_fn,
+psm2_error_t
+__psm2_am_request_short(psm2_epaddr_t epaddr, psm2_handler_t handler,
+		       psm2_amarg_t *args, int nargs, void *src, size_t len,
+		       int flags, psm2_am_completion_fn_t completion_fn,
 		       void *completion_ctxt)
 {
-	psm_error_t err;
+	psm2_error_t err;
 	ptl_ctl_t *ptlc = epaddr->ptlctl;
 
+	PSM2_LOG_MSG("entering");
 	PSMI_ASSERT_INITIALIZED();
 	psmi_assert(epaddr != NULL);
 	psmi_assert(handler >= 0 && handler < psmi_am_parameters.max_handlers);
@@ -179,21 +184,24 @@ __psm_am_request_short(psm_epaddr_t epaddr, psm_handler_t handler,
 				     nargs, src, len, flags, completion_fn,
 				     completion_ctxt);
 	PSMI_PUNLOCK();
+	PSM2_LOG_MSG("leaving");
+
 	return err;
 }
-PSMI_API_DECL(psm_am_request_short)
+PSMI_API_DECL(psm2_am_request_short)
 
-psm_error_t
-__psm_am_reply_short(psm_am_token_t token, psm_handler_t handler,
-		     psm_amarg_t *args, int nargs, void *src, size_t len,
-		     int flags, psm_am_completion_fn_t completion_fn,
+psm2_error_t
+__psm2_am_reply_short(psm2_am_token_t token, psm2_handler_t handler,
+		     psm2_amarg_t *args, int nargs, void *src, size_t len,
+		     int flags, psm2_am_completion_fn_t completion_fn,
 		     void *completion_ctxt)
 {
-	psm_error_t err;
+	psm2_error_t err;
 	struct psmi_am_token *tok;
-	psm_epaddr_t epaddr;
+	psm2_epaddr_t epaddr;
 	ptl_ctl_t *ptlc;
 
+	PSM2_LOG_MSG("entering");
 	PSMI_ASSERT_INITIALIZED();
 	psmi_assert_always(token != NULL);
 	psmi_assert(handler >= 0 && handler < psmi_am_parameters.max_handlers);
@@ -212,43 +220,49 @@ __psm_am_reply_short(psm_am_token_t token, psm_handler_t handler,
 	err = ptlc->am_short_reply(token, handler, args,
 				   nargs, src, len, flags, completion_fn,
 				   completion_ctxt);
+	PSM2_LOG_MSG("leaving");
+
 	return err;
 }
-PSMI_API_DECL(psm_am_reply_short)
+PSMI_API_DECL(psm2_am_reply_short)
 
-psm_error_t __psm_am_get_source(psm_am_token_t token, psm_epaddr_t *epaddr_out)
+psm2_error_t __psm2_am_get_source(psm2_am_token_t token, psm2_epaddr_t *epaddr_out)
 {
 	struct psmi_am_token *tok;
 
+	PSM2_LOG_MSG("entering");
 	if (token == NULL || epaddr_out == NULL) {
-		return psmi_handle_error(NULL, PSM_PARAM_ERR,
-					 "Invalid psm_am_get_source parameters");
+		PSM2_LOG_MSG("leaving");
+		return psmi_handle_error(NULL, PSM2_PARAM_ERR,
+					 "Invalid %s parameters", __FUNCTION__);
 	}
 
 	tok = (struct psmi_am_token *)token;
 	*epaddr_out = tok->epaddr_from;
-
-	return PSM_OK;
+	PSM2_LOG_MSG("leaving");
+	return PSM2_OK;
 }
-PSMI_API_DECL(psm_am_get_source)
+PSMI_API_DECL(psm2_am_get_source)
 
-psm_error_t
-__psm_am_get_parameters(psm_ep_t ep, struct psm_am_parameters *parameters,
+psm2_error_t
+__psm2_am_get_parameters(psm2_ep_t ep, struct psm2_am_parameters *parameters,
 			size_t sizeof_parameters_in,
 			size_t *sizeof_parameters_out)
 {
 	size_t s;
 
+	PSM2_LOG_MSG("entering");
 	if (parameters == NULL) {
-		return psmi_handle_error(NULL, PSM_PARAM_ERR,
-					 "Invalid psm_am_get_parameters parameters");
+		PSM2_LOG_MSG("leaving");
+		return psmi_handle_error(NULL, PSM2_PARAM_ERR,
+					 "Invalid %s parameters", __FUNCTION__);
 	}
 
 	memset(parameters, 0, sizeof_parameters_in);
 	s = min(sizeof(psmi_am_parameters), sizeof_parameters_in);
 	memcpy(parameters, &psmi_am_parameters, s);
 	*sizeof_parameters_out = s;
-
-	return PSM_OK;
+	PSM2_LOG_MSG("leaving");
+	return PSM2_OK;
 }
-PSMI_API_DECL(psm_am_get_parameters)
+PSMI_API_DECL(psm2_am_get_parameters)

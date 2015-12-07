@@ -62,7 +62,7 @@
 /*
  * Expected tid operations are carried out over "sessions".  One session is a
  * collection of N tids where N is determined by the expected message window
- * size (-W option or PSM_MQ_RNDV_HFI_WINDOW).  Since naks can cause
+ * size (-W option or PSM2_MQ_RNDV_HFI_WINDOW).  Since naks can cause
  * retransmissions, each session has an session index (_desc_idx) and a
  * generation count (_desc_genc) to be able to identify if retransmitted
  * packets reference the correct session.
@@ -90,8 +90,6 @@ struct ips_tidinfo {
 
 /* Generate an expected header every 16 packets */
 #define PSM_DEFAULT_EXPECTED_HEADER 16
-/* tid-session buffer size */
-#define PSM_TIDLIST_BUFSIZE	2048
 
 struct ips_protoexp {
 	const struct ptl *ptl;
@@ -107,7 +105,6 @@ struct ips_protoexp {
 	mpool_t tid_getreq_pool;
 	mpool_t tid_sreq_pool;	/* backptr into proto->ep->mq */
 	mpool_t tid_rreq_pool;	/* backptr into proto->ep->mq */
-
 	uint32_t tidflow_seed;
 	uint32_t tid_flags;
 	uint32_t tid_send_fragsize;
@@ -151,12 +148,10 @@ ips_tid_session_member;
 	(((tidinfo)>>IPS_TIDINFO_TID_SHIFT)&IPS_TIDINFO_TID_MASK)
 
 typedef struct {
-	uint16_t tsess_tidcount;
-	uint16_t tsess_tidoffset;	/* initial offset in first page */
-	uint16_t tsess_unaligned_start;
-	uint16_t tsess_unaligned_end;
-
-	uint32_t tsess_genseq;
+	uint8_t  tsess_unaligned_start;	/* unaligned bytes at starting */
+	uint8_t  tsess_unaligned_end;	/* unaligned bytes at ending */
+	uint16_t tsess_tidcount;	/* tid number for the session */
+	uint32_t tsess_tidoffset;	/* offset in first tid */
 	uint32_t tsess_srcoff;	/* source offset from beginning */
 	uint32_t tsess_length;	/* session length, including start/end */
 
@@ -182,7 +177,7 @@ struct ips_tid_send_desc {
 	ptl_arg_t sdescid;	/* sender descid */
 	ptl_arg_t rdescid;	/* reciever descid */
 	ips_epaddr_t *ipsaddr;
-	psm_mq_req_t mqreq;
+	psm2_mq_req_t mqreq;
 
 	/* tidflow to send tid traffic */
 	struct ips_flow tidflow;
@@ -249,8 +244,6 @@ struct ips_tid_recv_desc {
 	uint32_t tidflow_active_gen;
 	uint32_t tidflow_nswap_gen;
 	psmi_seqnum_t tidflow_genseq;
-	/* TID map */
-	ips_tidmap_t ts_map;
 
 	void *buffer;
 	uint32_t recv_msglen;
@@ -289,7 +282,7 @@ typedef void (*ips_tid_completion_callback_t) (void *);
 struct ips_tid_get_request {
 	STAILQ_ENTRY(ips_tid_get_request) tidgr_next;
 	struct ips_protoexp *tidgr_protoexp;
-	psm_epaddr_t tidgr_epaddr;
+	psm2_epaddr_t tidgr_epaddr;
 
 	void *tidgr_lbuf;
 	uint32_t tidgr_length;
@@ -326,13 +319,13 @@ struct ips_tid_get_request {
  * echoed on the wire throughout various phases of the expected send protocol
  * to identify a particular send.
  */
-psm_error_t ips_protoexp_init(const psmi_context_t *context,
+psm2_error_t ips_protoexp_init(const psmi_context_t *context,
 			      const struct ips_proto *proto,
 			      uint32_t protoexp_flags, int num_of_send_bufs,
 			      int num_of_send_desc,
 			      struct ips_protoexp **protoexp_o);
 
-psm_error_t ips_protoexp_fini(struct ips_protoexp *protoexp);
+psm2_error_t ips_protoexp_fini(struct ips_protoexp *protoexp);
 void ips_protoexp_handle_tiderr(const struct ips_recvhdrq_event *rcv_ev);
 void ips_protoexp_handle_data_err(const struct ips_recvhdrq_event *rcv_ev);
 void ips_protoexp_handle_tf_seqerr(const struct ips_recvhdrq_event *rcv_ev);
@@ -341,7 +334,7 @@ void ips_protoexp_handle_tf_generr(const struct ips_recvhdrq_event *rcv_ev);
 int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev);
 int ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev);
 
-psm_error_t ips_protoexp_flow_newgen(struct ips_tid_recv_desc *tidrecvc);
+psm2_error_t ips_protoexp_flow_newgen(struct ips_tid_recv_desc *tidrecvc);
 
 PSMI_ALWAYS_INLINE(
 void ips_protoexp_unaligned_copy(uint8_t *dst, uint8_t *src, uint16_t len))
@@ -357,14 +350,15 @@ void ips_protoexp_unaligned_copy(uint8_t *dst, uint8_t *src, uint16_t len))
  */
 #define IPS_PROTOEXP_TIDGET_WAIT	0x1
 #define IPS_PROTOEXP_TIDGET_PEERWAIT	0x2
-psm_error_t ips_protoexp_tid_get_from_token(struct ips_protoexp *protoexp,
+psm2_error_t ips_protoexp_tid_get_from_token(struct ips_protoexp *protoexp,
 			    void *buf, uint32_t length,
-			    psm_epaddr_t epaddr,
+			    psm2_epaddr_t epaddr,
 			    uint32_t remote_tok, uint32_t flags,
 			    ips_tid_completion_callback_t
 			    callback, void *context);
-psm_error_t
+psm2_error_t
 ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
-			    ips_epaddr_t *ipsaddr, psm_mq_req_t req,
-			    ptl_arg_t rdescid, ips_tid_session_list *tid_list,
+			    ips_epaddr_t *ipsaddr, psm2_mq_req_t req,
+			    ptl_arg_t rdescid, uint32_t tidflow_genseq,
+			    ips_tid_session_list *tid_list,
 			    uint32_t tid_list_size);

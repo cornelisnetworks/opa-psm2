@@ -180,6 +180,6 @@ typedef struct ips_path_rec {
 	struct ips_proto *proto;	/* for global info */
 } ips_path_rec_t;
 
-psm_error_t ips_opp_init(struct ips_proto *proto);
+psm2_error_t ips_opp_init(struct ips_proto *proto);
 
 #endif

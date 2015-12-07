@@ -55,12 +55,13 @@
 
 #include "psm_user.h"
 #include "psm_mq_internal.h"
+#include "ptl_ips/ips_proto_header.h"
 
 #if 0
 /* Not exposed in public psm, but may extend parts of PSM 2.1 to support
  * this feature before 2.3 */
 psm_mq_unexpected_callback_fn_t
-psmi_mq_register_unexpected_callback(psm_mq_t mq,
+psmi_mq_register_unexpected_callback(psm2_mq_t mq,
 				     psm_mq_unexpected_callback_fn_t fn)
 {
 	psm_mq_unexpected_callback_fn_t old_fn = mq->unexpected_callback;
@@ -69,9 +70,9 @@ psmi_mq_register_unexpected_callback(psm_mq_t mq,
 }
 #endif
 
-void psmi_mq_handle_rts_complete(psm_mq_req_t req)
+void psmi_mq_handle_rts_complete(psm2_mq_req_t req)
 {
-	psm_mq_t mq = req->mq;
+	psm2_mq_t mq = req->mq;
 
 	/* Stats on rendez-vous messages */
 	psmi_mq_stats_rts_account(req);
@@ -90,7 +91,7 @@ void psmi_mq_handle_rts_complete(psm_mq_req_t req)
 }
 
 static void
-psmi_mq_req_copy(psm_mq_req_t req,
+psmi_mq_req_copy(psm2_mq_req_t req,
 		 uint32_t offset, const void *buf, uint32_t nbytes)
 {
 	/* recv_msglen may be changed by unexpected receive buf. */
@@ -123,7 +124,7 @@ psmi_mq_req_copy(psm_mq_req_t req,
 }
 
 int
-psmi_mq_handle_data(psm_mq_t mq, psm_mq_req_t req,
+psmi_mq_handle_data(psm2_mq_t mq, psm2_mq_req_t req,
 		    uint32_t offset, const void *buf, uint32_t nbytes)
 {
 	psmi_assert(req != NULL);
@@ -144,7 +145,7 @@ psmi_mq_handle_data(psm_mq_t mq, psm_mq_req_t req,
 	 */
 	if (req->send_msgoff >= req->send_msglen) {
 		if (req->type & MQE_TYPE_EAGER_QUEUE) {
-			STAILQ_REMOVE(&mq->eager_q, req, psm_mq_req, nextq);
+			STAILQ_REMOVE(&mq->eager_q, req, psm2_mq_req, nextq);
 		}
 
 		if (req->state == MQ_STATE_MATCHED) {
@@ -163,11 +164,11 @@ psmi_mq_handle_data(psm_mq_t mq, psm_mq_req_t req,
  * message payload, or zero payload.
  */
 int
-psmi_mq_handle_rts(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *tag,
+psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		   uint32_t send_msglen, const void *payload, uint32_t paylen,
-		   int msgorder, mq_rts_callback_fn_t cb, psm_mq_req_t *req_o)
+		   int msgorder, mq_rts_callback_fn_t cb, psm2_mq_req_t *req_o)
 {
-	psm_mq_req_t req;
+	psm2_mq_req_t req;
 	uint32_t msglen;
 	int rc;
 
@@ -188,6 +189,8 @@ psmi_mq_handle_rts(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *tag,
 		}
 		req->recv_msgoff = req->send_msgoff = paylen;
 		*req_o = req;	/* yes match */
+		PSM_LOG_EPM(OPCODE_LONG_RTS,PSM_LOG_EPM_RX,src->epid,mq->ep->epid,
+			    "req->rts_reqidx_peer: %d",req->rts_reqidx_peer);
 		rc = MQ_RET_MATCH_OK;
 	} else if (msgorder > 1) {
 		/* There is NO request match, and this is the first time
@@ -203,10 +206,12 @@ psmi_mq_handle_rts(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *tag,
 		/* We don't know recv_msglen yet but we set it here for
 		 * mq_iprobe */
 		req->send_msglen = req->recv_msglen = send_msglen;
+		PSM_LOG_EPM_COND(req->send_msglen > mq->hfi_thresh_rv,
+				 OPCODE_LONG_RTS,PSM_LOG_EPM_RX,src->epid,mq->ep->epid,
+				    "req->rts_reqidx_peer: %d",req->rts_reqidx_peer);
 		req->state = MQ_STATE_UNEXP_RV;
 		req->peer = src;
 		req->tag = *tag;
-
 		req->rts_callback = cb;
 		if (paylen) {
 			req->buf = psmi_sysbuf_alloc(paylen);
@@ -244,12 +249,12 @@ psmi_mq_handle_rts(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *tag,
  * This handles the regular (i.e. non-rendezvous MPI envelopes)
  */
 int
-psmi_mq_handle_envelope(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *tag,
+psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 			uint32_t send_msglen, uint32_t offset,
 			const void *payload, uint32_t paylen, int msgorder,
-			uint32_t opcode, psm_mq_req_t *req_o)
+			uint32_t opcode, psm2_mq_req_t *req_o)
 {
-	psm_mq_req_t req;
+	psm2_mq_req_t req;
 	uint32_t msglen;
 
 	if (msgorder && (req = mq_req_match(&(mq->expected_q), src, tag, 1))) {
@@ -296,7 +301,7 @@ psmi_mq_handle_envelope(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *tag,
 			break;
 
 		default:
-			psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 					  "Internal error, unknown packet 0x%x",
 					  opcode);
 		}
@@ -384,7 +389,7 @@ psmi_mq_handle_envelope(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *tag,
 		break;
 
 	default:
-		psmi_handle_error(PSMI_EP_NORETURN, PSM_INTERNAL_ERR,
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 				  "Internal error, unknown packet 0x%x",
 				  opcode);
 	}
@@ -400,9 +405,9 @@ psmi_mq_handle_envelope(psm_mq_t mq, psm_epaddr_t src, psm_mq_tag_t *tag,
 	return MQ_RET_UNEXP_OK;
 }
 
-int psmi_mq_handle_outoforder(psm_mq_t mq, psm_mq_req_t ureq)
+int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t ureq)
 {
-	psm_mq_req_t ereq;
+	psm2_mq_req_t ereq;
 	uint32_t msglen;
 
 	ereq = mq_req_match(&(mq->expected_q), ureq->peer, &ureq->tag, 1);
@@ -440,7 +445,7 @@ int psmi_mq_handle_outoforder(psm_mq_t mq, psm_mq_req_t ureq)
 		psmi_sysbuf_free(ureq->buf);
 		ereq->type = ureq->type;
 		STAILQ_INSERT_AFTER(&mq->eager_q, ureq, ereq, nextq);
-		STAILQ_REMOVE(&mq->eager_q, ureq, psm_mq_req, nextq);
+		STAILQ_REMOVE(&mq->eager_q, ureq, psm2_mq_req, nextq);
 		break;
 	case MQ_STATE_UNEXP_RV:	/* rendez-vous ... */
 		ereq->state = MQ_STATE_MATCHED;

@@ -59,15 +59,16 @@
 #include "cmarw.h"
 
 static
-psm_error_t
-ptl_handle_rtsmatch_request(psm_mq_req_t req, int was_posted,
+psm2_error_t
+ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 			    amsh_am_token_t *tok)
 {
-	psm_amarg_t args[5];
-	psm_epaddr_t epaddr = req->rts_peer;
+	psm2_amarg_t args[5];
+	psm2_epaddr_t epaddr = req->rts_peer;
 	ptl_t *ptl = epaddr->ptlctl->ptl;
 	int pid = 0;
 
+	PSM2_LOG_MSG("entering.");
 	psmi_assert((tok != NULL && was_posted)
 		    || (tok == NULL && !was_posted));
 
@@ -101,12 +102,13 @@ ptl_handle_rtsmatch_request(psm_mq_req_t req, int was_posted,
 	/* 0-byte completion or we used kassist */
 	if (pid || req->recv_msglen == 0)
 		psmi_mq_handle_rts_complete(req);
-	return PSM_OK;
+	PSM2_LOG_MSG("leaving.");
+	return PSM2_OK;
 }
 
 static
-psm_error_t
-ptl_handle_rtsmatch(psm_mq_req_t req, int was_posted)
+psm2_error_t
+ptl_handle_rtsmatch(psm2_mq_req_t req, int was_posted)
 {
 	/* was_posted == 0 allows us to assume that we're not running this callback
 	 * within am handler context (i.e. we can poll) */
@@ -115,12 +117,12 @@ ptl_handle_rtsmatch(psm_mq_req_t req, int was_posted)
 }
 
 void
-psmi_am_mq_handler(void *toki, psm_amarg_t *args, int narg, void *buf,
+psmi_am_mq_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 		   size_t len)
 {
 	amsh_am_token_t *tok = (amsh_am_token_t *) toki;
-	psm_mq_req_t req;
-	psm_mq_tag_t tag;
+	psm2_mq_req_t req;
+	psm2_mq_tag_t tag;
 	int rc;
 	uint32_t opcode = args[0].u32w0;
 	uint32_t msglen = opcode <= MQ_MSG_SHORT ? len : args[0].u32w1;
@@ -167,15 +169,15 @@ psmi_am_mq_handler(void *toki, psm_amarg_t *args, int narg, void *buf,
 }
 
 void
-psmi_am_mq_handler_data(void *toki, psm_amarg_t *args, int narg, void *buf,
+psmi_am_mq_handler_data(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			size_t len)
 {
 	amsh_am_token_t *tok = (amsh_am_token_t *) toki;
 
 	psmi_assert(toki != NULL);
 
-	psm_epaddr_t epaddr = (psm_epaddr_t) tok->tok.epaddr_from;
-	psm_mq_req_t req = mq_eager_match(tok->mq, epaddr, 0);	/* using seqnum 0 */
+	psm2_epaddr_t epaddr = (psm2_epaddr_t) tok->tok.epaddr_from;
+	psm2_mq_req_t req = mq_eager_match(tok->mq, epaddr, 0);	/* using seqnum 0 */
 	psmi_assert_always(req != NULL);
 	psmi_mq_handle_data(tok->mq, req, args[2].u32w0, buf, len);
 
@@ -183,7 +185,7 @@ psmi_am_mq_handler_data(void *toki, psm_amarg_t *args, int narg, void *buf,
 }
 
 void
-psmi_am_mq_handler_rtsmatch(void *toki, psm_amarg_t *args, int narg, void *buf,
+psmi_am_mq_handler_rtsmatch(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			    size_t len)
 {
 	amsh_am_token_t *tok = (amsh_am_token_t *) toki;
@@ -191,10 +193,10 @@ psmi_am_mq_handler_rtsmatch(void *toki, psm_amarg_t *args, int narg, void *buf,
 	psmi_assert(toki != NULL);
 
 	ptl_t *ptl = tok->ptl;
-	psm_mq_req_t sreq = (psm_mq_req_t) (uintptr_t) args[0].u64w0;
+	psm2_mq_req_t sreq = (psm2_mq_req_t) (uintptr_t) args[0].u64w0;
 	void *dest = (void *)(uintptr_t) args[2].u64w0;
 	uint32_t msglen = args[3].u32w0;
-	psm_amarg_t rarg[1];
+	psm2_amarg_t rarg[1];
 
 	_HFI_VDBG("[rndv][send] req=%p dest_req=%p src=%p dest=%p len=%d\n",
 		  sreq, (void *)(uintptr_t) args[1].u64w0, sreq->buf, dest,
@@ -224,10 +226,10 @@ psmi_am_mq_handler_rtsmatch(void *toki, psm_amarg_t *args, int narg, void *buf,
 }
 
 void
-psmi_am_mq_handler_rtsdone(void *toki, psm_amarg_t *args, int narg, void *buf,
+psmi_am_mq_handler_rtsdone(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			   size_t len)
 {
-	psm_mq_req_t rreq = (psm_mq_req_t) (uintptr_t) args[0].u64w0;
+	psm2_mq_req_t rreq = (psm2_mq_req_t) (uintptr_t) args[0].u64w0;
 	psmi_assert(narg == 1);
 	_HFI_VDBG("[rndv][recv] req=%p dest=%p len=%d\n", rreq, rreq->buf,
 		  rreq->recv_msglen);
@@ -235,15 +237,15 @@ psmi_am_mq_handler_rtsdone(void *toki, psm_amarg_t *args, int narg, void *buf,
 }
 
 void
-psmi_am_handler(void *toki, psm_amarg_t *args, int narg, void *buf, size_t len)
+psmi_am_handler(void *toki, psm2_amarg_t *args, int narg, void *buf, size_t len)
 {
 	amsh_am_token_t *tok = (amsh_am_token_t *) toki;
-	psm_am_handler_fn_t hfn;
+	psm2_am_handler_fn_t hfn;
 
 	psmi_assert(toki != NULL);
 
 	hfn = psm_am_get_handler_function(tok->mq->ep,
-					  (psm_handler_t) args[0].u32w0);
+					  (psm2_handler_t) args[0].u32w0);
 
 	/* Invoke handler function. For AM we do not support break functionality */
 	hfn(toki, args + 1, narg - 1, buf, len);
