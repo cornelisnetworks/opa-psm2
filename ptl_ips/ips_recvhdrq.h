@@ -117,6 +117,14 @@ psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq);
 psm2_error_t ips_recvhdrq_fini(struct ips_recvhdrq *recvq);
 
 /*
+ * This function is designed to implement RAPID CCA. It iterates
+ * through the recvq, checking each element for set FECN or BECN bits.
+ * In the case of finding one, the proper response is executed, and the bits
+ * are cleared.
+ */
+psm2_error_t ips_recvhdrq_scan_cca(struct ips_recvhdrq *recvq);
+
+/*
  * Structure containing state for recvhdrq reading. This is logically
  * part of ips_recvhdrq but needs to be separated out for context
  * sharing so that it can be put in a shared memory page and hence
@@ -134,6 +142,7 @@ struct ips_recvhdrq_state {
 	uint32_t egrq_update_interval; /* Eager buffer update interval */
 	uint32_t num_egrq_done; /* num eager buffer done */
 	uint32_t hdr_countdown;	/* for false-egr-full tracing */
+	uint32_t hdrq_cachedlastscan;	/* last element to be prescanned */
 };
 
 /*

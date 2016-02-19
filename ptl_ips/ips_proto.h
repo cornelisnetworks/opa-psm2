@@ -161,7 +161,7 @@ psm2_error_t ips_proto_connect(struct ips_proto *proto, int numep,
 			      uint64_t timeout_in);
 
 psm2_error_t ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
-				 const psm2_epaddr_t array_of_epaddr[],
+				 psm2_epaddr_t array_of_epaddr[],
 				 const int array_of_epaddr_mask[],
 				 psm2_error_t array_of_errors[],
 				 uint64_t timeout_in);
@@ -391,6 +391,7 @@ struct ips_proto {
 	uint32_t message_type_to_index[256];
 #define message_type2index(proto, msg_type) (proto->message_type_to_index[(msg_type)])
 
+	time_t writevFailTime;
 };
 
 /*

@@ -155,11 +155,13 @@ ips_opp_get_path_rec(ips_path_type_t type, struct ips_proto *proto,
 			_HFI_CCADBG("No CCA for sl %d, disable CCA\n",
 				    path_rec->pr_sl);
 			proto->flags &= ~IPS_PROTO_FLAG_CCA;
+			proto->flags &= ~IPS_PROTO_FLAG_CCA_PRESCAN;
 		}
 		if (!(proto->ep->context.runtime_flags &
 					HFI1_CAP_STATIC_RATE_CTRL)) {
 			_HFI_CCADBG("No Static-Rate-Control, disable CCA\n");
 			proto->flags &= ~IPS_PROTO_FLAG_CCA;
+			proto->flags &= ~IPS_PROTO_FLAG_CCA_PRESCAN;
 		}
 
 		path_rec->proto = proto;

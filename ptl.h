@@ -158,13 +158,13 @@ struct ptl_ctl {
 				   psm2_epaddr_t output_array_of_epddr[],
 				   uint64_t timeout_ns);
 
-	 psm2_error_t(*ep_disconnect) (ptl_t *ptl, int force,
-				      int num_ep,
-				      const psm2_epaddr_t
-				      input_array_of_epaddr[],
-				      const int array_of_epaddr_mask[],
-				      psm2_error_t output_array_of_errors[],
-				      uint64_t timeout_ns);
+	 psm2_error_t (*ep_disconnect)(ptl_t *ptl,
+				       int force,
+				       int num_ep,
+				       psm2_epaddr_t input_array_of_epaddr[],
+				       const int array_of_epaddr_mask[],
+				       psm2_error_t output_array_of_errors[],
+				       uint64_t timeout_ns);
 
 	/* MQ stuff */
 	 psm2_error_t(*mq_send) (psm2_mq_t mq, psm2_epaddr_t dest,

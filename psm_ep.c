@@ -1250,8 +1250,8 @@ psmi_ep_open_device(const psm2_ep_t ep,
 				       PSMI_HFI_TYPE_DEFAULT, rank);
 	} else {
 		/* Self-only, meaning only 1 proc max */
-		*epid = PSMI_EPID_PACK(0, 0, 0, 0,
-				       PSMI_HFI_TYPE_DEFAULT, 0);
+		*epid = PSMI_EPID_PACK(
+		    0, 0, 0, 0, PSMI_HFI_TYPE_DEFAULT, 0x3ffffff);
 	}
 
 fail:

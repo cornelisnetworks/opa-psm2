@@ -53,7 +53,7 @@
 Summary: Intel PSM Libraries
 Name: hfi1-psm
 Version: 0.7
-Release: 175
+Release: 221
 License: GPL
 Group: System Environment/Libraries
 URL: http://www.intel.com/
@@ -154,6 +154,108 @@ rm -rf $RPM_BUILD_ROOT
 /etc/modprobe.d/hfi1-psm-compat.conf
 /usr/sbin/hfi1-psm-compat.cmds
 %changelog
+* Fri Jan 29 2016 <paul.j.reger@intel.com>
+- Fixes another case of write-to-heap-after-free.
+
+* Fri Jan 29 2016 <paul.j.reger@intel.com>
+- Fixes case of use-of-heap-allocation-after-free in tid cache code during shutdown.
+
+* Fri Jan 29 2016 <paul.j.reger@intel.com>
+- Adds guard to prevent heap overrun.
+
+* Wed Jan 20 2016 <russell.w.mcguire@intel.com>
+- Increase HASH_THRESHOLD for message rate benchmark
+
+* Fri Jan 8 2016 <npayyavu@sperf-02.sc.intel.com>
+- Fixes handling of link bounce events in PSM
+
+* Fri Jan 8 2016 <paul.j.reger@intel.com>
+- Adds guard to prevent calls attempting to free 0 tids and re-factors handling of ENOMEM during DMA completion.
+
+* Mon Dec 21 2015 <npayyavu@sperf-33.sc.intel.com>
+- Fixed AMSH file collisions and security issues
+
+* Thu Dec 10 2015 <kyle.liddell@intel.com>
+- Eliminate a data race on the completed_q to avoid req->state inconsistency
+
+* Wed Dec 9 2015 <paul.j.reger@intel.com>
+- Fixes two more critical problems flagged by KlockWorks.  These two problems are the same as those in sha 4bb697dd7341e176b586a44ff90ef88c411c00a2 but they occur in different sections of code.
+
+* Wed Dec 9 2015 <kyle.liddell@intel.com>
+- Fixed the broken outoforder_q list manipulation functions
+
+* Tue Dec 8 2015 <levi.e.dettwyler@intel.com>
+- Revert "Optimization: removed 4 bytes from ips_epaddr"
+
+* Tue Dec 8 2015 <levi.e.dettwyler@intel.com>
+- Fixed EPID generation for self-only mode
+
+* Mon Dec 7 2015 <paul.j.reger@intel.com>
+- Fixes problem with the sources in the dist tar file not able to make child dist tar files that can be built with rpmbuild.
+
+* Mon Dec 7 2015 <paul.j.reger@intel.com>
+- Fixes two problems flagged by KlockWorks contained in the three issues: 840, 843 and 844.
+
+* Thu Dec 3 2015 <levi.e.dettwyler@intel.com>
+- AM request and reply scbctrls are finalized
+
+* Thu Dec 3 2015 <levi.e.dettwyler@intel.com>
+- Fixed a deadlock in AM req/rep communication
+
+* Wed Dec 2 2015 <kyle.liddell@intel.com>
+- Implement PSM MQ using hash tables for faster message lookup
+
+* Tue Dec 1 2015 <levi.e.dettwyler@intel.com>
+- Revert "Implement PSM MQ using hash tables for faster message lookup"
+
+* Mon Nov 30 2015 <kyle.liddell@intel.com>
+- Implement PSM MQ using hash tables for faster message lookup
+
+* Fri Nov 20 2015 <nathan.b.white@intel.com>
+- Follow fixes to RAPID CCA
+
+* Thu Nov 19 2015 <levi.e.dettwyler@intel.com>
+- Optimization: removed 4 bytes from ips_epaddr
+
+* Thu Nov 19 2015 <levi.e.dettwyler@intel.com>
+- Handle return 0 for hfi_cmd_writev in scb_dma_send
+
+* Thu Nov 19 2015 <paul.j.reger@intel.com>
+- Fixed problem with an endless loop for reduced ulimit settings.
+
+* Wed Nov 18 2015 <nathan.b.white@intel.com>
+- Initial implementation of RAPID CCA
+
+* Fri Nov 13 2015 <levi.e.dettwyler@intel.com>
+- Fixed a buffer overflow in AM introduced by 6ca71c
+
+* Thu Nov 12 2015 <paul.j.reger@intel.com>
+- Change error handling for failure to lock pages to match driver's change.
+
+* Tue Nov 3 2015 <paul.j.reger@intel.com>
+- Improve readability of an obscure expression.  Does not change code.
+
+* Tue Oct 27 2015 <kyle.liddell@intel.com>
+- PSM support for handling TID packets intercepted by RSM
+
+* Fri Oct 23 2015 <levi.e.dettwyler@intel.com>
+- epaddrs are now freed and NULL'd on disconnect
+
+* Mon Oct 19 2015 <cq.tang@intel.com>
+- Fix PSM send/receive buffer over accessing, fix the PSM wire protocol compliance issue.
+
+* Mon Oct 19 2015 <cq.tang@intel.com>
+- Improve short message (8B < X <=8K) bandwidth and lower latency.
+
+* Mon Oct 19 2015 <cq.tang@intel.com>
+- A new PSM timer operation to reduce latency
+
+* Fri Oct 16 2015 <levi.e.dettwyler@intel.com>
+- Fixed a problem with retransmission of last packet
+
+* Tue Oct 13 2015 <paul.j.reger@intel.com>
+- Moved PSM2 library major/minor version numbers and build date to PSM2_IDENTIFY
+
 * Fri Oct 9 2015 <russell.w.mcguire@intel.com>
 - Exported 3 symbols to fix hfi1_pkt_test link
 

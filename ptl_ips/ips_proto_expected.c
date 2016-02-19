@@ -559,8 +559,8 @@ ips_protoexp_send_tid_grant(struct ips_tid_recv_desc *tidrecvc)
 	scb->ips_lrh.khdr.kdeth0 = 0;
 	scb->ips_lrh.mdata = tidrecvc->tidflow_genseq.psn_val;
 	scb->ips_lrh.data[0] = tidrecvc->rdescid;
-	scb->ips_lrh.data[1].u32w1 = tidrecvc->getreq->tidgr_sendtoken;
-	scb->ips_lrh.data[1].u32w0 = tidrecvc->getreq->tidgr_length;
+	scb->ips_lrh.data[1].u32w1 = tidrecvc->getreq->tidgr_length;
+	scb->ips_lrh.data[1].u32w0 = tidrecvc->getreq->tidgr_sendtoken;
 
 	ips_scb_buffer(scb) = (void *)&tidrecvc->tid_list;
 	ips_scb_length(scb) = tidrecvc->tsess_tidlist_length;
@@ -592,7 +592,7 @@ ips_protoexp_send_tid_completion(struct ips_tid_recv_desc *tidrecvc,
 	scb->ips_lrh.data[0] = sdescid;
 
 	/* Attached tidflow gen/seq */
-	scb->ips_lrh.data[1].u32w1 = tidrecvc->tidflow_genseq.psn_val;
+	scb->ips_lrh.mdata = tidrecvc->tidflow_genseq.psn_val;
 
 	ips_proto_flow_enqueue(flow, scb);
 	flow->flush(flow, NULL);
@@ -661,7 +661,7 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 
 		/* Hack to handle the tidflow */
 		hdr.data[0] = rcv_ev->p_hdr->data[0];
-		hdr.ack_seq_num = rcv_ev->p_hdr->data[1].u32w1;
+		hdr.ack_seq_num = rcv_ev->p_hdr->mdata;
 		hdr.khdr.kdeth0 = __cpu_to_le32(3 << HFI_KHDR_TIDCTRL_SHIFT);
 		rcv_ev->p_hdr = &hdr;
 
@@ -804,6 +804,19 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 					    &tidrecvc->ctrl_msg_queued,
 					    &ctrlscb, ctrlscb.cksum, 0);
 	}
+
+	/* If RSM has found a TID packet marked with FECN, the payload
+	 * will be written to the eager buffer, and we will have a payload
+	 * pointer here.  In that case, copy the payload into the user's
+	 * buffer.  If RSM did not intercept this EXPTID packet, the HFI
+	 * will handle the packet payload.
+	 * Possibly should assert(0 < paylen < MTU).
+	 */
+	if (ips_recvhdrq_event_payload(rcv_ev) &&
+	    ips_recvhdrq_event_paylen(rcv_ev))
+		psmi_mq_mtucpy(tidrecvc->buffer + p_hdr->exp_offset,
+			       ips_recvhdrq_event_payload(rcv_ev),
+			       ips_recvhdrq_event_paylen(rcv_ev));
 
 	/* If last packet then we are done. We send a tid transfer completion
 	 * packet back to sender, free all tids and close the current tidflow
@@ -1938,7 +1951,7 @@ void ips_protoexp_do_tf_seqerr(struct ips_protoexp *protoexp,
 			struct ips_tid_recv_desc *tidrecvc,
 			struct ips_message_header *p_hdr)
 {
-	psmi_seqnum_t sequence_num;
+	psmi_seqnum_t sequence_num, tf_sequence_num;
 	ips_scb_t ctrlscb;
 
 	/* Update stats for sequence errors */
@@ -1979,17 +1992,21 @@ void ips_protoexp_do_tf_seqerr(struct ips_protoexp *protoexp,
 		protoexp->proto->epaddr_stats.congestion_pkts++;
 	}
 
-	/* Get the latest seq from hardware tidflow table. But
-	 * only do this when context sharing is not used, because
-	 * context sharing might drop packet even though hardware
-	 * has received it successfully.
+	/* Get the latest seq from hardware tidflow table, if that value is
+	 * reliable. The value is not reliable if context sharing is used,
+	 * because context sharing might drop packet even though hardware
+	 * has received it successfully. The hardware table may also be
+	 * incorrect if RSM is intercepting TID & FECN & SH packets.
+	 * We can handle this condition by taking the most recent PSN whether
+	 * it comes from the tidflow table or from PSM's own accounting.
 	 */
-	if (!tidrecvc->context->tf_ctrl)
-	{
- 		tidrecvc->tidflow_genseq.psn_seq =
+	if (!tidrecvc->context->tf_ctrl) {
+		tf_sequence_num.psn_val =
 			hfi_tidflow_get_seqnum(
 				hfi_tidflow_get(tidrecvc->context->ctrl,
 						tidrecvc->rdescid._desc_idx));
+		if (tf_sequence_num.psn_val > tidrecvc->tidflow_genseq.psn_seq)
+			tidrecvc->tidflow_genseq.psn_seq = tf_sequence_num.psn_seq;
 	}
 
 	/* Swap generation for the flow. */

@@ -87,17 +87,51 @@ static struct {
 
 static mpool_t ips_am_msg_pool;
 
+/* This calculation ensures that the number of reply slots will always be at
+ * least twice as large + 1 as the number of request slots. This is optimal: the
+ * minimum amount required is actually only twice as many, but it is much
+ * slower. */
+#define calc_optimal_num_reply_slots(nslots) (((nslots)*2 / 3) + 1)
 
 psm2_error_t
 ips_proto_am_init(struct ips_proto *proto,
-		  int num_of_send_bufs, int num_of_send_desc,
-		  uint32_t imm_size, struct ips_proto_am *proto_am)
+		  int num_send_slots,
+		  uint32_t imm_size,
+		  struct ips_proto_am *proto_am)
 {
 	psm2_error_t err = PSM2_OK;
-	int send_buf_size = proto->scb_bufsize;
+	int send_buf_size = proto->ep->context.ctrl->__hfi_piosize;
+	int num_rep_slots = calc_optimal_num_reply_slots(num_send_slots);
+	int num_req_slots = num_send_slots - num_rep_slots;
 
 	proto_am->proto = proto;
-	proto_am->scbc_request = &proto->scbc_egr;
+
+	/* In a node pair, the number of reply send buffers on at least one of
+	 * the nodes must be at least double the number (optimal: double + 1) of
+	 * send descriptors on the other node. While this constraint applies
+	 * only to the reply send buffers, allowing the caller to tune only the
+	 * number of request send buffers would be awkward, as they have no
+	 * knowledge of the subdivision of the memory into separate mempools for
+	 * requests and replies. It's an internal concern at this point. */
+	if ((err = ips_scbctrl_init(&proto->ep->context,
+				    num_req_slots,
+				    num_req_slots,
+				    imm_size,
+				    send_buf_size,
+				    NULL,
+				    NULL,
+				    &proto_am->scbc_request)))
+		goto fail;
+
+	if ((err = ips_scbctrl_init(&proto->ep->context,
+				    num_rep_slots,
+				    num_rep_slots,
+				    imm_size,
+				    send_buf_size,
+				    NULL,
+				    NULL,
+				    &proto_am->scbc_reply)))
+		goto fail;
 
 	if (ips_am_msg_pool == NULL) {
 		union psmi_envvar_val max_msgs;
@@ -114,17 +148,14 @@ ips_proto_am_init(struct ips_proto *proto,
 				sizeof(struct ips_am_message),
 				32, max_msgs.e_uint, 0, UNDEFINED, NULL, NULL);
 	}
-
-	if ((err = ips_scbctrl_init(&proto->ep->context, num_of_send_desc,
-				    num_of_send_bufs, imm_size, send_buf_size,
-				    NULL, NULL, &proto_am->scbc_reply)))
-		goto fail;
 fail:
 	return err;
 }
 
 psm2_error_t ips_proto_am_fini(struct ips_proto_am *proto_am)
 {
+	ips_scbctrl_fini(&proto_am->scbc_request);
+	ips_scbctrl_fini(&proto_am->scbc_reply);
 	if (ips_am_msg_pool != NULL) {
 		psmi_mpool_destroy(ips_am_msg_pool);
 		ips_am_msg_pool = NULL;
@@ -138,7 +169,8 @@ psm2_error_t
 ips_am_get_parameters(psm2_ep_t ep, struct psm2_am_parameters *parameters)
 {
 	int max_nargs = min(1 << IPS_AM_HDR_NARGS_BITS, PSMI_AM_MAX_ARGS);
-	int max_payload = ep->context.ctrl->__hfi_piosize -
+	int max_payload =
+	    ep->context.ctrl->__hfi_piosize -
 	    ((max_nargs - IPS_AM_HDR_NARGS) * sizeof(psm2_amarg_t));
 
 	if (parameters == NULL) {
@@ -295,18 +327,18 @@ ips_am_short_request(psm2_epaddr_t epaddr,
 		    ((nargs - IPS_AM_HDR_NARGS) << 3) : 0;
 
 		/* len + pad_bytes + overflow_args */
-		PSMI_BLOCKUNTIL(epaddr->ptlctl->ep, err,
-				((scb =
-				  ips_scbctrl_alloc(proto_am->scbc_request, 1,
-						    len + pad_bytes + arg_sz,
-						    IPS_SCB_FLAG_ADD_BUFFER)) !=
-				 NULL));
+		PSMI_BLOCKUNTIL(epaddr->ptlctl->ep,
+				err,
+				((scb = ips_scbctrl_alloc(
+				      &proto_am->scbc_request,
+				      1,
+				      len + pad_bytes + arg_sz,
+				      IPS_SCB_FLAG_ADD_BUFFER)) != NULL));
 	} else {
-		PSMI_BLOCKUNTIL(epaddr->ptlctl->ep, err,
-				((scb =
-				  ips_scbctrl_alloc_tiny(proto_am->
-							 scbc_request)) !=
-				 NULL));
+		PSMI_BLOCKUNTIL(epaddr->ptlctl->ep,
+				err,
+				((scb = ips_scbctrl_alloc_tiny(
+				      &proto_am->scbc_request)) != NULL));
 	}
 
 	psmi_assert_always(scb != NULL);

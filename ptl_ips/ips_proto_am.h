@@ -61,7 +61,7 @@
 
 struct ips_proto_am {
 	struct ips_proto *proto;	/* back pointer */
-	struct ips_scbctrl *scbc_request;
+	struct ips_scbctrl scbc_request;
 	struct ips_scbctrl scbc_reply;
 };
 
@@ -81,9 +81,11 @@ ips_am_short_request(psm2_epaddr_t epaddr,
 		     psm2_am_completion_fn_t completion_fn,
 		     void *completion_ctxt);
 
-psm2_error_t ips_proto_am_init(struct ips_proto *proto, int num_of_send_bufs,
-			      int num_of_send_desc, uint32_t imm_size,
-			      struct ips_proto_am *proto_am);
+psm2_error_t 
+ips_proto_am_init(struct ips_proto *proto,
+             int num_send_slots,
+             uint32_t imm_size,
+             struct ips_proto_am *proto_am);
 
 psm2_error_t ips_proto_am_fini(struct ips_proto_am *proto_am);
 

@@ -99,6 +99,11 @@ static __inline__ uint64_t get_cycles(void)
 #define LOCK_PREFIX "lock "
 #endif
 
+static __inline__ void ips_barrier()
+{
+	asm volatile ("" :  :  : "memory");
+}
+
 static __inline__ void ips_mb()
 {
 	asm volatile ("mfence" :  :  : "memory");

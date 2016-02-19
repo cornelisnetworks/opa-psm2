@@ -56,6 +56,7 @@
 #include "psm_user.h"
 #include "ips_proto.h"
 #include "ips_scb.h"
+#include "ips_proto_internal.h"
 
 psm2_error_t
 ips_scbctrl_init(const psmi_context_t *context,
@@ -154,6 +155,18 @@ ips_scbctrl_init(const psmi_context_t *context,
 	}
 	base = (uintptr_t) scbc->scb_base;
 	base = PSMI_ALIGNUP(base + PSM_VALGRIND_REDZONE_SZ, 64);
+
+	/*
+	 * Allocate ack/send timer for each scb object.
+	 */
+	scbc->timers = (struct psmi_timer *)
+		psmi_calloc(ep, UNDEFINED, 2*numscb,
+		sizeof(struct psmi_timer));
+	if (scbc->timers == NULL) {
+		err = PSM2_NO_MEMORY;
+		goto fail;
+	}
+
 	for (i = 0; i < numscb; i++) {
 		scb = (struct ips_scb *)(base + i * scb_size);
 		scb->scbc = scbc;
@@ -164,6 +177,22 @@ ips_scbctrl_init(const psmi_context_t *context,
 			scb->imm_payload = NULL;
 
 		SLIST_INSERT_HEAD(&scbc->scb_free, scb, next);
+
+		/*
+		 * Initialize timers.
+		 * Associate the timers to each scb, the association is
+		 * not fixed because later PSM may exchange the timers
+		 * between scb, the reason for exchanging is that the
+		 * timer is currently using by flow, but the scb is to
+		 * be freed. see ack/nak processing in file ips_prot_recv.c
+		 */
+		scb->timer_ack = &scbc->timers[2*i];
+		psmi_timer_entry_init(scb->timer_ack,
+				ips_proto_timer_ack_callback, scb);
+
+		scb->timer_send = &scbc->timers[2*i+1];
+		psmi_timer_entry_init(scb->timer_send,
+				ips_proto_timer_send_callback, scb);
 	}
 	scbc->scb_avail_callback = scb_avail_callback;
 	scbc->scb_avail_context = scb_avail_context;
@@ -195,15 +224,22 @@ int ips_scbctrl_bufalloc(ips_scb_t *scb)
 {
 	struct ips_scbctrl *scbc = scb->scbc;
 
-	psmi_assert_always(scbc->sbuf_num > 0);
-	psmi_assert_always(!((scb->payload >= scbc->sbuf_buf_base) &&
+	psmi_assert(scbc->sbuf_num > 0);
+	psmi_assert(!((scb->payload >= scbc->sbuf_buf_base) &&
 			     (scb->payload <= scbc->sbuf_buf_last)));
+	psmi_assert(scb->payload_size <= scbc->sbuf_buf_size);
+
+	if (scb->payload_size <= scbc->scb_imm_size) {
+		/* Attach immediate buffer */
+		scb->payload = scb->imm_payload;
+		return 1;
+	}
+
 	if (SLIST_EMPTY(&scbc->sbuf_free))
 		return 0;
 	else {
 		psmi_assert(scbc->sbuf_num_cur);
 		scb->payload = SLIST_FIRST(&scbc->sbuf_free);
-		scb->payload_size = scbc->sbuf_buf_size;
 		scbc->sbuf_num_cur--;
 
 		/* If under memory pressure request ACK for packet to reclaim
@@ -230,6 +266,7 @@ ips_scb_t *ips_scbctrl_alloc(struct ips_scbctrl *scbc, int scbnum, int len,
 	ips_scb_t *scb, *scb_head = NULL;
 
 	psmi_assert(flags & IPS_SCB_FLAG_ADD_BUFFER ? (scbc->sbuf_num > 0) : 1);
+	psmi_assert(scbc->sbuf_buf_size >= len);
 
 	while (scbnum--) {
 		if (SLIST_EMPTY(&scbc->scb_free))
@@ -241,14 +278,9 @@ ips_scb_t *ips_scbctrl_alloc(struct ips_scbctrl *scbc, int scbnum, int len,
 		VALGRIND_MEMPOOL_ALLOC(scbc, scb, sizeof(struct ips_scb));
 
 		if (flags & IPS_SCB_FLAG_ADD_BUFFER) {
-			if (len > scbc->scb_imm_size) {
-				if (!ips_scbctrl_bufalloc(scb))
-					break;
-			} else {	/* Attach immediate buffer */
-				scb->payload = scb->imm_payload;
-				scb->payload_size = scbc->scb_imm_size;
-				psmi_assert(scb->payload);
-			}
+			scb->payload_size = len;
+			if (!ips_scbctrl_bufalloc(scb))
+				break;
 		} else {
 			scb->payload = NULL;
 			scb->payload_size = 0;
@@ -259,7 +291,6 @@ ips_scb_t *ips_scbctrl_alloc(struct ips_scbctrl *scbc, int scbnum, int len,
 		scb->tidctrl = 0;
 		scb->nfrag = 1;
 		scb->frag_size = 0;
-		scb->padcnt = 0;
 
 		scbc->scb_num_cur--;
 		if (scbc->scb_num_cur < (scbc->scb_num >> 1))
@@ -316,7 +347,6 @@ ips_scb_t *ips_scbctrl_alloc_tiny(struct ips_scbctrl *scbc)
 	scb->tidctrl = 0;
 	scb->nfrag = 1;
 	scb->frag_size = 0;
-	scb->padcnt = 0;
 
 	scbc->scb_num_cur--;
 	if (scbc->scb_num_cur < (scbc->scb_num >> 1))

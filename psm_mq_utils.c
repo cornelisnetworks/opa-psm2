@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
 #include "psm_mq_internal.h"
@@ -81,8 +81,9 @@ psm2_mq_req_t psmi_mq_req_alloc(psm2_mq_t mq, uint32_t type)
 #endif
 		req->type = type;
 		req->state = MQ_STATE_FREE;
-		req->next = NULL;
-		req->pprev = NULL;
+		memset(req->next, 0, NUM_MQ_SUBLISTS * sizeof(psm2_mq_req_t));
+		memset(req->prev, 0, NUM_MQ_SUBLISTS * sizeof(psm2_mq_req_t));
+		memset(req->q, 0, NUM_MQ_SUBLISTS * sizeof(struct mqq *));
 		req->error_code = PSM2_OK;
 		req->mq = mq;
 		req->testwait_callback = NULL;

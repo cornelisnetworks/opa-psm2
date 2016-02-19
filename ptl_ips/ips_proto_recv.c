@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
 #include "ipserror.h"
@@ -391,8 +391,9 @@ void ips_tidflow_nak_post_process(struct ips_proto *proto,
 		scb->payload = (void *)((char *)scb->payload + nbytes);
 
 		/* 1. if last packet in sequence, set ACK, clear SH */
-		if (scb->chunk_size_remaining <= scb->frag_size) {
-			psmi_assert(scb->nfrag_remaining == 1);
+		if (scb->nfrag_remaining == 1) {
+			psmi_assert(scb->chunk_size_remaining <=
+				    scb->frag_size);
 			scb->flags |= IPS_SEND_FLAG_ACKREQ;
 			scb->flags &= ~IPS_SEND_FLAG_HDRSUPP;
 
@@ -601,11 +602,10 @@ ips_proto_process_ack(struct ips_recvhdrq_event *rcv_ev)
 		 * acked */
 		if (STAILQ_EMPTY(unackedq)) {
 			psmi_timer_cancel(proto->timerq, flow->timer_ack);
-			psmi_mpool_put(flow->timer_ack);
 			flow->timer_ack = NULL;
 			psmi_timer_cancel(proto->timerq, flow->timer_send);
-			psmi_mpool_put(flow->timer_send);
 			flow->timer_send = NULL;
+
 			SLIST_FIRST(scb_pend) = NULL;
 			psmi_assert(flow->scb_num_pending == 0);
 			/* Reset congestion window - all packets ACK'd */
@@ -613,8 +613,32 @@ ips_proto_process_ack(struct ips_recvhdrq_event *rcv_ev)
 			flow->ack_interval = max((flow->credits >> 2) - 1, 1);
 			flow->flags &= ~IPS_FLOW_FLAG_CONGESTED;
 			goto ret;
+		} else if (flow->timer_ack == scb->timer_ack) {
+			/*
+			 * Exchange timers with last scb on unackedq.
+			 * timer in scb is used by flow, cancelling current
+			 * timer and then requesting a new timer takes more
+			 * time, instead, we exchange the timer between current
+			 * freeing scb and the last scb on unacked queue.
+			 */
+			psmi_timer *timer;
+			ips_scb_t *last = STAILQ_LAST(unackedq, ips_scb, nextq);
+
+			timer = scb->timer_ack;
+			scb->timer_ack = last->timer_ack;
+			last->timer_ack = timer;
+			timer = scb->timer_send;
+			scb->timer_send = last->timer_send;
+			last->timer_send = timer;
+
+			scb->timer_ack->context = scb;
+			scb->timer_send->context = scb;
+			last->timer_ack->context = last;
+			last->timer_send->context = last;
 		}
 	}
+
+	psmi_assert(!STAILQ_EMPTY(unackedq));	/* sanity for above loop */
 
 	/* CCA: If flow is congested adjust rate */
 	if_pf(rcv_ev->is_congested & IPS_RECV_EVENT_BECN) {
@@ -640,7 +664,8 @@ ips_proto_process_ack(struct ips_recvhdrq_event *rcv_ev)
 	}
 
 	/* Reclaimed some credits - attempt to flush flow */
-	flow->flush(flow, NULL);
+	if (!SLIST_EMPTY(scb_pend))
+		flow->flush(flow, NULL);
 
 	/*
 	 * If the next packet has not even been put on the wire, cancel the
@@ -752,11 +777,10 @@ int ips_proto_process_nak(struct ips_recvhdrq_event *rcv_ev)
 		/* set all index pointer to NULL if all frames has been acked */
 		if (STAILQ_EMPTY(unackedq)) {
 			psmi_timer_cancel(proto->timerq, flow->timer_ack);
-			psmi_mpool_put(flow->timer_ack);
 			flow->timer_ack = NULL;
 			psmi_timer_cancel(proto->timerq, flow->timer_send);
-			psmi_mpool_put(flow->timer_send);
 			flow->timer_send = NULL;
+
 			SLIST_FIRST(scb_pend) = NULL;
 			psmi_assert(flow->scb_num_pending == 0);
 			/* Reset congestion window if all packets acknowledged */
@@ -764,6 +788,28 @@ int ips_proto_process_nak(struct ips_recvhdrq_event *rcv_ev)
 			flow->ack_interval = max((flow->credits >> 2) - 1, 1);
 			flow->flags &= ~IPS_FLOW_FLAG_CONGESTED;
 			goto ret;
+		} else if (flow->timer_ack == scb->timer_ack) {
+			/*
+			 * Exchange timers with last scb on unackedq.
+			 * timer in scb is used by flow, cancelling current
+			 * timer and then requesting a new timer takes more
+			 * time, instead, we exchange the timer between current
+			 * freeing scb and the last scb on unacked queue.
+			 */
+			psmi_timer *timer;
+			ips_scb_t *last = STAILQ_LAST(unackedq, ips_scb, nextq);
+
+			timer = scb->timer_ack;
+			scb->timer_ack = last->timer_ack;
+			last->timer_ack = timer;
+			timer = scb->timer_send;
+			scb->timer_send = last->timer_send;
+			last->timer_send = timer;
+
+			scb->timer_ack->context = scb;
+			scb->timer_send->context = scb;
+			last->timer_ack->context = last;
+			last->timer_send->context = last;
 		}
 	}
 
@@ -1264,6 +1310,16 @@ int ips_proto_process_packet_error(struct ips_recvhdrq_event *rcv_ev)
 				/* Safe to process ACKs from header */
 				ips_proto_process_ack(rcv_ev);
 			}
+			break;
+		case OPCODE_EXPTID:
+			/* If RSM is matching packets that are TID&FECN&SH,
+			 * it is possible to have a EXPTID packet encounter
+			 * the eager full condition and have the payload
+			 * dropped (but the header delivered).
+			 * Treat this condition as a data error (corruption,etc)
+			 * and send a NAK.
+			 */
+			ips_protoexp_handle_data_err(rcv_ev);
 			break;
 		default:
 			break;

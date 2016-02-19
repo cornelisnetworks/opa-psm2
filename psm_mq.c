@@ -63,12 +63,89 @@
  */
 
 /*
+ * Once the linked lists cross the size limit, this function will enable tag
+ * hashing and disable the non-hashing fastpath. We need to go back and insert
+ * reqs into the hash tables where the hashing searches will look for them.
+ */
+void
+psmi_mq_fastpath_disable(psm2_mq_t mq)
+{
+	psm2_mq_req_t *curp, cur;
+	struct mqq *qp;
+	unsigned hashvals[NUM_HASH_CONFIGS];
+	int t = PSM2_ANYTAG_ANYSRC;
+
+	mq->nohash_fastpath = 0;
+	/* Everything in the unexpected_q needs to be duplicated into
+	   each of the (three) unexpected hash tables. */
+	qp = &mq->unexpected_q;
+	for (curp = &qp->first; (cur = *curp) != NULL; curp = &cur->next[t]) {
+		mq->unexpected_hash_len++;
+		hashvals[PSM2_TAG_SRC] =
+			hash_64(*(uint64_t *) cur->tag.tag) % NUM_HASH_BUCKETS;
+		hashvals[PSM2_TAG_ANYSRC] =
+			hash_32(cur->tag.tag[0]) % NUM_HASH_BUCKETS;
+		hashvals[PSM2_ANYTAG_SRC] =
+			hash_32(cur->tag.tag[1]) % NUM_HASH_BUCKETS;
+		for (t = PSM2_TAG_SRC; t < PSM2_ANYTAG_ANYSRC; t++)
+			mq_qq_append_which(mq->unexpected_htab,
+					   t, hashvals[t], cur);
+	}
+
+	/* Everything in the expected_q needs to be moved into the
+	   (single) correct expected hash table. */
+	qp = &mq->expected_q;
+	for (curp = &qp->first; (cur = *curp) != NULL; /*curp = &cur->next*/) {
+		/* must read next ptr before remove */
+		curp = &cur->next[PSM2_ANYTAG_ANYSRC];
+		if ((cur->tagsel.tag[0] == 0xFFFFFFFF) &&
+		    (cur->tagsel.tag[1] == 0xFFFFFFFF)) {
+			/* hash tag0 and tag1 */
+			t = PSM2_TAG_SRC;
+			hashvals[t] = hash_64(*(uint64_t *) cur->tag.tag) % NUM_HASH_BUCKETS;
+			mq_qq_append_which(mq->expected_htab,
+					   t, hashvals[t], cur);
+		} else if (cur->tagsel.tag[0] == 0xFFFFFFFF) {
+			t = PSM2_TAG_ANYSRC;
+			hashvals[t] = hash_32(cur->tag.tag[0]) % NUM_HASH_BUCKETS;
+			mq_qq_append_which(mq->expected_htab,
+					   t, hashvals[t], cur);
+		} else if (cur->tagsel.tag[1] == 0xFFFFFFFF) {
+			t = PSM2_ANYTAG_SRC;
+			hashvals[t] = hash_32(cur->tag.tag[1]) % NUM_HASH_BUCKETS;
+			mq_qq_append_which(mq->expected_htab,
+					   t, hashvals[t], cur);
+		} else
+			continue; /* else, req must stay in ANY ANY */
+
+		mq->expected_list_len--;
+		mq->expected_hash_len++;
+		mq_qq_remove_which(cur, PSM2_ANYTAG_ANYSRC);
+	}
+}
+
+/* easy threshold to re-enable: if |hash| == 0 && |list| < X
+   aggressive threshold: if |hash| + |list| < X
+   even easier: if |hash| + |list| == 0
+   might be better approach to avoid constant bouncing between modes */
+void psmi_mq_fastpath_try_reenable(psm2_mq_t mq)
+{
+	if_pf(mq->nohash_fastpath == 0 &&
+	      mq->unexpected_hash_len == 0 &&
+	      mq->expected_hash_len == 0 &&
+	      mq->unexpected_list_len == 0 &&
+	      mq->expected_list_len == 0){
+		mq->nohash_fastpath = 1;
+	}
+}
+
+/*
  * ! @brief PSM exposed version to allow PTLs to match
  */
 
-/*! @brief Try to match against an mqsq using a tag and tagsel
+/*! @brief Try to match against the MQ using a tag and tagsel
  *
- * @param[in] q Match Queue
+ * @param[in] mq Message Queue
  * @param[in] src Source (sender) epaddr, may be PSM2_MQ_ANY_ADDR.
  * @param[in] tag Input Tag
  * @param[in] tagsel Input Tag Selector
@@ -78,13 +155,38 @@
  */
 static
 psm2_mq_req_t
-mq_req_match_with_tagsel(psm2_mq_t mq, struct mqsq *q, psm2_epaddr_t src,
+mq_req_match_with_tagsel(psm2_mq_t mq, psm2_epaddr_t src,
 			 psm2_mq_tag_t *tag, psm2_mq_tag_t *tagsel, int remove)
 {
 	psm2_mq_req_t *curp;
 	psm2_mq_req_t cur;
+	unsigned hashval;
+	int i, j = 0;
+	struct mqq *qp;
 
-	for (curp = &q->first; (cur = *curp) != NULL; curp = &cur->next) {
+	if_pt (mq->nohash_fastpath) {
+		i = j = PSM2_ANYTAG_ANYSRC;
+		qp = &mq->unexpected_q;
+	} else if ((tagsel->tag[0] == 0xFFFFFFFF) &&
+		   (tagsel->tag[1] == 0xFFFFFFFF)) {
+		i = PSM2_TAG_SRC;
+		hashval = hash_64(*(uint64_t *) tag->tag) % NUM_HASH_BUCKETS;
+		qp = &mq->unexpected_htab[i][hashval];
+	} else if (tagsel->tag[0] == 0xFFFFFFFF) {
+		i = PSM2_TAG_ANYSRC;
+		hashval = hash_32(tag->tag[0]) % NUM_HASH_BUCKETS;
+		qp = &mq->unexpected_htab[i][hashval];
+	} else if (tagsel->tag[1] == 0xFFFFFFFF) {
+		i = PSM2_ANYTAG_SRC;
+		hashval = hash_32(tag->tag[1]) % NUM_HASH_BUCKETS;
+		qp = &mq->unexpected_htab[i][hashval];
+	} else {
+		/* unhashable tag */
+		i = PSM2_ANYTAG_ANYSRC;
+		qp = &mq->unexpected_q;
+	}
+
+	for (curp = &qp->first; (cur = *curp) != NULL; curp = &cur->next[i]) {
 		psmi_assert(cur->peer != PSM2_MQ_ANY_ADDR);
 		if ((src == PSM2_MQ_ANY_ADDR || src == cur->peer) &&
 		    !((tag->tag[0] ^ cur->tag.tag[0]) & tagsel->tag[0]) &&
@@ -92,9 +194,13 @@ mq_req_match_with_tagsel(psm2_mq_t mq, struct mqsq *q, psm2_epaddr_t src,
 		    !((tag->tag[2] ^ cur->tag.tag[2]) & tagsel->tag[2])) {
 			/* match! */
 			if (remove) {
-				if ((*curp = cur->next) == NULL)	/* fix tail */
-					q->lastp = curp;
-				cur->next = NULL;
+				if_pt (i == PSM2_ANYTAG_ANYSRC)
+					mq->unexpected_list_len--;
+				else
+					mq->unexpected_hash_len--;
+				for (; j < NUM_MQ_SUBLISTS; j++)
+					mq_qq_remove_which(cur, j);
+				psmi_mq_fastpath_try_reenable(mq);
 			}
 			return cur;
 		}
@@ -102,83 +208,76 @@ mq_req_match_with_tagsel(psm2_mq_t mq, struct mqsq *q, psm2_epaddr_t src,
 	return NULL;
 }
 
-#if 0
-/* Only for psm2_mq_irecv. Currently not enabled. */
-PSMI_ALWAYS_INLINE(
-psm2_mq_req_t
-mq_req_match_with_tagsel_inline(struct mqsq *q,
-				uint64_t tag,
-				uint64_t tagsel))
+static void mq_add_to_expected_hashes(psm2_mq_t mq, psm2_mq_req_t req)
 {
-	psm2_mq_req_t cur = q->first;
-	if (cur == NULL)
-		return NULL;
-	else if (!((cur->tag ^ tag) & tagsel)) {
-		if ((q->first = cur->next) == NULL)
-			q->lastp = &q->first;
-		cur->next = NULL;
-		return cur;
-	} else
-		return mq_req_match_with_tagsel(q, tag, tagsel, 1);
-}
-#endif
+	unsigned hashval;
+	int i;
 
-/*! @brief Try to remove the req in an mqsq
+	req->timestamp = mq->timestamp++;
+	if_pt (mq->nohash_fastpath) {
+		mq_qq_append(&mq->expected_q, req);
+		req->q[PSM2_ANYTAG_ANYSRC] = &mq->expected_q;
+		mq->expected_list_len++;
+		if_pf (mq->expected_list_len >= HASH_THRESHOLD)
+			psmi_mq_fastpath_disable(mq);
+	} else if ((req->tagsel.tag[0] == 0xFFFFFFFF) &&
+		   (req->tagsel.tag[1] == 0xFFFFFFFF)) {
+		i = PSM2_TAG_SRC;
+		hashval = hash_64(*(uint64_t *) req->tag.tag) % NUM_HASH_BUCKETS;
+		mq_qq_append_which(mq->expected_htab, i, hashval, req);
+		mq->expected_hash_len++;
+	} else if (req->tagsel.tag[0] == 0xFFFFFFFF) {
+		i = PSM2_TAG_ANYSRC;
+		hashval = hash_32(req->tag.tag[0]) % NUM_HASH_BUCKETS;
+		mq_qq_append_which(mq->expected_htab, i, hashval, req);
+		mq->expected_hash_len++;
+	} else if (req->tagsel.tag[1] == 0xFFFFFFFF) {
+		i = PSM2_ANYTAG_SRC;
+		hashval = hash_32(req->tag.tag[1]) % NUM_HASH_BUCKETS;
+		mq_qq_append_which(mq->expected_htab, i, hashval, req);
+		mq->expected_hash_len++;
+	} else {
+		mq_qq_append(&mq->expected_q, req);
+		req->q[PSM2_ANYTAG_ANYSRC] = &mq->expected_q;
+		mq->expected_list_len++;
+	}
+}
+
+/*! @brief Try to remove the req in the MQ
  *
- * @param[in] q Match Queue
+ * @param[in] mq Message Queue
  * @param[in] req MQ request
  *
  * @returns 1 if successfully removed, or 0 if req cannot be found.
  */
 static
-int mq_req_remove_single(psm2_mq_t mq, struct mqsq *q, psm2_mq_req_t req)
+int mq_req_remove_single(psm2_mq_t mq, psm2_mq_req_t req)
 {
-	psm2_mq_req_t *curp;
-	psm2_mq_req_t cur;
+	int i;
 
-	for (curp = &q->first; (cur = *curp) != NULL; curp = &cur->next) {
-		if (cur == req) {
-			if ((*curp = cur->next) == NULL)
-				q->lastp = curp;
-			cur->next = NULL;
-			return 1;
-		}
+	/* item should only exist in one expected queue at a time */
+	psmi_assert((!!req->q[0] + !!req->q[1] + !!req->q[2] + !!req->q[3]) == 1);
+
+	for (i = 0; i < NUM_MQ_SUBLISTS; i++)
+		if (req->q[i]) /* found */
+			break;
+	switch (i) {
+	case PSM2_ANYTAG_ANYSRC:
+		mq->expected_list_len--;
+		break;
+	case PSM2_TAG_SRC:
+	case PSM2_TAG_ANYSRC:
+	case PSM2_ANYTAG_SRC:
+		mq->expected_hash_len--;
+		break;
+	default:
+		return 0;
 	}
-	return 0;
-}
 
-#if 0
- /*XXX only used with cancel, for now */
-/*! @brief Remove a req that matches a send_req in an mqsq
- *
- * Rendez-vous requests keep track of the sender's send_req within a req in a
- * match Queue.  Upon cancels, it is required to search the queue and remove
- * the send_req that matches the request to be cancelled.
- *
- * @param[in] q Match Queue
- * @param[in] req MQ send request to match
- * @param[in] remove Non-zero value to remove the req from the MQ
- */
-static
-psm2_mq_req_t
-mq_req_match_req(struct mqsq *q, psm2_mq_req_t req, int remove)
-{
-	psm2_mq_req_t *curp;
-	psm2_mq_req_t cur;
-
-	for (curp = &q->first; (cur = *curp) != NULL; curp = &cur->next) {
-		if (cur->send_req == req) {
-			if (remove) {
-				if ((*curp = cur->next) == NULL)	/* fix tail */
-					q->lastp = curp;
-				cur->next = NULL;
-			}
-			return cur;
-		}
-	}
-	return NULL;		/* no match */
+	mq_qq_remove_which(req, i);
+	psmi_mq_fastpath_try_reenable(mq);
+	return 1;
 }
-#endif
 
 void psmi_mq_mtucpy(void *vdest, const void *vsrc, uint32_t nchars)
 {
@@ -228,8 +327,7 @@ psmi_mq_iprobe_inner(psm2_mq_t mq, psm2_epaddr_t src,
 	psm2_mq_req_t req;
 
 	PSMI_PLOCK();
-	req = mq_req_match_with_tagsel(mq, &mq->unexpected_q,
-				       src, tag, tagsel, remove_req);
+	req = mq_req_match_with_tagsel(mq, src, tag, tagsel, remove_req);
 
 	if (req != NULL) {
 		PSMI_PUNLOCK();
@@ -238,8 +336,7 @@ psmi_mq_iprobe_inner(psm2_mq_t mq, psm2_epaddr_t src,
 
 	psmi_poll_internal(mq->ep, 1);
 	/* try again */
-	req = mq_req_match_with_tagsel(mq, &mq->unexpected_q,
-				       src, tag, tagsel, remove_req);
+	req = mq_req_match_with_tagsel(mq, src, tag, tagsel, remove_req);
 
 	PSMI_PUNLOCK();
 	return req;
@@ -387,7 +484,7 @@ psm2_error_t __psm2_mq_cancel(psm2_mq_req_t *ireq)
 		if (req->state == MQ_STATE_POSTED) {
 			int rc;
 
-			rc = mq_req_remove_single(mq, &mq->expected_q, req);
+			rc = mq_req_remove_single(mq, req);
 			psmi_assert_always(rc);
 			req->state = MQ_STATE_COMPLETE;
 			mq_qq_append(&mq->completed_q, req);
@@ -795,9 +892,7 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 	PSMI_PLOCK();
 
 	/* First check unexpected Queue and remove req if found */
-	req =
-	    mq_req_match_with_tagsel(mq, &mq->unexpected_q, src, tag, tagsel,
-				     1);
+	req = mq_req_match_with_tagsel(mq, src, tag, tagsel, REMOVE_ENTRY);
 
 	if (req == NULL) {
 		/* prepost before arrival, add to expected q */
@@ -819,7 +914,7 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 		/* Nobody should touch the buffer after it's posted */
 		VALGRIND_MAKE_MEM_NOACCESS(buf, len);
 
-		mq_sq_append(&mq->expected_q, req);
+		mq_add_to_expected_hashes(mq, req);
 		_HFI_VDBG("buf=%p,len=%d,tag=%08x.%08x.%08x "
 			  " tagsel=%08x.%08x.%08x req=%p\n",
 			  buf, len, tag->tag[0], tag->tag[1], tag->tag[2],
@@ -1113,15 +1208,15 @@ psm2_error_t psmi_mq_malloc(psm2_mq_t *mqo)
 	mq->ep = NULL;
 	/*mq->unexpected_callback = NULL; */
 	mq->memmode = psmi_parse_memmode();
-	mq->expected_q.first = NULL;
-	mq->expected_q.lastp = &mq->expected_q.first;
-	mq->unexpected_q.first = NULL;
-	mq->unexpected_q.lastp = &mq->unexpected_q.first;
-	mq->completed_q.first = NULL;
-	mq->completed_q.lastp = &mq->completed_q.first;
 
-	mq->outoforder_q.first = NULL;
-	mq->outoforder_q.lastp = &mq->outoforder_q.first;
+	memset(mq->unexpected_htab, 0,
+	       NUM_HASH_CONFIGS * NUM_HASH_BUCKETS * sizeof(struct mqq));
+	memset(mq->expected_htab, 0,
+	       NUM_HASH_CONFIGS * NUM_HASH_BUCKETS * sizeof(struct mqq));
+	memset(&mq->expected_q, 0, sizeof(struct mqq));
+	memset(&mq->unexpected_q, 0, sizeof(struct mqq));
+	memset(&mq->completed_q, 0, sizeof(struct mqq));
+	memset(&mq->outoforder_q, 0, sizeof(struct mqq));
 	STAILQ_INIT(&mq->eager_q);
 
 
@@ -1176,6 +1271,7 @@ psm2_error_t psmi_mq_initialize_defaults(psm2_mq_t mq)
 		    (union psmi_envvar_val) 0, &env_stats);
 	mq->print_stats = env_stats.e_uint;
 
+	mq->nohash_fastpath = 1;
 	return PSM2_OK;
 }
 

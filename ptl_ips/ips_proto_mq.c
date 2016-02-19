@@ -69,10 +69,11 @@ PSMI_NEVER_INLINE(ips_scb_t *
 	proto->stats.scb_egr_unavail_cnt++;
 
 	PSMI_BLOCKUNTIL(proto->ep, err,
-			((scb = istiny ?
-			  ips_scbctrl_alloc_tiny(&proto->scbc_egr) :
-			  ips_scbctrl_alloc(&proto->scbc_egr, npkts, len,
-					    flags)) != NULL));
+			((scb = 
+			  (istiny ?
+			   ips_scbctrl_alloc_tiny(&proto->scbc_egr) :
+			   ips_scbctrl_alloc(&proto->scbc_egr, npkts, len,
+					     flags))) != NULL));
 	psmi_assert(scb != NULL);
 	return scb;
 }
@@ -114,6 +115,7 @@ int ips_proto_mq_eager_complete(void *reqp, uint32_t nbytes)
 	 */
 	if (req->send_msgoff >= req->send_msglen) {
 		req->state = MQ_STATE_COMPLETE;
+		ips_barrier();
 		mq_qq_append(&req->mq->completed_q, req);
 	}
 	return IPS_RECVHDRQ_CONTINUE;
@@ -215,31 +217,60 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 	ips_epaddr_t *ipsaddr = flow->ipsaddr;
 	psm2_error_t err = PSM2_OK;
 	uintptr_t buf = (uintptr_t) ubuf;
-	uint32_t nbytes_left = len;
-	uint32_t pktlen, offset, chunk_size;
+	uint32_t nbytes_left, pktlen, offset, chunk_size;
 	uint16_t frag_size, msgseq, padding;
 	ips_scb_t *scb;
 
-	psmi_assert(nbytes_left > 0);
+	psmi_assert(len > 0);
+	psmi_assert(req != NULL);
 
 	if (flow->transfer == PSM_TRANSFER_DMA) {
-		/* nonblocking.
-		 * there is a request, send from user buffer directly */
-		psmi_assert(req != NULL);
 		psmi_assert((proto->flags & IPS_PROTO_FLAG_SPIO) == 0);
-
 		frag_size = flow->path->pr_mtu;
 		/* max chunk size is the rv window size */
 		chunk_size = proto->mq->hfi_window_rv;
 	} else {
-		/* if req!=NULL, it is nonblocking */
-		chunk_size = frag_size = ipsaddr->frag_size;
 		psmi_assert((proto->flags & IPS_PROTO_FLAG_SDMA) == 0);
+		chunk_size = frag_size = ipsaddr->frag_size;
+	}
+	msgseq = ipsaddr->msgctl->mq_send_seqnum++;
+
+	/*
+	 * If we can send this message by a single packet, we prefer
+	 * to use short packet, instead of eager paccket.
+	 */
+	if (len <= frag_size) {
+		uint32_t paylen = len & ~0x3;
+
+		scb = mq_alloc_pkts(proto, 1, 0, 0);
+		psmi_assert(scb);
+
+		ips_scb_opcode(scb) = OPCODE_SHORT;
+		scb->ips_lrh.khdr.kdeth0 = msgseq;
+		ips_scb_hdrdata(scb).u32w1 = len;
+		ips_scb_copy_tag(scb->ips_lrh.tag, tag->tag);
+
+		ips_scb_buffer(scb) = (void *)buf;
+		ips_scb_length(scb) = paylen;
+		if (len > paylen) {
+			mq_copy_tiny((uint32_t *)&ips_scb_hdrdata(scb).u32w0,
+				(uint32_t *)(buf + paylen),
+				len - paylen);
+
+			/* for complete callback */
+			req->send_msgoff = len - paylen;
+		}
+
+		ips_scb_cb(scb) = ips_proto_mq_eager_complete;
+		ips_scb_cb_param(scb) = req;
+		ips_scb_flags(scb) |= IPS_SEND_FLAG_ACKREQ;
+
+		err = ips_mq_send_envelope(proto, flow, scb, PSMI_TRUE);
+		return err;
 	}
 
-	msgseq = ipsaddr->msgctl->mq_send_seqnum++;
+	nbytes_left = len;
 	offset = 0;
-
 	do {
 		padding = nbytes_left & 0x3;
 		if (padding) {
@@ -256,13 +287,7 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 			psmi_assert((pktlen & 0x3) == 0);
 		}
 
-		if (flow->transfer == PSM_TRANSFER_DMA)
-			scb = mq_alloc_pkts(proto, 1, 0, 0);
-		else
-			scb = mq_alloc_pkts(proto, 1, pktlen,
-					    (req ==
-					     NULL) ? IPS_SCB_FLAG_ADD_BUFFER :
-					    0);
+		scb = mq_alloc_pkts(proto, 1, 0, 0);
 		psmi_assert(scb != NULL);
 
 		ips_scb_opcode(scb) = OPCODE_EAGER;
@@ -274,17 +299,12 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 		_HFI_VDBG
 		    ("payload=%p, thislen=%d, frag_size=%d, nbytes_left=%d\n",
 		     (void *)buf, pktlen, frag_size, nbytes_left);
-		if (req)	/* non-blocking, send from user's buffer */
-			ips_scb_buffer(scb) = (void *)buf;
-		else		/* blocking, copy to bounce buffer */
-			psmi_mq_mtucpy(ips_scb_buffer(scb), (void *)buf,
-				       pktlen);
+		ips_scb_buffer(scb) = (void *)buf;
 
 		buf += pktlen;
 		offset += pktlen;
 		nbytes_left -= pktlen;
 
-		scb->padcnt = padding;
 		pktlen += padding;
 		psmi_assert((pktlen & 0x3) == 0);
 
@@ -299,10 +319,8 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 			ips_scb_length(scb) = pktlen;
 
 		if (nbytes_left == 0) {	/* last segment/packet */
-			if (req) {	/* non-blocking mode, need completion */
-				ips_scb_cb(scb) = ips_proto_mq_eager_complete;
-				ips_scb_cb_param(scb) = req;
-			}
+			ips_scb_cb(scb) = ips_proto_mq_eager_complete;
+			ips_scb_cb_param(scb) = req;
 
 			/* Set ACKREQ if single packet per scb. For multi
 			 * packets per scb, it is SDMA, driver will set
@@ -311,7 +329,7 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 			 */
 			if (scb->nfrag == 1)
 				ips_scb_flags(scb) |= IPS_SEND_FLAG_ACKREQ;
-		} else if (req) {
+		} else {
 			req->send_msgoff += pktlen;
 		}
 
@@ -345,7 +363,6 @@ ips_ptl_mq_rndv(struct ips_proto *proto, psm2_mq_req_t req,
 		ips_epaddr_t *ipsaddr, const void *buf, uint32_t len)
 {
 	struct ips_flow *flow = &ipsaddr->flows[proto->msgflowid];
-	uint32_t pktlen = (len > ipsaddr->frag_size) ? 0 : len;
 	psm2_error_t err = PSM2_OK;
 	ips_scb_t *scb;
 
@@ -353,12 +370,10 @@ ips_ptl_mq_rndv(struct ips_proto *proto, psm2_mq_req_t req,
 	req->buf = (void *)buf;
 	req->buf_len = len;
 	req->send_msglen = len;
-	req->send_msgoff = pktlen;
 	req->recv_msgoff = 0;
 	req->rts_peer = (psm2_epaddr_t) ipsaddr;
 
-	scb = mq_alloc_pkts(proto, 1, pktlen,
-			    pktlen ? IPS_SCB_FLAG_ADD_BUFFER : 0);
+	scb = mq_alloc_pkts(proto, 1, 0, 0);
 	psmi_assert(scb);
 	ips_scb_opcode(scb) = OPCODE_LONG_RTS;
 	ips_scb_flags(scb) |= IPS_SEND_FLAG_ACKREQ;
@@ -370,14 +385,14 @@ ips_ptl_mq_rndv(struct ips_proto *proto, psm2_mq_req_t req,
 	ips_scb_hdrdata(scb).u32w1 = len;
 	ips_scb_hdrdata(scb).u32w0 = psmi_mpool_get_obj_index(req);
 
-	if (pktlen) {
-		ips_shortcpy(ips_scb_buffer(scb), buf, pktlen);
-		/*
-		 * Make DW multiple, receiving side will discard the extra bytes.
-		 */
-		pktlen = (pktlen + 3) & (~3);
+	if (len <= ipsaddr->frag_size && !(len & 0x3)) {
+		ips_scb_buffer(scb) = (void *)buf;
+		ips_scb_length(scb) = len;
+		req->send_msgoff = len;
+	} else {
+		ips_scb_length(scb) = 0;
+		req->send_msgoff = 0;
 	}
-	ips_scb_length(scb) = pktlen;
 
 	PSM_LOG_EPM_COND(len > proto->mq->hfi_thresh_rv && proto->protoexp,OPCODE_LONG_RTS,PSM_LOG_EPM_TX,proto->ep->epid, req->rts_peer->epid,
 			    "ips_scb_hdrdata(scb).u32w0: %d",ips_scb_hdrdata(scb).u32w0);
@@ -453,30 +468,68 @@ ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 		     psmi_epaddr_get_name(((psm2_epaddr_t) ipsaddr)->epid), ubuf,
 		     len, tag->tag[0], tag->tag[1], tag->tag[2], req);
 	} else if (len <= ipsaddr->frag_size) {
-		uint32_t pad_write_bytes = ((PSM_CACHE_LINE_BYTES -
-					     (len & (PSM_CACHE_LINE_BYTES - 1)))
-					    & (PSM_CACHE_LINE_BYTES - 1));
-		flow = &ipsaddr->flows[proto->msgflowid];
+		uint32_t paylen = len & ~0x3;
 
-		if_pf((pad_write_bytes + len) > ipsaddr->frag_size)
-		    pad_write_bytes = 0;
-
-		scb = mq_alloc_pkts(proto, 1, (len + pad_write_bytes),
-				    IPS_SCB_FLAG_ADD_BUFFER);
+		scb = mq_alloc_pkts(proto, 1, 0, 0);
 		psmi_assert(scb);
+
 		ips_scb_opcode(scb) = OPCODE_SHORT;
 		scb->ips_lrh.khdr.kdeth0 = ipsaddr->msgctl->mq_send_seqnum++;
 		ips_scb_hdrdata(scb).u32w1 = len;
 		ips_scb_copy_tag(scb->ips_lrh.tag, tag->tag);
-		ips_scb_length(scb) = len + pad_write_bytes;
 
-		ips_shortcpy(ips_scb_buffer(scb), ubuf, len);
+		ips_scb_buffer(scb) = (void *)ubuf;
+		ips_scb_length(scb) = paylen;
+		if (len > paylen) {
+			/* there are nonDW bytes, copy to header */
+			mq_copy_tiny((uint32_t *)&ips_scb_hdrdata(scb).u32w0,
+				(uint32_t *)((uintptr_t)ubuf + paylen),
+				len - paylen);
+
+			/* for complete callback */
+			req->send_msgoff = len - paylen;
+		}
+
+		/*
+		 * Need ack for send side completion because we
+		 * send from user buffer.
+		 */
+		ips_scb_flags(scb) |= IPS_SEND_FLAG_ACKREQ;
+
+		flow = &ipsaddr->flows[proto->msgflowid];
 		err = ips_mq_send_envelope(proto, flow, scb, PSMI_TRUE);
 		if (err != PSM2_OK)
 			return err;
 
-		req->state = MQ_STATE_COMPLETE;
-		mq_qq_append(&mq->completed_q, req);
+		/*
+		 * It should be OK to check the buffer address in
+		 * 'scb' to be changed, when this scb is done, the
+		 * address is set to NULL when scb is put back to
+		 * scb pool. Even if the same scb is re-used, it
+		 * is not possible to set to this 'buf' address.
+		 */
+		if (ips_scb_buffer(scb) == (void *)ubuf) {
+			if (paylen > proto->scb_bufsize ||
+					!ips_scbctrl_bufalloc(scb)) {
+				/* payload is larger than bounce buffer,
+				 * or, can't allocate bounce buffer,
+				 * continue to send from user buffer */
+				ips_scb_cb(scb) = ips_proto_mq_eager_complete;
+				ips_scb_cb_param(scb) = req;
+			} else {
+				/* copy to bounce buffer */
+				ips_shortcpy(ips_scb_buffer(scb),
+					(void*)ubuf, paylen);
+
+				/* mark the message done */
+				req->state = MQ_STATE_COMPLETE;
+				mq_qq_append(&mq->completed_q, req);
+			}
+		} else {
+			/* mark the message done */
+			req->state = MQ_STATE_COMPLETE;
+			mq_qq_append(&mq->completed_q, req);
+		}
 		_HFI_VDBG
 		    ("[ishrt][%s->%s][b=%p][m=%d][t=%08x.%08x.%08x][req=%p]\n",
 		     psmi_epaddr_get_name(mq->ep->epid),
@@ -555,34 +608,66 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 			  psmi_epaddr_get_name(((psm2_epaddr_t) ipsaddr)->epid),
 			  ubuf, len, tag->tag[0], tag->tag[1], tag->tag[2]);
 	} else if (len <= ipsaddr->frag_size) {
-		uint32_t pad_write_bytes = ((PSM_CACHE_LINE_BYTES -
-					     (len & (PSM_CACHE_LINE_BYTES - 1)))
-					    & (PSM_CACHE_LINE_BYTES - 1));
-		flow = &ipsaddr->flows[proto->msgflowid];
+		uint32_t paylen = len & ~0x3;
 
-		if_pf((pad_write_bytes + len) > ipsaddr->frag_size)
-		    pad_write_bytes = 0;
-
-		scb = mq_alloc_pkts(proto, 1, (len + pad_write_bytes),
-				    IPS_SCB_FLAG_ADD_BUFFER);
+		scb = mq_alloc_pkts(proto, 1, 0, 0);
 		psmi_assert(scb);
+
 		ips_scb_opcode(scb) = OPCODE_SHORT;
 		scb->ips_lrh.khdr.kdeth0 = ipsaddr->msgctl->mq_send_seqnum++;
 		ips_scb_hdrdata(scb).u32w1 = len;
 		ips_scb_copy_tag(scb->ips_lrh.tag, tag->tag);
-		ips_scb_length(scb) = len + pad_write_bytes;
 
-		ips_shortcpy(ips_scb_buffer(scb), ubuf, len);
+		ips_scb_buffer(scb) = (void *)ubuf;
+		ips_scb_length(scb) = paylen;
+		if (len > paylen) {
+			/* there are nonDW bytes, copy to header */
+			mq_copy_tiny((uint32_t *)&ips_scb_hdrdata(scb).u32w0,
+				(uint32_t *)((uintptr_t)ubuf + paylen),
+				len - paylen);
+		}
+
+		/*
+		 * Need ack for send side completion because we
+		 * send from user buffer.
+		 */
+		ips_scb_flags(scb) |= IPS_SEND_FLAG_ACKREQ;
+
+		flow = &ipsaddr->flows[proto->msgflowid];
 		err = ips_mq_send_envelope(proto, flow, scb, PSMI_TRUE);
 		if (err != PSM2_OK)
 			return err;
 
+		/*
+		 * It should be OK to check the buffer address in
+		 * 'scb' to be changed, when this scb is done, the
+		 * address is set to NULL when scb is put back to
+		 * scb pool. Even if the same scb is re-used, it
+		 * is not possible to set to this 'ubuf' address.
+		 */
+		if (ips_scb_buffer(scb) == (void *)ubuf) {
+			if (paylen > proto->scb_bufsize ||
+					!ips_scbctrl_bufalloc(scb)) {
+				/* payload is larger than bounce buffer,
+				 * or, can't allocate bounce buffer,
+				 * send from user buffer till complete */
+				PSMI_BLOCKUNTIL(mq->ep, err,
+					ips_scb_buffer(scb) != (void*)ubuf);
+				if (err > PSM2_OK_NO_PROGRESS)
+					return err;
+				err = PSM2_OK;
+			} else {
+				/* copy to bounce buffer */
+				ips_shortcpy(ips_scb_buffer(scb),
+					(void*)ubuf, paylen);
+			}
+		}
 		_HFI_VDBG("[shrt][%s->%s][b=%p][m=%d][t=%08x.%08x.%08x]\n",
 			  psmi_epaddr_get_name(mq->ep->epid),
 			  psmi_epaddr_get_name(((psm2_epaddr_t) ipsaddr)->epid),
 			  ubuf, len, tag->tag[0], tag->tag[1], tag->tag[2]);
 	} else if (len <= mq->hfi_thresh_rv) {
-		psm2_mq_req_t req = NULL;
+		psm2_mq_req_t req;
 
 		if (len <= proto->iovec_thresh_eager_blocking) {
 			/* use PIO transfer */
@@ -592,27 +677,25 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 			/* use SDMA transfer */
 			psmi_assert((proto->flags & IPS_PROTO_FLAG_SPIO) == 0);
 			flow = &ipsaddr->flows[EP_FLOW_GO_BACK_N_DMA];
-
-			/* Block until we can get a req */
-			PSMI_BLOCKUNTIL(mq->ep, err,
-					(req =
-					 psmi_mq_req_alloc(mq, MQE_TYPE_SEND)));
-			if (err > PSM2_OK_NO_PROGRESS)
-				return err;
-			else
-				err = PSM2_OK;
-			req->type |= MQE_TYPE_WAITING;
-			req->send_msglen = len;
-			req->tag = *tag;
-
-			req->send_msgoff = 0;
 		}
+
+		/* Block until we can get a req */
+		PSMI_BLOCKUNTIL(mq->ep, err,
+				(req =
+				 psmi_mq_req_alloc(mq, MQE_TYPE_SEND)));
+		if (err > PSM2_OK_NO_PROGRESS)
+			return err;
+
+		req->type |= MQE_TYPE_WAITING;
+		req->send_msglen = len;
+		req->tag = *tag;
+		req->send_msgoff = 0;
 
 		err = ips_ptl_mq_eager(proto, req, flow, tag, ubuf, len);
 		if (err != PSM2_OK)
 			return err;
-		if (req)
-			psmi_mq_wait_internal(&req);
+
+		psmi_mq_wait_internal(&req);
 
 		_HFI_VDBG("[long][%s->%s][b=%p][m=%d][t=%08x.%08x.%08x]\n",
 			  psmi_epaddr_get_name(mq->ep->epid),
@@ -624,6 +707,9 @@ do_rendezvous:
 		/* Block until we can get a req */
 		PSMI_BLOCKUNTIL(mq->ep, err,
 				(req = psmi_mq_req_alloc(mq, MQE_TYPE_SEND)));
+		if (err > PSM2_OK_NO_PROGRESS)
+			return err;
+
 		req->type |= MQE_TYPE_WAITING;
 		req->tag = *tag;
 		err = ips_ptl_mq_rndv(proto, req, ipsaddr, ubuf, len);
@@ -714,8 +800,8 @@ ips_proto_mq_push_cts_req(struct ips_proto *proto, psm2_mq_req_t req)
 	ips_scb_opcode(scb) = OPCODE_LONG_CTS;
 	scb->ips_lrh.khdr.kdeth0 = 0;
 	args[0].u32w0 = psmi_mpool_get_obj_index(req);
-	args[1].u32w1 = req->rts_reqidx_peer;
-	args[1].u32w0 = req->recv_msglen;
+	args[1].u32w1 = req->recv_msglen;
+	args[1].u32w0 = req->rts_reqidx_peer;
 
 	PSM_LOG_EPM(OPCODE_LONG_CTS,PSM_LOG_EPM_TX, proto->ep->epid,
 		    flow->ipsaddr->epaddr.epid ,"req->rts_reqidx_peer: %d",
@@ -742,7 +828,7 @@ ips_proto_mq_push_rts_data(struct ips_proto *proto, psm2_mq_req_t req)
 	uint32_t nbytes_left = req->send_msglen - req->recv_msgoff;
 	uint32_t nbytes_sent = 0;
 	uint32_t nbytes_this, chunk_size;
-	uint16_t frag_size, padding;
+	uint16_t frag_size, unaligned_bytes;
 	struct ips_flow *flow;
 	ips_scb_t *scb;
 
@@ -787,37 +873,38 @@ ips_proto_mq_push_rts_data(struct ips_proto *proto, psm2_mq_req_t req)
 			break;
 		}
 
-		padding = nbytes_left & 0x3;
-		if (padding) {
-			psmi_assert(nbytes_left > frag_size);
-			/* over reading should be OK on sender because
-			 * the padding area is within the whole buffer,
-			 * receiver will discard the extra bytes via
-			 * padcnt in packet header
-			 */
-			padding = 4 - padding;
-			nbytes_this = frag_size - padding;
-		} else {
-			nbytes_this = min(chunk_size, nbytes_left);
-		}
-
 		ips_scb_opcode(scb) = OPCODE_LONG_DATA;
 		scb->ips_lrh.khdr.kdeth0 = 0;
-		ips_scb_hdrdata(scb).u32w1 = req->rts_reqidx_peer;
-		ips_scb_hdrdata(scb).u32w0 = req->recv_msgoff;
+		scb->ips_lrh.data[0].u32w0 = req->rts_reqidx_peer;
+		scb->ips_lrh.data[1].u32w1 = req->send_msglen;
+
+		/* attached unaligned bytes into packet header */
+		unaligned_bytes = nbytes_left & 0x3;
+		if (unaligned_bytes) {
+			mq_copy_tiny((uint32_t *)&scb->ips_lrh.mdata,
+				(uint32_t *)buf, unaligned_bytes);
+
+			/* position to send */
+			buf += unaligned_bytes;
+			req->recv_msgoff += unaligned_bytes;
+			psmi_assert(req->recv_msgoff < 4);
+
+			/* for complete callback */
+			req->send_msgoff += unaligned_bytes;
+
+			nbytes_left -= unaligned_bytes;
+			nbytes_sent += unaligned_bytes;
+		}
+		scb->ips_lrh.data[1].u32w0 = req->recv_msgoff;
 		ips_scb_buffer(scb) = (void *)buf;
 
-		buf += nbytes_this;
-		req->recv_msgoff += nbytes_this;
-		nbytes_left -= nbytes_this;
-		nbytes_sent += nbytes_this;
-
-		scb->padcnt = padding;
-		nbytes_this += padding;
-		psmi_assert((nbytes_this & 0x3) == 0);
-
 		scb->frag_size = frag_size;
-		scb->nfrag = (nbytes_this + frag_size - 1) / frag_size;
+		nbytes_this = min(chunk_size, nbytes_left);
+		if (nbytes_this > 0)
+			scb->nfrag = (nbytes_this + frag_size - 1) / frag_size;
+		else
+			scb->nfrag = 1;
+
 		if (scb->nfrag > 1) {
 			ips_scb_length(scb) = frag_size;
 			scb->nfrag_remaining = scb->nfrag;
@@ -826,6 +913,10 @@ ips_proto_mq_push_rts_data(struct ips_proto *proto, psm2_mq_req_t req)
 		} else
 			ips_scb_length(scb) = nbytes_this;
 
+		buf += nbytes_this;
+		req->recv_msgoff += nbytes_this;
+		nbytes_sent += nbytes_this;
+		nbytes_left -= nbytes_this;
 		if (nbytes_left == 0) {
 			/* because of scb callback, use eager complete */
 			ips_scb_cb(scb) = ips_proto_mq_eager_complete;
@@ -879,7 +970,7 @@ ips_proto_mq_handle_cts(struct ips_recvhdrq_event *rcv_ev)
 		PSM2_LOG_MSG("leaving");
 		return IPS_RECVHDRQ_CONTINUE;
 	}
-	req = psmi_mpool_find_obj_by_index(mq->sreq_pool, p_hdr->data[1].u32w1);
+	req = psmi_mpool_find_obj_by_index(mq->sreq_pool, p_hdr->data[1].u32w0);
 	psmi_assert(req != NULL);
 
 	/*
@@ -892,18 +983,18 @@ ips_proto_mq_handle_cts(struct ips_recvhdrq_event *rcv_ev)
 			ips_recvhdrq_event_payload(rcv_ev);
 		psmi_assert(paylen == 0 || payload);
 		PSM_LOG_EPM(OPCODE_LONG_CTS,PSM_LOG_EPM_RX,rcv_ev->ipsaddr->epaddr.epid,
-			    mq->ep->epid,"p_hdr->data[1].u32w1 %d",
-			    p_hdr->data[1].u32w1);
+			    mq->ep->epid,"p_hdr->data[1].u32w0 %d",
+			    p_hdr->data[1].u32w0);
 		proto->epaddr_stats.tids_grant_recv++;
 
-		psmi_assert(p_hdr->data[1].u32w0 > mq->hfi_thresh_rv);
+		psmi_assert(p_hdr->data[1].u32w1 > mq->hfi_thresh_rv);
 		psmi_assert(proto->protoexp != NULL);
 
 		/* ptl_req_ptr will be set to each tidsendc */
 		if (req->ptl_req_ptr == NULL) {
-			req->send_msglen = p_hdr->data[1].u32w0;
+			req->send_msglen = p_hdr->data[1].u32w1;
 		}
-		psmi_assert(req->send_msglen == p_hdr->data[1].u32w0);
+		psmi_assert(req->send_msglen == p_hdr->data[1].u32w1);
 
 		if (ips_tid_send_handle_tidreq(proto->protoexp,
 					       rcv_ev->ipsaddr, req, p_hdr->data[0],
@@ -911,7 +1002,7 @@ ips_proto_mq_handle_cts(struct ips_recvhdrq_event *rcv_ev)
 			proto->psmi_logevent_tid_send_reqs.next_warning = 0;
 	} else {
 		req->rts_reqidx_peer = p_hdr->data[0].u32w0; /* eager receive only */
-		req->send_msglen = p_hdr->data[1].u32w0;
+		req->send_msglen = p_hdr->data[1].u32w1;
 
 		if (req->send_msgoff >= req->send_msglen) {
 			/* already sent enough bytes, may truncate so using >= */
@@ -1028,7 +1119,7 @@ ips_proto_mq_handle_rts(struct ips_recvhdrq_event *rcv_ev)
 		req->ptl_req_ptr = (void *)msgctl;
 
 		msgctl->outoforder_count++;
-		mq_sq_append(&mq->outoforder_q, req);
+		mq_qq_append(&mq->outoforder_q, req);
 
 		ret = IPS_RECVHDRQ_BREAK;
 	} else {
@@ -1120,7 +1211,7 @@ ips_proto_mq_handle_tiny(struct ips_recvhdrq_event *rcv_ev)
 		req->ptl_req_ptr = (void *)msgctl;
 
 		msgctl->outoforder_count++;
-		mq_sq_append(&mq->outoforder_q, req);
+		mq_qq_append(&mq->outoforder_q, req);
 
 		ret = IPS_RECVHDRQ_BREAK;
 	} else {
@@ -1188,7 +1279,7 @@ ips_proto_mq_handle_short(struct ips_recvhdrq_event *rcv_ev)
 	int rc = psmi_mq_handle_envelope(mq,
 				(psm2_epaddr_t) &ipsaddr->msgctl->master_epaddr,
 				(psm2_mq_tag_t *) p_hdr->tag,
-				p_hdr->hdr_data.u32w1, 0,
+				p_hdr->hdr_data.u32w1, p_hdr->hdr_data.u32w0,
 				payload, paylen, msgorder, OPCODE_SHORT, &req);
 	if (unlikely(rc == MQ_RET_UNEXP_NO_RESOURCES)) {
 		uint32_t psn_mask = ((psm2_epaddr_t)ipsaddr)->proto->psn_mask;
@@ -1207,7 +1298,7 @@ ips_proto_mq_handle_short(struct ips_recvhdrq_event *rcv_ev)
 		req->ptl_req_ptr = (void *)msgctl;
 
 		msgctl->outoforder_count++;
-		mq_sq_append(&mq->outoforder_q, req);
+		mq_qq_append(&mq->outoforder_q, req);
 
 		ret = IPS_RECVHDRQ_BREAK;
 	} else {
@@ -1272,8 +1363,8 @@ ips_proto_mq_handle_eager(struct ips_recvhdrq_event *rcv_ev)
 		 * error is caught below.
 		 */
 		if (req) {
-			psmi_mq_handle_data(mq, req, p_hdr->data[1].u32w0,
-					    payload, paylen);
+			psmi_mq_handle_data(mq, req,
+				p_hdr->data[1].u32w0, payload, paylen);
 
 			if (msgorder == IPS_MSG_ORDER_FUTURE_RECV)
 				ret = IPS_RECVHDRQ_BREAK;
@@ -1333,7 +1424,7 @@ ips_proto_mq_handle_eager(struct ips_recvhdrq_event *rcv_ev)
 
 	if (unlikely(msgorder == IPS_MSG_ORDER_FUTURE_RECV)) {
 		msgctl->outoforder_count++;
-		mq_sq_append(&mq->outoforder_q, req);
+		mq_qq_append(&mq->outoforder_q, req);
 
 		ret = IPS_RECVHDRQ_BREAK;
 	} else {
@@ -1397,8 +1488,22 @@ ips_proto_mq_handle_data(struct ips_recvhdrq_event *rcv_ev)
 	if (!ips_proto_is_expected_or_nak((struct ips_recvhdrq_event *)rcv_ev))
 		return IPS_RECVHDRQ_CONTINUE;
 
-	req = psmi_mpool_find_obj_by_index(mq->rreq_pool, p_hdr->data[1].u32w1);
+	req = psmi_mpool_find_obj_by_index(mq->rreq_pool, p_hdr->data[0].u32w0);
 	psmi_assert(req != NULL);
+	psmi_assert(p_hdr->data[1].u32w1 == req->send_msglen);
+
+	/*
+	 * if a packet has very small offset, it must have unaligned data
+	 * attached in the packet header, and this must be the first packet
+	 * for that message.
+	 */
+	if (p_hdr->data[1].u32w0 < 4 && p_hdr->data[1].u32w0 > 0) {
+		psmi_assert(p_hdr->data[1].u32w0 == (req->send_msglen&0x3));
+		mq_copy_tiny((uint32_t *)req->buf,
+				(uint32_t *)&p_hdr->mdata,
+				p_hdr->data[1].u32w0);
+		req->send_msgoff += p_hdr->data[1].u32w0;
+	}
 
 	payload = ips_recvhdrq_event_payload(rcv_ev);
 	paylen = ips_recvhdrq_event_paylen(rcv_ev);

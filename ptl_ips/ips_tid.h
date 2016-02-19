@@ -145,4 +145,10 @@ PSMI_INLINE(int ips_tid_num_available(struct ips_tid *tidc))
 	return tidc->tid_ctrl->tid_num_avail;
 }
 
+/* Note that the caller is responsible for making sure that NIDLE is non-zero
+   before calling ips_tidcache_evict.  If NIDLE is 0 at the time of call,
+   ips_tidcache_evict is unstable.
+ */
+uint64_t ips_tidcache_evict(struct ips_tid *tidc, uint64_t length);
+
 #endif /* _IPS_TID_H */

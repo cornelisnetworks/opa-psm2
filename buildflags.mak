@@ -48,7 +48,7 @@
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-#  Copyright (c) 2003-2014 Intel Corporation. All rights reserved.
+#  Copyright (c) 2003-2015 Intel Corporation. All rights reserved.
 #
 
 # set top_srcdir and include this file
@@ -124,6 +124,16 @@ ifneq (icc,${CC})
     BASECFLAGS += -mavx512f
   endif
 endif
+endif
+
+#
+# test if compiler supports SSE4.2 (needed for crc32 instruction)
+#
+RET := $(shell echo "int main() {}" | $${CC} -msse4.2 -E -xc - > /dev/null 2>&1; echo $$?)
+ifneq (1,${RET})
+  BASECFLAGS += -msse4.2
+else
+  $(error SSE4.2 compiler support required )
 endif
 
 ifneq (,${PSM_DEBUG})

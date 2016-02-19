@@ -1210,7 +1210,7 @@ fail:
 
 psm2_error_t
 ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
-		     const psm2_epaddr_t array_of_epaddr[],
+		     psm2_epaddr_t array_of_epaddr[],
 		     const int array_of_epaddr_mask[],
 		     psm2_error_t array_of_errors[], uint64_t timeout_in)
 {
@@ -1437,6 +1437,7 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 		 * mark our connect-to status as being "none". */
 		if (ipsaddr->cstate_from == CSTATE_NONE) {
 			ips_free_epaddr(array_of_epaddr[i]);
+			array_of_epaddr[i] = NULL;
 		} else
 			ipsaddr->cstate_to = CSTATE_NONE;
 	}

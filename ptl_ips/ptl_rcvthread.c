@@ -370,6 +370,9 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 				 * wrong. */
 				if (ips_recvhdrq_isempty(recvq))
 					continue;
+				if(recvq->proto->flags & IPS_PROTO_FLAG_CCA_PRESCAN) {
+					ips_recvhdrq_scan_cca(recvq);
+				}
 				if (!ips_recvhdrq_trylock(recvq))
 					continue;
 				err = ips_recvhdrq_progress(recvq);
@@ -383,6 +386,9 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 				 * assume to have received an hfi interrupt and service
 				 * only hfi.
 				 */
+				if(recvq->proto->flags & IPS_PROTO_FLAG_CCA_PRESCAN ) {
+						ips_recvhdrq_scan_cca(recvq);
+				}
 				err = psmi_poll_internal(ep,
 							 ret ==
 							 0 ? PSMI_TRUE :
@@ -400,7 +406,7 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 			}
 		}
 
-		if (ret == 0) {	/* change timeout only on timed out poll */
+		if (ret == 0) { /* change timeout only on timed out poll */
 			rcvc->pollcnt_to++;
 			next_timeout = rcvthread_next_timeout(rcvc);
 		}

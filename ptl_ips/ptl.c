@@ -604,6 +604,10 @@ psm2_error_t ips_ptl_poll(ptl_t *ptl, int _ignored)
 	if (!ips_recvhdrq_isempty(&ptl->recvq)) {
 		if (do_lock && !ips_recvhdrq_trylock(&ptl->recvq))
 			return err;
+		if (ptl->recvq.proto->flags & IPS_PROTO_FLAG_CCA_PRESCAN) {
+			ips_recvhdrq_scan_cca(&ptl->recvq);
+		}
+
 		err = ips_recvhdrq_progress(&ptl->recvq);
 		if (do_lock)
 			ips_recvhdrq_unlock(&ptl->recvq);
@@ -670,6 +674,10 @@ psm2_error_t ips_ptl_shared_poll(ptl_t *ptl, int _ignored)
 			 * re-ordering of incoming packets (since packets from
 			 * hardware context will be processed immediately). */
 			if_pt(ips_recvhdrq_isempty(&recvshc->recvq)) {
+				if (ptl->recvq.proto->flags & IPS_PROTO_FLAG_CCA_PRESCAN) {
+					ips_recvhdrq_scan_cca(&ptl->recvq);
+				}
+
 				err = ips_recvhdrq_progress(&ptl->recvq);
 			}
 			ips_unlock_shared_context(recvshc);
@@ -680,6 +688,10 @@ psm2_error_t ips_ptl_shared_poll(ptl_t *ptl, int _ignored)
 	    return err;
 
 	if (!ips_recvhdrq_isempty(&recvshc->recvq)) {
+		if (recvshc->recvq.proto->flags & IPS_PROTO_FLAG_CCA_PRESCAN) {
+			ips_recvhdrq_scan_cca(&recvshc->recvq);
+		}
+
 		err2 = ips_recvhdrq_progress(&recvshc->recvq);
 		if (err2 != PSM2_OK_NO_PROGRESS) {
 			err = err2;
@@ -890,7 +902,7 @@ fail:
 
 psm2_error_t
 ips_ptl_disconnect(ptl_t *ptl, int force, int numep,
-		   const psm2_epaddr_t array_of_epaddr[],
+		   psm2_epaddr_t array_of_epaddr[],
 		   const int array_of_epaddr_mask[],
 		   psm2_error_t array_of_errors[], uint64_t timeout_in)
 {

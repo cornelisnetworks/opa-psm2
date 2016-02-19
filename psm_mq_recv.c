@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
 #include "psm_mq_internal.h"
@@ -77,6 +77,7 @@ void psmi_mq_handle_rts_complete(psm2_mq_req_t req)
 	/* Stats on rendez-vous messages */
 	psmi_mq_stats_rts_account(req);
 	req->state = MQ_STATE_COMPLETE;
+	ips_barrier();
 	mq_qq_append(&mq->completed_q, req);
 #ifdef PSM_VALGRIND
 	if (MQE_TYPE_IS_RECV(req->type))
@@ -150,6 +151,7 @@ psmi_mq_handle_data(psm2_mq_t mq, psm2_mq_req_t req,
 
 		if (req->state == MQ_STATE_MATCHED) {
 			req->state = MQ_STATE_COMPLETE;
+			ips_barrier();
 			mq_qq_append(&mq->completed_q, req);
 		} else {	/* MQ_STATE_UNEXP */
 			req->state = MQ_STATE_COMPLETE;
@@ -159,6 +161,93 @@ psmi_mq_handle_data(psm2_mq_t mq, psm2_mq_req_t req,
 	return rc;
 }
 
+/* in case the compiler can't figure out how to preserve the hashed values
+   between mq_req_match() and mq_add_to_unexpected_hashes() ... */
+static unsigned hashvals[NUM_HASH_CONFIGS];
+
+static
+void mq_add_to_unexpected_hashes(psm2_mq_t mq, psm2_mq_req_t req)
+{
+	int table;
+	mq_qq_append(&mq->unexpected_q, req);
+	req->q[PSM2_ANYTAG_ANYSRC] = &mq->unexpected_q;
+	mq->unexpected_list_len++;
+	if_pt (mq->nohash_fastpath) {
+		if_pf (mq->unexpected_list_len >= HASH_THRESHOLD)
+			psmi_mq_fastpath_disable(mq);
+		return;
+	}
+
+	for (table = PSM2_TAG_SRC; table < PSM2_ANYTAG_ANYSRC; table++)
+		mq_qq_append_which(mq->unexpected_htab,
+				   table, hashvals[table], req);
+	mq->unexpected_hash_len++;
+}
+
+
+psm2_mq_req_t
+mq_list_scan(struct mqq *q, psm2_epaddr_t src, psm2_mq_tag_t *tag, int which, uint64_t *time_threshold)
+{
+	psm2_mq_req_t *curp, cur;
+
+	for (curp = &q->first;
+	     ((cur = *curp) != NULL) && (cur->timestamp < *time_threshold);
+	     curp = &cur->next[which]) {
+		if ((cur->peer == PSM2_MQ_ANY_ADDR || src == cur->peer) &&
+		    !((tag->tag[0] ^ cur->tag.tag[0]) & cur->tagsel.tag[0]) &&
+		    !((tag->tag[1] ^ cur->tag.tag[1]) & cur->tagsel.tag[1]) &&
+		    !((tag->tag[2] ^ cur->tag.tag[2]) & cur->tagsel.tag[2])) {
+			*time_threshold = cur->timestamp;
+			return cur;
+		}
+	}
+	return NULL;
+}
+
+psm2_mq_req_t
+mq_req_match(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag, int remove)
+{
+	psm2_mq_req_t match[4];
+	int table;
+	uint64_t best_ts = -1;
+
+	if (mq->nohash_fastpath) {
+		table = PSM2_ANYTAG_ANYSRC;
+		match[table] =
+			mq_list_scan(&mq->expected_q,
+				     src, tag, PSM2_ANYTAG_ANYSRC, &best_ts);
+		if (match[table] && remove) {
+			mq->expected_list_len--;
+			mq_qq_remove_which(match[table], table);
+		}
+		return match[table];
+	}
+
+	hashvals[PSM2_TAG_SRC] = hash_64(*(uint64_t *) tag->tag) % NUM_HASH_BUCKETS;
+	hashvals[PSM2_TAG_ANYSRC] = hash_32(tag->tag[0]) % NUM_HASH_BUCKETS;
+	hashvals[PSM2_ANYTAG_SRC] = hash_32(tag->tag[1]) % NUM_HASH_BUCKETS;
+
+	for (table = PSM2_TAG_SRC; table < PSM2_ANYTAG_ANYSRC; table++)
+		match[table] =
+			mq_list_scan(&mq->expected_htab[table][hashvals[table]],
+				     src, tag, table, &best_ts);
+	table = PSM2_ANYTAG_ANYSRC;
+	match[table] = mq_list_scan(&mq->expected_q, src, tag, table, &best_ts);
+
+	table = min_timestamp_4(match);
+	if (table == -1)
+		return NULL;
+
+	if (remove) {
+		if_pt (table == PSM2_ANYTAG_ANYSRC)
+			mq->expected_list_len--;
+		else
+			mq->expected_hash_len--;
+		mq_qq_remove_which(match[table], table);
+		psmi_mq_fastpath_try_reenable(mq);
+	}
+	return match[table];
+}
 /*
  * This handles the rendezvous MPI envelopes, the packet might have the whole
  * message payload, or zero payload.
@@ -174,7 +263,7 @@ psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 
 	PSMI_PLOCK_ASSERT();
 
-	if (msgorder && (req = mq_req_match(&(mq->expected_q), src, tag, 1))) {
+	if (msgorder && (req = mq_req_match(mq, src, tag, 1))) {
 		/* we have a match, no need to callback */
 		msglen = mq_set_msglen(req, req->buf_len, send_msglen);
 		/* reset send_msglen because sender only sends this many */
@@ -183,7 +272,7 @@ psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		req->peer = src;
 		req->tag = *tag;
 
-		paylen = (paylen < msglen) ? paylen : msglen;
+		if (paylen > msglen) paylen = msglen;
 		if (paylen) {
 			psmi_mq_mtucpy(req->buf, payload, paylen);
 		}
@@ -213,6 +302,7 @@ psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		req->peer = src;
 		req->tag = *tag;
 		req->rts_callback = cb;
+		if (paylen > send_msglen) paylen = send_msglen;
 		if (paylen) {
 			req->buf = psmi_sysbuf_alloc(paylen);
 			mq->stats.rx_sysbuf_num++;
@@ -222,7 +312,7 @@ psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		req->recv_msgoff = req->send_msgoff = paylen;
 
 		if (msgorder) {
-			mq_sq_append(&mq->unexpected_q, req);
+			mq_add_to_unexpected_hashes(mq, req);
 		}
 		/* caller will handle out of order case */
 		*req_o = req;	/* no match, will callback */
@@ -257,7 +347,7 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 	psm2_mq_req_t req;
 	uint32_t msglen;
 
-	if (msgorder && (req = mq_req_match(&(mq->expected_q), src, tag, 1))) {
+	if (msgorder && (req = mq_req_match(mq, src, tag, 1))) {
 		/* we have a match */
 		psmi_assert(MQE_TYPE_IS_RECV(req->type));
 		req->peer = src;
@@ -274,17 +364,31 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		case MQ_MSG_TINY:
 			PSM_VALGRIND_DEFINE_MQ_RECV(req->buf, req->buf_len,
 						    msglen);
+			/* mq_copy_tiny() can handle zero byte */
 			mq_copy_tiny((uint32_t *) req->buf,
 				     (uint32_t *) payload, msglen);
 			req->state = MQ_STATE_COMPLETE;
+			ips_barrier();
 			mq_qq_append(&mq->completed_q, req);
 			break;
 
 		case MQ_MSG_SHORT:	/* message fits in 1 payload */
 			PSM_VALGRIND_DEFINE_MQ_RECV(req->buf, req->buf_len,
 						    msglen);
-			psmi_mq_mtucpy(req->buf, payload, msglen);
+			if (msglen <= paylen) {
+				psmi_mq_mtucpy(req->buf, payload, msglen);
+			} else {
+				psmi_assert((msglen & ~0x3) == paylen);
+				psmi_mq_mtucpy(req->buf, payload, paylen);
+				/*
+				 * there are nonDW bytes attached in header,
+				 * copy after the DW payload.
+				 */
+				mq_copy_tiny((uint32_t *)(req->buf+paylen),
+					(uint32_t *)&offset, msglen & 0x3);
+			}
 			req->state = MQ_STATE_COMPLETE;
+			ips_barrier();
 			mq_qq_append(&mq->completed_q, req);
 			break;
 
@@ -370,7 +474,18 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		req->buf = psmi_sysbuf_alloc(msglen);
 		mq->stats.rx_sysbuf_num++;
 		mq->stats.rx_sysbuf_bytes += paylen;
-		psmi_mq_mtucpy(req->buf, payload, msglen);
+		if (msglen <= paylen) {
+			psmi_mq_mtucpy(req->buf, payload, msglen);
+		} else {
+			psmi_assert((msglen & ~0x3) == paylen);
+			psmi_mq_mtucpy(req->buf, payload, paylen);
+			/*
+			 * there are nonDW bytes attached in header,
+			 * copy after the DW payload.
+			 */
+			mq_copy_tiny((uint32_t *)(req->buf+paylen),
+				(uint32_t *)&offset, msglen & 0x3);
+		}
 		req->state = MQ_STATE_COMPLETE;
 		break;
 
@@ -398,7 +513,7 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 	mq->stats.rx_sys_num++;
 
 	if (msgorder) {
-		mq_sq_append(&mq->unexpected_q, req);
+		mq_add_to_unexpected_hashes(mq, req);
 	}
 	/* caller will handle out of order case */
 	*req_o = req;		/* no match, will callback */
@@ -410,9 +525,9 @@ int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t ureq)
 	psm2_mq_req_t ereq;
 	uint32_t msglen;
 
-	ereq = mq_req_match(&(mq->expected_q), ureq->peer, &ureq->tag, 1);
+	ereq = mq_req_match(mq, ureq->peer, &ureq->tag, 1);
 	if (ereq == NULL) {
-		mq_sq_append(&mq->unexpected_q, ureq);
+		mq_add_to_unexpected_hashes(mq, ureq);
 		return 0;
 	}
 
@@ -429,6 +544,7 @@ int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t ureq)
 			psmi_sysbuf_free(ureq->buf);
 		}
 		ereq->state = MQ_STATE_COMPLETE;
+		ips_barrier();
 		mq_qq_append(&mq->completed_q, ereq);
 		break;
 	case MQ_STATE_UNEXP:	/* not done yet */

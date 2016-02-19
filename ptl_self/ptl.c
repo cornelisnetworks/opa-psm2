@@ -290,7 +290,7 @@ fail:
 static
 psm2_error_t
 self_disconnect(ptl_t *ptl, int numep,
-		const psm2_epaddr_t array_of_epaddr[],
+		psm2_epaddr_t array_of_epaddr[],
 		int array_of_epaddr_mask[], int force, uint64_t timeout_ns)
 {
 	int i;

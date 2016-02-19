@@ -161,36 +161,11 @@ retry:
 			(uint64_t) start, &length,
 			(uint64_t) tidc->tid_array, &tidcnt) < 0) {
 		/* if driver reaches lockable memory limit */
-		if (errno == EDQUOT && NIDLE) {
-			/*
-			 * try to free the required
-			 * pages from idle queue tids
-			 */
-			tidlen = 0;
-			idx = IHEAD;
-			do {
-				idx = IPREV(idx);
-				psmi_assert(idx != 0);
-				tidc->tid_array[tidcnt] =
-					p_map->root[idx].tidinfo;
-				tidcnt++;
+		if (errno == ENOMEM && NIDLE) {
+			uint64_t lengthEvicted = ips_tidcache_evict(tidc,length);
 
-				tidlen += IPS_TIDINFO_GET_LENGTH
-					(p_map->root[idx].tidinfo)<<12;
-			} while (tidcnt < NIDLE && tidlen < length);
-
-			if (tidlen >= length) {
-				/*
-				 * free the selected tids.
-				 */
-				err = ips_tidcache_remove(tidc, tidcnt);
-				if (err)
-					return err;
-
+			if (lengthEvicted >= length)
 				goto retry;
-			}
-
-			/* not free enough tids, let it fall down */
 		}
 
 		/* Unable to pin pages? retry later */
@@ -584,4 +559,39 @@ ips_tidcache_cleanup(struct ips_tid *tidc)
 	psmi_free(tidc->tid_cachemap.root);
 
 	return PSM2_OK;
+}
+
+
+/* Note that the caller is responsible for making sure that NIDLE is non-zero
+   before calling ips_tidcache_evict.  If NIDLE is 0 at the time of call,
+   ips_tidcache_evict is unstable.
+ */
+uint64_t
+ips_tidcache_evict(struct ips_tid *tidc,uint64_t length)
+{
+	cl_qmap_t *p_map = &tidc->tid_cachemap;
+	uint32_t idx = IHEAD, tidcnt = 0, tidlen = 0;
+	/*
+	 * try to free the required
+	 * pages from idle queue tids
+	 */
+
+	do {
+		idx = IPREV(idx);
+		psmi_assert(idx != 0);
+		tidc->tid_array[tidcnt] =
+			p_map->root[idx].tidinfo;
+		tidcnt++;
+
+		tidlen += IPS_TIDINFO_GET_LENGTH
+			(p_map->root[idx].tidinfo)<<12;
+	} while (tidcnt < NIDLE && tidlen < length);
+
+	/*
+	 * free the selected tids on successfully finding some:.
+	 */
+	if (tidcnt > 0 && ips_tidcache_remove(tidc, tidcnt))
+		return 0;
+
+	return tidlen;
 }

@@ -105,6 +105,7 @@ struct ips_scbctrl {
 	/* Immediate data for send buffers */
 	uint32_t scb_imm_size;
 	void *scb_imm_buf;
+	psmi_timer *timers;	/* ack/send timers */
 
 	/*
 	 * Send buffers (or bounce buffers) to keep user data if we need to
@@ -137,6 +138,9 @@ struct ips_scb {
 	uint64_t ack_timeout;	/* in cycles  */
 	uint64_t abs_timeout;	/* in cycles  */
 
+	psmi_timer *timer_send;	/* for sending packets */
+	psmi_timer *timer_ack;	/* for acking packets */
+
 	/* Used when composing packet */
 	psmi_seqnum_t seq_num;
 	uint32_t cksum[2];
@@ -157,7 +161,6 @@ struct ips_scb {
 	struct ips_tid_send_desc *tidsendc;
 	uint32_t *tsess;
 	uint16_t tsess_length;
-	uint16_t padcnt;
 
 	struct ips_scbctrl *scbc;
 	void *imm_payload;

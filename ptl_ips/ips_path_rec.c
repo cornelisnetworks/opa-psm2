@@ -138,8 +138,11 @@ static psm2_error_t ips_gen_cct_table(struct ips_proto *proto)
 		goto fail;
 	}
 
-	/* The first table entry is always 0 i.e. no IPD delay */
-	cct_table[0] = 0;
+	if (proto->ccti_size)
+	{
+		/* The first table entry is always 0 i.e. no IPD delay */
+		cct_table[0] = 0;
+	}
 
 	/* Generate the remaining CCT table entries */
 	for (ipdidx = 1; ipdidx < proto->ccti_size; ipdidx += 4, ipdval++)
@@ -303,11 +306,13 @@ ips_none_get_path_rec(struct ips_proto *proto,
 			_HFI_CCADBG("No CCA for sl %d, disable CCA\n",
 				    path_rec->pr_sl);
 			proto->flags &= ~IPS_PROTO_FLAG_CCA;
+			proto->flags &= ~IPS_PROTO_FLAG_CCA_PRESCAN;
 		}
 		if (!(proto->ep->context.runtime_flags &
 					HFI1_CAP_STATIC_RATE_CTRL)) {
 			_HFI_CCADBG("No Static-Rate-Control, disable CCA\n");
 			proto->flags &= ~IPS_PROTO_FLAG_CCA;
+			proto->flags &= ~IPS_PROTO_FLAG_CCA_PRESCAN;
 		}
 
 		path_rec->proto = proto;
@@ -606,6 +611,7 @@ psm2_error_t ips_ibta_init(struct ips_proto *proto)
 	psm2_error_t err = PSM2_OK;
 	union psmi_envvar_val psm_path_policy;
 	union psmi_envvar_val disable_cca;
+	union psmi_envvar_val cca_prescan;
 
 	/* Get the path selection policy */
 	psmi_getenv("PSM2_PATH_SELECTION",
@@ -652,6 +658,14 @@ psm2_error_t ips_ibta_init(struct ips_proto *proto)
 		    || getenv("PSM2_CCTI_TABLE_SIZE")) {
 			goto disablecca;
 		}
+
+		psmi_getenv("PSM2_CCA_PRESCAN",
+                    "Enable Congestion Control Prescanning (disabled by default) ",
+                    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
+                    (union psmi_envvar_val)0, &cca_prescan);
+
+		if (cca_prescan.e_uint)
+			proto->flags |= IPS_PROTO_FLAG_CCA_PRESCAN;
 
 /*
  * Check qib driver CCA setting, and try to use it if available.
@@ -701,6 +715,7 @@ psm2_error_t ips_ibta_init(struct ips_proto *proto)
  */
 disablecca:
 		proto->flags &= ~IPS_PROTO_FLAG_CCA;
+		proto->flags &= ~IPS_PROTO_FLAG_CCA_PRESCAN;
 	}
 
 finishcca:

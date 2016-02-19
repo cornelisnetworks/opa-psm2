@@ -177,11 +177,11 @@ ips_tid_init(const psmi_context_t *context, struct ips_protoexp *protoexp,
 
 psm2_error_t ips_tid_fini(struct ips_tid *tidc)
 {
-	if (!tidc->context->tid_ctrl)
-		psmi_free(tidc->tid_ctrl);
-
 	if (tidc->tid_array)
 		ips_tidcache_cleanup(tidc);
+
+	if (!tidc->context->tid_ctrl)
+		psmi_free(tidc->tid_ctrl);
 
 	return PSM2_OK;
 }

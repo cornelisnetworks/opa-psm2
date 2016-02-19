@@ -169,8 +169,6 @@ psm2_error_t __psm2_init(int *major, int *minor)
 		    (union psmi_envvar_val)hfi_debug, &env_tmask);
 	hfi_debug = (long)env_tmask.e_ulong;
 
-	_HFI_VDBG("PSM2 version: %d.%d, %s\n",PSM2_VERNO_MAJOR,PSM2_VERNO_MINOR, psmi_hfi_revision);
-
 	/* The "real thing" is done in hfi_proto.c as a constructor function, but
 	 * we getenv it here to report what we're doing with the setting */
 	{
@@ -192,9 +190,10 @@ psm2_error_t __psm2_init(int *major, int *minor)
 
 	if (getenv("PSM2_IDENTIFY")) {
 		Dl_info info_psm, info_hfi;
-		_HFI_INFO("%s from %s:%s\n", psmi_hfi_revision,
+		_HFI_INFO("PSM2: %s version: %d.%d, from %s:%s\n", psmi_hfi_revision,
+			  PSM2_VERNO_MAJOR,PSM2_VERNO_MINOR,
 			  dladdr(psm2_init, &info_psm) ? info_psm.dli_fname :
-			  "libpsm not available",
+			  "libpsm2 not available",
 			  dladdr(hfi_userinit, &info_hfi) ? info_hfi.dli_fname :
 			  "libhfi not available");
 	}

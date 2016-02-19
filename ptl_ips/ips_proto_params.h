@@ -200,6 +200,7 @@
 
 /* IBTA CCA Protocol support */
 #define IPS_PROTO_FLAG_CCA 0x2000
+#define IPS_PROTO_FLAG_CCA_PRESCAN 0x4000	/* Enable RAPID CCA prescanning */
 
 #define IPS_PROTOEXP_FLAG_ENABLED	0x01	/* default */
 #define IPS_PROTOEXP_FLAG_HDR_SUPP      0x02	/* Header suppression enabled */

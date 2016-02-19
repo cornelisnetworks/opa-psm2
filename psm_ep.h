@@ -172,12 +172,7 @@ struct psm2_ep {
 
 struct mqq {
 	psm2_mq_req_t first;
-	psm2_mq_req_t *lastp;
-};
-
-struct mqsq {
-	psm2_mq_req_t first;
-	psm2_mq_req_t *lastp;
+	psm2_mq_req_t last;
 };
 
 typedef

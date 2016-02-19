@@ -51,11 +51,19 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
 
 #ifndef MQ_INT_H
 #define MQ_INT_H
 
+/* Ugh. smmintrin.h eventually includes mm_malloc.h, which calls malloc */
+#ifdef malloc
+#undef malloc
+#endif
+#ifdef free
+#undef free
+#endif
+#include <smmintrin.h>
 #include "psm_user.h"
 
 #if 0
@@ -65,29 +73,48 @@ typedef psm2_error_t(*psm_mq_unexpected_callback_fn_t)
 	 uint32_t paylen);
 #endif
 
+#define NUM_HASH_BUCKETS 64
+#define HASH_THRESHOLD 65
+#define NUM_HASH_CONFIGS 3
+#define NUM_MQ_SUBLISTS (NUM_HASH_CONFIGS + 1)
+#define REMOVE_ENTRY 1
+
+enum psm2_mq_tag_pattern {
+	PSM2_TAG_SRC = 0,
+	PSM2_TAG_ANYSRC,
+	PSM2_ANYTAG_SRC,
+	PSM2_ANYTAG_ANYSRC,
+};
+
 struct psm2_mq {
 	psm2_ep_t ep;		/**> ep back pointer */
 	mpool_t sreq_pool;
 	mpool_t rreq_pool;
 
-	/*psm_mq_unexpected_callback_fn_t unexpected_callback; */
-	struct mqsq expected_q;	/**> Preposted (expected) queue */
-	struct mqsq unexpected_q;
-				/**> Unexpected queue */
-	struct mqq completed_q;	/**> Completed queue */
+	struct mqq unexpected_htab[NUM_HASH_CONFIGS][NUM_HASH_BUCKETS];
+	struct mqq expected_htab[NUM_HASH_CONFIGS][NUM_HASH_BUCKETS];
 
-	struct mqsq outoforder_q;
-				/**> OutofOrder queue */
-	 STAILQ_HEAD(, psm2_mq_req) eager_q;
-				       /**> eager request queue */
+	/*psm_mq_unexpected_callback_fn_t unexpected_callback; */
+	struct mqq expected_q;		/**> Preposted (expected) queue */
+	struct mqq unexpected_q;	/**> Unexpected queue */
+	struct mqq completed_q;		/**> Completed queue */
+
+	struct mqq outoforder_q;	/**> OutofOrder queue */
+	STAILQ_HEAD(, psm2_mq_req) eager_q; /**> eager request queue */
 
 	uint32_t hfi_thresh_rv;
 	uint32_t shm_thresh_rv;
 	uint32_t hfi_window_rv;
 	int memmode;
 
+	uint64_t timestamp;
 	psm2_mq_stats_t stats;	/**> MQ stats, accumulated by each PTL */
 	int print_stats;
+	int nohash_fastpath;
+	unsigned unexpected_hash_len;
+	unsigned unexpected_list_len;
+	unsigned expected_hash_len;
+	unsigned expected_list_len;
 };
 
 #define MQ_HFI_THRESH_TINY	8
@@ -151,10 +178,12 @@ typedef psm2_error_t(*mq_testwait_callback_fn_t) (psm2_mq_req_t *req);
 /* receive mq_req, the default */
 struct psm2_mq_req {
 	struct {
-		psm2_mq_req_t next;
-		psm2_mq_req_t *pprev;	/* used in completion queue */
-        STAILQ_ENTRY(psm2_mq_req) nextq;	/* used for eager only */
+		psm2_mq_req_t next[NUM_MQ_SUBLISTS];
+		psm2_mq_req_t prev[NUM_MQ_SUBLISTS];
+		STAILQ_ENTRY(psm2_mq_req) nextq; /* used for eager only */
 	};
+	struct mqq *q[NUM_MQ_SUBLISTS];
+	uint64_t timestamp;
 	uint32_t state;
 	uint32_t type;
 	psm2_mq_t mq;
@@ -200,6 +229,19 @@ struct psm2_mq_req {
 		uint8_t ptl_req_data[0];	/* when used by ptl for "inline" data */
 	};
 };
+
+PSMI_ALWAYS_INLINE(
+unsigned
+hash_64(uint64_t a))
+{
+	return _mm_crc32_u64(0, a);
+}
+PSMI_ALWAYS_INLINE(
+unsigned
+hash_32(uint32_t a))
+{
+	return _mm_crc32_u32(0, a);
+}
 
 void psmi_mq_mtucpy(void *vdest, const void *vsrc, uint32_t nchars);
 
@@ -302,42 +344,89 @@ mq_set_msglen(psm2_mq_req_t req, uint32_t recvlen, uint32_t sendlen))
 	}
 }
 
+PSMI_ALWAYS_INLINE(
+int
+min_timestamp_4(psm2_mq_req_t *match))
+{
+	uint64_t oldest = -1;
+	int which = -1, i;
+	for (i = 0; i < 4; i++) {
+		if (match[i] && (match[i]->timestamp < oldest)) {
+			oldest = match[i]->timestamp;
+			which = i;
+		}
+	}
+	return which;
+}
+
 #ifndef PSM_DEBUG
 /*! Append to Queue */
 PSMI_ALWAYS_INLINE(void mq_qq_append(struct mqq *q, psm2_mq_req_t req))
 {
-	req->next = NULL;
-	req->pprev = q->lastp;
-	*(q->lastp) = req;
-	q->lastp = &req->next;
+	req->next[PSM2_ANYTAG_ANYSRC] = NULL;
+	req->prev[PSM2_ANYTAG_ANYSRC] = q->last;
+	if (q->last)
+		q->last->next[PSM2_ANYTAG_ANYSRC] = req;
+	else
+		q->first = req;
+	q->last = req;
+	req->q[PSM2_ANYTAG_ANYSRC] = q;
 }
 #else
-#define mq_qq_append(q, req)					\
-	do {							\
-		(req)->next = NULL;				\
-			(req)->pprev = (q)->lastp;		\
-			*((q)->lastp) = (req);			\
-			(q)->lastp = &(req)->next;		\
-			if (q == &(req)->mq->completed_q)	\
-				_HFI_VDBG("Moving (req)=%p to completed queue on %s, %d\n",	\
-					(req), __FILE__, __LINE__);	\
+#define mq_qq_append(qq, req)						\
+	do {								\
+		(req)->next[PSM2_ANYTAG_ANYSRC] = NULL;			\
+		(req)->prev[PSM2_ANYTAG_ANYSRC] = (qq)->last;		\
+		if ((qq)->last)						\
+			(qq)->last->next[PSM2_ANYTAG_ANYSRC] = (req);	\
+		else							\
+			(qq)->first = (req);				\
+		(qq)->last = (req);					\
+		(req)->q[PSM2_ANYTAG_ANYSRC] = (qq);			\
+		if (qq == &(req)->mq->completed_q)			\
+			_HFI_VDBG("Moving (req)=%p to completed queue on %s, %d\n", \
+				  (req), __FILE__, __LINE__);		\
 	} while (0)
 #endif
-
-PSMI_ALWAYS_INLINE(void mq_sq_append(struct mqsq *q, psm2_mq_req_t req))
+PSMI_ALWAYS_INLINE(
+void mq_qq_append_which(struct mqq q[NUM_HASH_CONFIGS][NUM_HASH_BUCKETS],
+			int table, int bucket, psm2_mq_req_t req))
 {
-	req->next = NULL;
-	*(q->lastp) = req;
-	q->lastp = &req->next;
+	req->next[table] = NULL;
+	req->prev[table] = q[table][bucket].last;
+	if (q[table][bucket].last)
+		q[table][bucket].last->next[table] = req;
+	else
+		q[table][bucket].first = req;
+	q[table][bucket].last = req;
+	req->q[table] = &q[table][bucket];
 }
-
 PSMI_ALWAYS_INLINE(void mq_qq_remove(struct mqq *q, psm2_mq_req_t req))
 {
-	if (req->next != NULL)
-		req->next->pprev = req->pprev;
+	if (req->next[PSM2_ANYTAG_ANYSRC] != NULL)
+		req->next[PSM2_ANYTAG_ANYSRC]->prev[PSM2_ANYTAG_ANYSRC] =
+			req->prev[PSM2_ANYTAG_ANYSRC];
 	else
-		q->lastp = req->pprev;
-	*(req->pprev) = req->next;
+		q->last = req->prev[PSM2_ANYTAG_ANYSRC];
+	if (req->prev[PSM2_ANYTAG_ANYSRC])
+		req->prev[PSM2_ANYTAG_ANYSRC]->next[PSM2_ANYTAG_ANYSRC] =
+			req->next[PSM2_ANYTAG_ANYSRC];
+	else
+		q->first = req->next[PSM2_ANYTAG_ANYSRC];
+}
+PSMI_ALWAYS_INLINE(void mq_qq_remove_which(psm2_mq_req_t req, int table))
+{
+	struct mqq *q = req->q[table];
+
+	req->q[table] = NULL;
+	if (req->next[table] != NULL)
+		req->next[table]->prev[table] = req->prev[table];
+	else
+		q->last = req->prev[table];
+	if (req->prev[table])
+		req->prev[table]->next[table] = req->next[table];
+	else
+		q->first = req->next[table];
 }
 
 psm2_error_t psmi_mq_req_init(psm2_mq_t mq);
@@ -374,53 +463,20 @@ int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t req);
 
 void psmi_mq_stats_register(psm2_mq_t mq, mpspawn_stats_add_fn add_fn);
 
-/*! @brief Try to match against an mqsq using a tag only
- *
- * @param[in] q Match Queue
- * @param[in] src Source (sender) epaddr, may NOT be PSM2_MQ_ANY_ADDR.
- * @param[in] tag Input Tag
- * @param[in] remove Non-zero to remove the req from the queue
- *
- * @returns NULL if no match or an mq request if there is a match
- */
+void psmi_mq_fastpath_disable(psm2_mq_t mq);
+void psmi_mq_fastpath_try_reenable(psm2_mq_t mq);
+
 PSMI_ALWAYS_INLINE(
 psm2_mq_req_t
-mq_req_match(struct mqsq *q, psm2_epaddr_t src, psm2_mq_tag_t *tag, int remove))
+mq_ooo_match(struct mqq *q, void *msgctl, uint16_t msg_seqnum))
 {
 	psm2_mq_req_t *curp;
 	psm2_mq_req_t cur;
 
-	psmi_assert(src != PSM2_MQ_ANY_ADDR);
-	for (curp = &q->first; (cur = *curp) != NULL; curp = &cur->next) {
-		if ((cur->peer == PSM2_MQ_ANY_ADDR || src == cur->peer) &&
-		    !((tag->tag[0] ^ cur->tag.tag[0]) & cur->tagsel.tag[0]) &&
-		    !((tag->tag[1] ^ cur->tag.tag[1]) & cur->tagsel.tag[1]) &&
-		    !((tag->tag[2] ^ cur->tag.tag[2]) & cur->tagsel.tag[2])) {
-			/* match! */
-			if (remove) {
-				if ((*curp = cur->next) == NULL) /* fix tail */
-					q->lastp = curp;
-				cur->next = NULL;
-			}
-			return cur;
-		}
-	}
-	return NULL; /* no match */
-}
-
-PSMI_ALWAYS_INLINE(
-psm2_mq_req_t
-mq_ooo_match(struct mqsq *q, void *msgctl, uint16_t msg_seqnum))
-{
-	psm2_mq_req_t *curp;
-	psm2_mq_req_t cur;
-
-	for (curp = &q->first; (cur = *curp) != NULL; curp = &cur->next) {
+	for (curp = &q->first; (cur = *curp) != NULL; curp = &cur->next[PSM2_ANYTAG_ANYSRC]) {
 		if (cur->ptl_req_ptr == msgctl && cur->msg_seqnum == msg_seqnum) {
 			/* match! */
-			if ((*curp = cur->next) == NULL)	/* fix tail */
-				q->lastp = curp;
-			cur->next = NULL;
+			mq_qq_remove(q, cur);
 			return cur;
 		}
 	}

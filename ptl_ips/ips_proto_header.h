@@ -141,10 +141,10 @@ struct ips_message_header {
 
 		/* for expected tid packet only */
 		struct {
-			ptl_arg_t exp_sdescid;  /* sender descriptor id */
-			__u16	  exp_rdescid_genc; /* tidrecvc gen count */
 			__u8	  exp_ustart[3]; /* unaligned start bytes */
 			__u8	  exp_uend[3];   /* unaligned end bytes */
+			__u16	  exp_rdescid_genc; /* tidrecvc gen count */
+			ptl_arg_t exp_sdescid;  /* sender descriptor id */
 			__u32     exp_cksum;	/* optional checksum */
 			__u32     exp_offset;	/* packet offset */
 		};

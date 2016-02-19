@@ -135,7 +135,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 
 	/* See if user specifies a lower MTU to use */
 	if (!psmi_getenv
-	    ("PSM_MTU", "MTU specified by user: 1-7,256-8192,10240]",
+	    ("PSM2_MTU", "MTU specified by user: 1-7,256-8192,10240]",
 	     PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
 	     (union psmi_envvar_val)-1, &env_mtu)) {
 		if (env_mtu.e_int != 256 && env_mtu.e_int != 512
@@ -192,8 +192,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 
 	proto->timeout_send = us_2_cycles(IPS_PROTO_SPIO_RETRY_US_DEFAULT);
 	proto->iovec_thresh_eager = proto->iovec_thresh_eager_blocking = ~0U;
-	proto->scb_bufsize = PSMI_ALIGNUP(proto->epinfo.ep_mtu, PSMI_PAGESIZE),
-	    proto->t_init = get_cycles();
+	proto->t_init = get_cycles();
 	proto->t_fini = 0;
 	proto->flags = env_cksum.e_uint ? IPS_PROTO_FLAG_CKSUM : 0;
 	proto->runid_key = getpid();
@@ -301,15 +300,14 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	}
 
 	/*
-	 * Create a pool of timers for flow ack/send timer and path_rec timer.
-	 * The default scb is num_of_send_desc=4K, we use max number of 4X
-	 * of that to be sure we don't run out of timers.
+	 * Create a pool of CCA timers for path_rec. The timers should not
+	 * exceed the scb number num_of_send_desc(default 4K).
 	 */
 	{
 		uint32_t chunks, maxsz;
 
 		chunks = 256;
-		maxsz = 4 * num_of_send_desc;
+		maxsz = num_of_send_desc;
 
 		proto->timer_pool =
 		    psmi_mpool_create(sizeof(struct psmi_timer), chunks, maxsz,
@@ -398,6 +396,19 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	 * Eager buffers.  We don't care to receive a callback when eager buffers
 	 * are newly released since we actively poll for new bufs.
 	 */
+	{
+		/* configure PSM bounce buffer size */
+		union psmi_envvar_val env_bbs;
+
+		psmi_getenv("PSM2_BOUNCE_SZ",
+			"PSM bounce buffer size (default is 512B)",
+			PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
+			(union psmi_envvar_val)512,
+			&env_bbs);
+
+		proto->scb_bufsize = env_bbs.e_uint;
+	}
+
 	if ((err = ips_scbctrl_init(context, num_of_send_desc,
 				    num_of_send_bufs, imm_size,
 				    proto->scb_bufsize, NULL, NULL,
@@ -479,16 +490,20 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 			   tvals[1], (tvals[1] == 0) ? " (never fatal)" : "");
 	}
 
-	/*
-	 * Active Message interface.  AM requests compete with MQ for eager
-	 * buffers, since request establish the amount of buffering in the network
-	 * (maximum number of requests in flight).  AM replies use the same amount
-	 * of request buffers -- we can never run out of AM reply buffers because a
-	 * request handler can only be run if we have at least one reply buffer (or
-	 * else the AM request is dropped).
-	 */
-	if ((err = ips_proto_am_init(proto, num_of_send_bufs, num_of_send_desc,
-				     imm_size, &proto->proto_am)))
+	/* Active Message interface. AM requests compete with MQ for eager
+	 * buffers, since request establish the amount of buffering in the
+	 * network (maximum number of requests in flight). The AM init function
+	 * does not allow the number of send buffers to be set separately from
+	 * the number of send descriptors, because otherwise it would have to
+	 * impose extremely arcane constraints on the relative amounts to avoid
+	 * a deadlock scenario. Thus, it handles it internally. The constraint
+	 * is: In a node pair, the number of reply send buffers on at least one
+	 * of the nodes must be at least double the number (optimal: double + 1)
+	 * of send descriptors on the other node. */
+	if ((err = ips_proto_am_init(proto,
+				     min(num_of_send_bufs, num_of_send_desc),
+				     imm_size,
+				     &proto->proto_am)))
 		goto fail;
 
 #if 0
@@ -1016,18 +1031,13 @@ void ips_proto_flow_enqueue(struct ips_flow *flow, ips_scb_t *scb)
 	}
 
 	/* If this is the first scb on flow, pull in both timers. */
-	if (STAILQ_EMPTY(&flow->scb_unacked)) {
-		flow->timer_ack =
-		    (struct psmi_timer *)psmi_mpool_get(proto->timer_pool);
-		psmi_assert(flow->timer_ack != NULL);
-		psmi_timer_entry_init(flow->timer_ack,
-				      ips_proto_timer_ack_callback, flow);
-		flow->timer_send =
-		    (struct psmi_timer *)psmi_mpool_get(proto->timer_pool);
-		psmi_assert(flow->timer_send != NULL);
-		psmi_timer_entry_init(flow->timer_send,
-				      ips_proto_timer_send_callback, flow);
+	if (flow->timer_ack == NULL) {
+		psmi_assert(flow->timer_send == NULL);
+		flow->timer_ack = scb->timer_ack;
+		flow->timer_send = scb->timer_send;
 	}
+	psmi_assert(flow->timer_ack != NULL);
+	psmi_assert(flow->timer_send != NULL);
 
 	/* Every flow has a pending head that points into the unacked queue.
 	 * If sends are already pending, process those first */
@@ -1065,6 +1075,8 @@ ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed)
 	uint64_t t_cyc;
 	ips_scb_t *scb;
 	psm2_error_t err = PSM2_OK;
+
+	psmi_assert(!SLIST_EMPTY(scb_pend));
 
 	/* Out of credits - ACKs/NAKs reclaim recredit or congested flow */
 	if_pf((flow->credits <= 0) || (flow->flags & IPS_FLOW_FLAG_CONGESTED)) {
@@ -1146,15 +1158,14 @@ ips_proto_flow_flush_dma(struct ips_flow *flow, int *nflushed)
 	psm2_error_t err = PSM2_OK;
 	int nsent = 0;
 
+	psmi_assert(!SLIST_EMPTY(scb_pend));
+
 	/* Out of credits - ACKs/NAKs reclaim recredit or congested flow */
 	if_pf((flow->credits <= 0) || (flow->flags & IPS_FLOW_FLAG_CONGESTED)) {
 		if (nflushed)
 			*nflushed = 0;
 		return PSM2_EP_NO_RESOURCES;
 	}
-
-	if (SLIST_EMPTY(scb_pend))
-		goto success;
 
 	err = scb_dma_send(proto, flow, scb_pend, &nsent);
 	if (err != PSM2_OK && err != PSM2_EP_NO_RESOURCES &&
@@ -1269,7 +1280,6 @@ ips_proto_flow_flush_dma(struct ips_flow *flow, int *nflushed)
 	else
 		err = PSM2_EP_NO_RESOURCES;	/* no flush at all */
 
-success:
 fail:
 	if (nflushed)
 		*nflushed = nsent;
@@ -1348,6 +1358,57 @@ psm2_error_t ips_proto_dma_completion_update(struct ips_proto *proto)
 	return PSM2_OK;
 }
 
+/*
+
+Handles ENOMEM on a DMA completion.
+
+ */
+static inline
+psm2_error_t
+handle_ENOMEM_on_DMA_completion(struct ips_proto *proto)
+{
+	psm2_error_t err;
+	time_t now = time(NULL);
+
+	if (proto->protoexp && proto->protoexp->tidc.tid_cachemap.nidle) {
+		uint64_t lengthEvicted =
+			ips_tidcache_evict(&proto->protoexp->tidc, -1);
+
+		if (!proto->writevFailTime)
+			proto->writevFailTime = now;
+
+		if (lengthEvicted)
+			return PSM2_OK; /* signals a retry of the writev command. */
+		else
+			return PSM2_EP_NO_RESOURCES;  /* should signal a return of
+							no progress, and retry later */
+	}
+	else if (!proto->writevFailTime)
+	{
+		proto->writevFailTime = now;
+		return PSM2_EP_NO_RESOURCES;  /* should signal a return of
+						 no progress, and retry later */
+	}
+	else
+	{
+		static const double thirtySeconds = 30.0;
+
+		if (difftime(now, proto->writevFailTime) >
+		    thirtySeconds) {
+			err = psmi_handle_error(
+				proto->ep,
+				PSM2_EP_DEVICE_FAILURE,
+				"SDMA completion error: out of "
+				"memory (fd=%d, index=%d)",
+				proto->fd,
+				proto->sdma_done_index);
+			return err;
+		}
+		return PSM2_EP_NO_RESOURCES;  /* should signal a return of
+						 no progress, and retry later */
+	}
+}
+
 /* ips_dma_transfer_frame is used only for control messages, and is
  * not enabled by default, and not tested by QA; expected send
  * dma goes through scb_dma_send() */
@@ -1424,9 +1485,11 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 	/*
 	 * Write into driver to do SDMA work.
 	 */
+retry:
 	ret = hfi_cmd_writev(proto->fd, iovec, iovcnt);
 
 	if (ret > 0) {
+		proto->writevFailTime = 0;
 		psmi_assert_always(ret == 1);
 
 		proto->sdma_avail_counter--;
@@ -1458,15 +1521,35 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 		 * ECOMM: Link may have gone down
 		 * EINTR: Got interrupt while in writev
 		 */
-		if (ret == 0 || errno == ENOMEM || errno == ECOMM
-		    || errno == EINTR)
-			err = PSM2_EP_NO_RESOURCES;
+		if (errno == ENOMEM) {
+			err = handle_ENOMEM_on_DMA_completion(proto);
+			if (err == PSM2_OK)
+				goto retry;
+		} else if (ret == 0 || errno == ECOMM || errno == EINTR) {
+			err = psmi_context_check_status(
+			    (const psmi_context_t *)&proto->ep->context);
+			/*
+			 * During a link bounce the err returned from
+			 * psmi_context_check_status is PSM2_EP_NO_NETWORK. In this case
+			 * the error code which we need to return to the calling flush
+			 * function(ips_proto_flow_flush_dma) is PSM2_EP_NO_RESOURCES to
+			 * signal it to restart the timers to flush the packets.
+			 * Not doing so would leave the packet on the unacked and
+			 * pending q without the sdma descriptors ever being updated.
+			 */
+			if (err == PSM2_OK || err == PSM2_EP_NO_NETWORK)
+				err = PSM2_EP_NO_RESOURCES;
+		}
+
 		else
-			err =
-			    psmi_handle_error(proto->ep, PSM2_EP_DEVICE_FAILURE,
-					      "Unhandled error in writev(): %s (fd=%d,iovec=%p,len=%d)",
-					      strerror(errno), proto->fd,
-					      &iovec, 1);
+			err = psmi_handle_error(proto->ep,
+						PSM2_EP_DEVICE_FAILURE,
+						"Unhandled error in writev(): "
+						"%s (fd=%d,iovec=%p,len=%d)",
+						strerror(errno),
+						proto->fd,
+						&iovec,
+						1);
 	}
 
 	return err;
@@ -1503,15 +1586,14 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 
 	unsigned int vec_idx = 0;
 	unsigned int scb_idx = 0, scb_sent = 0;
-	unsigned int num=0, max_elem;
+	unsigned int num = 0, max_elem;
 	uint32_t have_cksum;
 	uint32_t fillidx;
 	int16_t credits;
 	ssize_t ret;
 
 	/* See comments above for fault injection */
-	if_pf(dma_do_fault())
-	    goto fail;
+	if_pf(dma_do_fault()) goto fail;
 
 	/* Check how many SCBs to send based on flow credits */
 	credits = flow->credits;
@@ -1542,7 +1624,8 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 	iovec = alloca(sizeof(struct iovec) * max_elem);
 
 	if_pf(iovec == NULL) {
-		err = psmi_handle_error(PSMI_EP_NORETURN, PSM2_NO_MEMORY,
+		err = psmi_handle_error(PSMI_EP_NORETURN,
+					PSM2_NO_MEMORY,
 					"alloca for %d bytes failed in writev",
 					(int)(sizeof(struct iovec) * max_elem));
 		goto fail;
@@ -1563,16 +1646,20 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 		/*
 		 * Setup PBC.
 		 */
-		ips_proto_pbc_update(proto, flow, PSMI_FALSE,
-				     &scb->pbc, HFI_MESSAGE_HDR_SIZE,
-				     scb->payload_size +
-				     (have_cksum ? PSM_CRC_SIZE_IN_BYTES : 0));
+		ips_proto_pbc_update(
+		    proto,
+		    flow,
+		    PSMI_FALSE,
+		    &scb->pbc,
+		    HFI_MESSAGE_HDR_SIZE,
+		    scb->payload_size +
+			(have_cksum ? PSM_CRC_SIZE_IN_BYTES : 0));
 
 		sdmahdr = psmi_get_sdma_req_info(scb);
-		sdmahdr->npkts = scb->nfrag > 1 ?
-			scb->nfrag_remaining : scb->nfrag;
-		sdmahdr->fragsize = scb->frag_size ?
-			scb->frag_size : flow->ipsaddr->frag_size;
+		sdmahdr->npkts =
+		    scb->nfrag > 1 ? scb->nfrag_remaining : scb->nfrag;
+		sdmahdr->fragsize =
+		    scb->frag_size ? scb->frag_size : flow->ipsaddr->frag_size;
 
 		sdmahdr->comp_idx = fillidx;
 		psmi_assert(proto->sdma_comp_queue[fillidx].status != QUEUED);
@@ -1600,8 +1687,9 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 			 * length.
 			 */
 			iovec[vec_idx].iov_base = scb->payload;
-			iovec[vec_idx].iov_len = scb->nfrag > 1 ?
-				scb->chunk_size_remaining : scb->payload_size;
+			iovec[vec_idx].iov_len = scb->nfrag > 1
+						     ? scb->chunk_size_remaining
+						     : scb->payload_size;
 			vec_idx++;
 			iovcnt++;
 
@@ -1611,7 +1699,6 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 				  (int)iovec[vec_idx - 2].iov_len,
 				  iovec[vec_idx - 1].iov_base,
 				  (int)iovec[vec_idx - 1].iov_len);
-
 		}
 
 		/* If checksum then update checksum  */
@@ -1636,8 +1723,8 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 			vec_idx++;
 			iovcnt++;
 
-			sdmahdr->ctrl = 1 |
-			    (EXPECTED << HFI1_SDMA_REQ_OPCODE_SHIFT) |
+			sdmahdr->ctrl =
+			    1 | (EXPECTED << HFI1_SDMA_REQ_OPCODE_SHIFT) |
 			    (iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
 
 			_HFI_VDBG("tid-info=%p,%d\n",
@@ -1645,8 +1732,8 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 				  (int)iovec[vec_idx - 1].iov_len);
 		} else {
 			sdmahdr->ctrl = 1 |
-			    (EAGER << HFI1_SDMA_REQ_OPCODE_SHIFT) |
-			    (iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
+					(EAGER << HFI1_SDMA_REQ_OPCODE_SHIFT) |
+					(iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
 		}
 
 		/* Can bound the number to send by 'num' */
@@ -1654,34 +1741,53 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 			break;
 	}
 	psmi_assert(vec_idx > 0);
+retry:
 	ret = hfi_cmd_writev(proto->fd, iovec, vec_idx);
 
-	/*
-	 * Successfully wrote entire vector
-	 */
-	if (ret < 0) {
-		/* ENOMEM: No kernel memory to queue request, try later?
+	if (ret > 0) {
+		proto->writevFailTime = 0;
+		/* No need for inflight system call, we can infer it's value
+		 * from
+		 * writev's return value */
+		scb_sent += ret;
+	} else {
+		/*
+		 * ret == 0: Driver did not queue packet. Try later.
+		 * ENOMEM: No kernel memory to queue request, try later?
 		 * ECOMM: Link may have gone down
 		 * EINTR: Got interrupt while in writev
 		 */
-		if (errno == ENOMEM || errno == ECOMM || errno == EINTR) {
-			err = psmi_context_check_status((const psmi_context_t *)
-							&proto->ep->context);
+		if (errno == ENOMEM) {
+			err = handle_ENOMEM_on_DMA_completion(proto);
 			if (err == PSM2_OK)
+				goto retry;
+		} else if (ret == 0 || errno == ECOMM || errno == EINTR) {
+			err = psmi_context_check_status(
+			    (const psmi_context_t *)&proto->ep->context);
+			/*
+			 * During a link bounce the err returned from
+			 * psmi_context_check_status is PSM2_EP_NO_NETWORK. In this case
+			 * the error code which we need to return to the calling flush
+			 * function(ips_proto_flow_flush_dma) is PSM2_EP_NO_RESOURCES to
+			 * signal the caller to restart the timers to flush the packets.
+			 * Not doing so would leave the packet on the unacked and
+			 * pending q without the sdma descriptors ever being updated.
+			 */
+			if (err == PSM2_OK || err == PSM2_EP_NO_NETWORK)
 				err = PSM2_EP_NO_RESOURCES;
 		} else {
-			err =
-			    psmi_handle_error(proto->ep, PSM2_EP_DEVICE_FAILURE,
-					      "Unexpected error in writev(): %s (errno=%d) "
-					      "(fd=%d,iovec=%p,len=%d)",
-					      strerror(errno), errno, proto->fd,
-					      iovec, vec_idx);
+			err = psmi_handle_error(
+			    proto->ep,
+			    PSM2_EP_DEVICE_FAILURE,
+			    "Unexpected error in writev(): %s (errno=%d) "
+			    "(fd=%d,iovec=%p,len=%d)",
+			    strerror(errno),
+			    errno,
+			    proto->fd,
+			    iovec,
+			    vec_idx);
 			goto fail;
 		}
-	} else {
-		/* No need for inflight system call, we can infer it's value from
-		 * writev's return value */
-		scb_sent += ret;
 	}
 
 fail:
@@ -1734,7 +1840,7 @@ psm2_error_t
 ips_proto_timer_ack_callback(struct psmi_timer *current_timer,
 			     uint64_t current)
 {
-	struct ips_flow *flow = (struct ips_flow *)current_timer->context;
+	struct ips_flow *flow = ((ips_scb_t *)current_timer->context)->flow;
 	struct ips_proto *proto = ((psm2_epaddr_t) (flow->ipsaddr))->proto;
 	uint64_t t_cyc_next = get_cycles();
 	psmi_seqnum_t err_chk_seq;
@@ -1821,7 +1927,7 @@ psm2_error_t
 ips_proto_timer_send_callback(struct psmi_timer *current_timer,
 			      uint64_t current)
 {
-	struct ips_flow *flow = (struct ips_flow *)current_timer->context;
+	struct ips_flow *flow = ((ips_scb_t *)current_timer->context)->flow;
 	struct ips_proto *proto = ((psm2_epaddr_t) (flow->ipsaddr))->proto;
 
 	/* If flow is marked as congested adjust injection rate - see process nak
@@ -1839,7 +1945,8 @@ ips_proto_timer_send_callback(struct psmi_timer *current_timer,
 					    ccti_increase);
 	}
 
-	flow->flush(flow, NULL);
+	if (!SLIST_EMPTY(&flow->scb_pend))
+		flow->flush(flow, NULL);
 
 	return PSM2_OK;
 }

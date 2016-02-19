@@ -55,6 +55,7 @@
 
 #include <sys/types.h>		/* shm_open and signal handling */
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 #include <signal.h>
 
@@ -200,14 +201,7 @@ psm2_error_t psmi_shm_create(ptl_t *ptl)
 	psm2_error_t err = PSM2_OK;
 	int shmfd;
 	char *amsh_keyname;
-
-	snprintf(shmbuf, sizeof(shmbuf), "/psm2_shm.%016lx", ep->epid);
-	amsh_keyname = psmi_strdup(NULL, shmbuf);
-	if (amsh_keyname == NULL) {
-		err = PSM2_NO_MEMORY;
-		goto fail;
-	}
-
+	int iterator;
 	/* Get which kassist mode to use. */
 	ptl->psmi_kassist_mode = psmi_get_kassist_mode();
 	use_kassist = (ptl->psmi_kassist_mode != PSMI_KASSIST_OFF);
@@ -217,15 +211,60 @@ psm2_error_t psmi_shm_create(ptl_t *ptl)
 		   psmi_kassist_getmode(ptl->psmi_kassist_mode), use_kassist);
 
 	segsz = am_ctl_sizeof_block();
-	shmfd = shm_open(amsh_keyname, O_RDWR | O_CREAT, S_IRWXU);
-	if (shmfd < 0) {
-		err = psmi_handle_error(NULL, PSM2_SHMEM_SEGMENT_ERR,
-					"Error creating shared memory object in shm_open%s%s",
-					errno != EACCES ? ": " :
-					"(/dev/shm may have stale shm files that need to be removed): ",
-					strerror(errno));
+	for (iterator = 0; iterator <= INT_MAX; iterator++) {
+		snprintf(shmbuf,
+			 sizeof(shmbuf),
+			 "/psm2_shm.%ld%016lx%d",
+			 (long int) getuid(),
+			 ep->epid,
+			 iterator);
+		amsh_keyname = psmi_strdup(NULL, shmbuf);
+		if (amsh_keyname == NULL) {
+			err = PSM2_NO_MEMORY;
+			goto fail;
+		}
+		shmfd =
+		    shm_open(amsh_keyname, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+		if (shmfd < 0) {
+			if (errno == EACCES && iterator < INT_MAX)
+				continue;
+			else {
+				err = psmi_handle_error(NULL,
+							PSM2_SHMEM_SEGMENT_ERR,
+							"Error creating shared "
+							"memory object in "
+							"shm_open: %s",
+							strerror(errno));
+				goto fail;
+			}
+		} else {
+			struct stat st;
+			if (fstat(shmfd, &st) == -1) {
+				err = psmi_handle_error(NULL,
+							PSM2_SHMEM_SEGMENT_ERR,
+							"Error validating "
+							"shared memory object "
+							"with fstat: %s",
+							strerror(errno));
+				goto fail;
+			}
+			if (getuid() == st.st_uid) {
+				err = PSM2_OK;
+				break;
+			} else {
+				err = PSM2_SHMEM_SEGMENT_ERR;
+				close(shmfd);
+			}
+		}
+	}
+	if (err) {
+		err = psmi_handle_error(NULL,
+					PSM2_SHMEM_SEGMENT_ERR,
+					"Error creating shared memory object "
+					"in shm_open: namespace exhausted.");
 		goto fail;
 	}
+
 	/* Now register the atexit handler for cleanup, whether master or slave */
 	atexit(amsh_atexit);
 
@@ -302,6 +341,7 @@ psm2_error_t psmi_shm_map_remote(ptl_t *ptl, psm2_epid_t epid, uint16_t *shmidx_
 	psm2_error_t err = PSM2_OK;
 	int dest_shmfd;
 	struct am_ctl_nodeinfo *dest_nodeinfo;
+	int iterator;
 
 	shmidx = *shmidx_o = -1;
 
@@ -312,15 +352,56 @@ psm2_error_t psmi_shm_map_remote(ptl_t *ptl, psm2_epid_t epid, uint16_t *shmidx_
 		}
 	}
 
-	snprintf(shmbuf, sizeof(shmbuf), "/psm2_shm.%016lx", epid);
+
 	use_kassist = (ptl->psmi_kassist_mode != PSMI_KASSIST_OFF);
 
 	segsz = am_ctl_sizeof_block();
-	dest_shmfd = shm_open(shmbuf, O_RDWR, S_IRWXU);
-	if (dest_shmfd < 0) {
-		err = psmi_handle_error(NULL, PSM2_SHMEM_SEGMENT_ERR,
-					"Error opening remote shared memory object in shm_open: %s",
-					strerror(errno));
+	for (iterator = 0; iterator <= INT_MAX; iterator++) {
+		snprintf(shmbuf,
+			 sizeof(shmbuf),
+			 "/psm2_shm.%ld%016lx%d",
+			 (long int) getuid(),
+			 epid,
+			 iterator);
+		dest_shmfd = shm_open(shmbuf, O_RDWR, S_IRWXU);
+		if (dest_shmfd < 0) {
+			if (errno == EACCES && iterator < INT_MAX)
+				continue;
+			else {
+				err = psmi_handle_error(NULL,
+							PSM2_SHMEM_SEGMENT_ERR,
+							"Error opening remote "
+							"shared memory object "
+							"in shm_open: %s",
+							strerror(errno));
+				goto fail;
+			}
+		} else {
+			struct stat st;
+			if (fstat(dest_shmfd, &st) == -1) {
+				err = psmi_handle_error(NULL,
+							PSM2_SHMEM_SEGMENT_ERR,
+							"Error validating "
+							"shared memory object "
+							"with fstat: %s",
+							strerror(errno));
+				goto fail;
+			}
+			if (getuid() == st.st_uid) {
+				err = PSM2_OK;
+				break;
+			} else {
+				err = PSM2_SHMEM_SEGMENT_ERR;
+				close(dest_shmfd);
+			}
+		}
+	}
+	if (err) {
+		err = psmi_handle_error(NULL,
+					PSM2_SHMEM_SEGMENT_ERR,
+					"Error opening remote shared "
+					"memory object in shm_open: "
+					"namespace exhausted.");
 		goto fail;
 	}
 
@@ -684,6 +765,14 @@ struct ptl_connection_req {
 	psm2_amarg_t args[4];
 };
 
+static
+void amsh_free_epaddr(psm2_epaddr_t epaddr)
+{
+	psmi_epid_remove(epaddr->ptlctl->ep, epaddr->epid);
+	psmi_free(epaddr);
+	return;
+}
+
 #define PTL_OP_CONNECT      0
 #define PTL_OP_DISCONNECT   1
 #define PTL_OP_ABORT        2
@@ -1028,7 +1117,6 @@ amsh_ep_connreq_fini(ptl_t *ptl, struct ptl_connection_req *req)
 		else if (req->epid_mask[i] == AMSH_CMASK_PREREQ) {
 			req->errors[i] = PSM2_TIMEOUT;
 			req->numep_left--;
-			req->epaddr[i] = NULL;
 			req->epid_mask[i] = AMSH_CMASK_DONE;
 		}
 	}
@@ -1040,8 +1128,12 @@ amsh_ep_connreq_fini(ptl_t *ptl, struct ptl_connection_req *req)
 		psmi_assert(req->epid_mask[i] == AMSH_CMASK_DONE);
 
 		err = psmi_error_cmp(err, req->errors[i]);
-		/* Report errors in connection. */
-		/* XXX de-alloc epaddr */
+		/* XXX TODO: Report errors in connection. */
+		if (req->op == PTL_OP_DISCONNECT || req->op == PTL_OP_ABORT) {
+			psmi_assert(req->epaddr[i] != NULL);
+			amsh_free_epaddr(req->epaddr[i]);
+			req->epaddr[i] = NULL;
+		}
 	}
 
 	psmi_free(req->epid_mask);
@@ -1132,7 +1224,7 @@ amsh_ep_connect(ptl_t *ptl,
 static
 psm2_error_t
 amsh_ep_disconnect(ptl_t *ptl, int force, int numep,
-		   const psm2_epaddr_t array_of_epaddr[],
+		   psm2_epaddr_t array_of_epaddr[],
 		   const int array_of_epaddr_mask[],
 		   psm2_error_t array_of_errors[], uint64_t timeout_ns)
 {
@@ -1140,7 +1232,7 @@ amsh_ep_disconnect(ptl_t *ptl, int force, int numep,
 				    force ? PTL_OP_ABORT : PTL_OP_DISCONNECT,
 				    numep, NULL, array_of_epaddr_mask,
 				    array_of_errors,
-				    (psm2_epaddr_t *) array_of_epaddr,
+				    array_of_epaddr,
 				    timeout_ns);
 }
 
@@ -2030,7 +2122,11 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 		break;
 
 	case PSMI_AM_DISC_REQ:
-		epaddr = tok->tok.epaddr_from;
+		epaddr = psmi_epid_lookup(ptl->ep, epid);
+		if (!epaddr) {
+			_HFI_VDBG("Dropping disconnect request from an epid that we are not connected to\n");
+			return;
+		}
 		args[0].u32w0 = PSMI_AM_DISC_REP;
 		args[2].u32w1 = PSM2_OK;
 		AMSH_CSTATE_FROM_SET((am_epaddr_t *) epaddr, DISC_REQ);

@@ -118,6 +118,7 @@ ips_recvhdrq_init(const psmi_context_t *context,
 	recvq->state->num_hdrq_done = 0;
 	recvq->state->num_egrq_done = 0;
 	recvq->state->hdr_countdown = 0;
+	recvq->state->hdrq_cachedlastscan = 0;
 
 	{
 		union psmi_envvar_val env_hdr_update;
@@ -489,7 +490,12 @@ psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 		     rcv_hdr, recvq->hdrq_rhf_off, rhf, rhf[0], rhf[1],
 		     rcv_ev.p_hdr);
 
-		if_pt(recvq->proto->flags & IPS_PROTO_FLAG_CCA) {
+		/* If the hdrq_head is before cachedlastscan, that means that we have
+		 * already prescanned this for BECNs and FECNs, so we should not check
+		 * again
+		 */
+		if_pt((recvq->proto->flags & IPS_PROTO_FLAG_CCA) &&
+				(state->hdrq_head >= state->hdrq_cachedlastscan)) {
 			/* IBTA CCA handling:
 			 * If FECN bit set handle IBTA CCA protocol. For the
 			 * flow that suffered congestion we flag it to generate
@@ -584,9 +590,15 @@ psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 				}
 			}
 
-			/* eager packet and tiderr,
-			 * don't consider updating egr head */
-			goto skip_packet_no_egr_update;
+			/* Eager packet and tiderr.
+			 * Don't consider updating egr head, unless we're in
+			 * the congested state.  If we're congested, we should
+			 * try to keep the eager buffers free. */
+
+			if (!rcv_ev.is_congested)
+				goto skip_packet_no_egr_update;
+			else
+				goto skip_packet;
 		}
 
 		/* If checksum is enabled, verify that it is valid */
@@ -715,4 +727,143 @@ skip_packet_no_egr_update:
 
 	PSM2_LOG_MSG("leaving");
 	return num_hdrq_done ? PSM2_OK : PSM2_OK_NO_PROGRESS;
+}
+
+/*	This function is designed to implement RAPID CCA. It iterates
+	through the recvq, checking each element for set FECN or BECN bits.
+	In the case of finding one, the proper response is executed, and the bits
+	are cleared.
+*/
+psm2_error_t ips_recvhdrq_scan_cca (struct ips_recvhdrq *recvq)
+{
+
+/* Looks at hdr and determines if it is the last item in the queue */
+
+#define is_last_hdr(hdr)						\
+	(has_rtail ? 							\
+	(hdr != ips_recvq_tail_get(&recvq->hdrq)) :			\
+	(recvq->state->hdrq_rhf_seq == _get_rhf_seq(recvq, curr_hdr)))
+
+	struct ips_recvhdrq_state *state = recvq->state;
+	const __le32 *rhf;
+	PSMI_CACHEALIGN struct ips_recvhdrq_event rcv_ev = {.proto = recvq->proto,
+							    .recvq = recvq
+	};
+
+	uint32_t num_hdrq_done = state->hdrq_cachedlastscan / recvq->hdrq.elemsz;
+	const int num_hdrq_todo = recvq->hdrq.elemcnt;
+	const uint32_t hdrq_elemsz = recvq->hdrq.elemsz;
+
+	int done;
+
+	/* Chip features */
+	const int has_rtail = recvq->runtime_flags & HFI1_CAP_DMA_RTAIL;
+
+	uint32_t *rcv_hdr =
+	    (uint32_t *)recvq->hdrq.base_addr + state->hdrq_cachedlastscan;
+	uint32_t *curr_hdr = rcv_hdr;
+	uint32_t scan_head = state->hdrq_head + state->hdrq_cachedlastscan;
+
+	/* Skip the first element, since we're going to process it soon anyway */
+	if ( state->hdrq_cachedlastscan == 0 )
+	{
+		curr_hdr = curr_hdr + hdrq_elemsz;
+		scan_head += hdrq_elemsz;
+		num_hdrq_done++;
+	}
+
+	PSM2_LOG_MSG("entering");
+	done = !is_last_hdr(scan_head);
+
+	while (!done) {
+		rhf = (const __le32 *)curr_hdr + recvq->hdrq_rhf_off;
+		rcv_ev.error_flags = hfi_hdrget_err_flags(rhf);
+		rcv_ev.ptype = hfi_hdrget_rcv_type(rhf);
+		rcv_ev.rhf = rhf;
+		rcv_ev.rcv_hdr = curr_hdr;
+		rcv_ev.p_hdr =
+		    recvq->hdrq_rhf_off ? _get_proto_hdr_from_rhf(curr_hdr, rhf)
+		    : _get_proto_hdr(curr_hdr);
+		rcv_ev.has_cksum =
+		    ((recvq->proto->flags & IPS_PROTO_FLAG_CKSUM) &&
+		     (rcv_ev.p_hdr->flags & IPS_SEND_FLAG_PKTCKSUM));
+
+		_HFI_VDBG
+		    ("scanning packet for CCA: curr_hdr %p, rhf_off %d, rhf %p (%x,%x), p_hdr %p\n",
+		     curr_hdr, recvq->hdrq_rhf_off, rhf, rhf[0], rhf[1],
+		     rcv_ev.p_hdr);
+
+		if_pt ( _is_cca_fecn_set(rcv_ev.p_hdr) & IPS_RECV_EVENT_FECN ) {
+			struct ips_epstate_entry *epstaddr = ips_epstate_lookup(recvq->epstate,
+										rcv_ev.p_hdr->connidx);
+
+			if (epstaddr != NULL && epstaddr->ipsaddr != NULL)
+			{
+				rcv_ev.ipsaddr = epstaddr->ipsaddr;
+
+				/* Send BECN back */
+				ips_epaddr_t *ipsaddr = rcv_ev.ipsaddr;
+				struct ips_message_header *p_hdr = rcv_ev.p_hdr;
+				ips_epaddr_flow_t flowid = ips_proto_flowid(p_hdr);
+				struct ips_flow *flow;
+				ips_scb_t ctrlscb;
+
+				psmi_assert(flowid < EP_FLOW_LAST);
+				flow = &ipsaddr->flows[flowid];
+				ctrlscb.flags = 0;
+				ctrlscb.ips_lrh.data[0].u32w0 =
+					flow->cca_ooo_pkts;
+
+				rcv_ev.proto->epaddr_stats.congestion_pkts++;
+				/* Clear FECN event */
+				rcv_ev.is_congested &= ~IPS_RECV_EVENT_FECN;
+
+				ips_proto_send_ctrl_message(flow,
+							    OPCODE_BECN,
+							    &flow->ipsaddr->
+							    ctrl_msg_queued,
+							    &ctrlscb, ctrlscb.cksum, 0);
+			}
+		}
+		else if_pt (_is_cca_becn_set(rcv_ev.p_hdr) << (IPS_RECV_EVENT_BECN - 1) ) {
+			struct ips_epstate_entry *epstaddr = ips_epstate_lookup(recvq->epstate,
+										rcv_ev.p_hdr->connidx);
+
+			if (epstaddr != NULL && epstaddr->ipsaddr != NULL)
+			{
+				rcv_ev.ipsaddr = epstaddr->ipsaddr;
+
+				/* Adjust flow */
+				struct ips_proto *proto = rcv_ev.proto;
+				struct ips_message_header *p_hdr = rcv_ev.p_hdr;
+				ips_epaddr_t *ipsaddr = rcv_ev.ipsaddr;
+				struct ips_flow *flow;
+				ips_epaddr_flow_t flowid = ips_proto_flowid(p_hdr);
+
+				psmi_assert(flowid < EP_FLOW_LAST);
+				flow = &ipsaddr->flows[flowid];
+				if ((flow->path->pr_ccti +
+				     proto->cace[flow->path->pr_sl].ccti_increase) <= proto->ccti_limit) {
+					ips_cca_adjust_rate(flow->path,
+							    proto->cace[flow->path->pr_sl].ccti_increase);
+					/* Clear congestion event */
+					rcv_ev.is_congested &= ~IPS_RECV_EVENT_BECN;
+				}
+			}
+		}
+
+		curr_hdr = curr_hdr + hdrq_elemsz;
+
+		num_hdrq_done++;
+		scan_head += hdrq_elemsz;
+		state->hdrq_cachedlastscan += hdrq_elemsz;
+
+		done = (num_hdrq_done == num_hdrq_todo && !is_last_hdr(scan_head) );
+
+	}
+	/* while (hdrq_entries_to_read) */
+
+
+	PSM2_LOG_MSG("leaving");
+	return PSM2_OK;
 }

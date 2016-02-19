@@ -272,7 +272,6 @@ ips_proto_hdr(struct ips_proto *proto, struct ips_epaddr *ipsaddr,
 
 	/* Setup BTH fields */
 	p_hdr->bth[0] = __cpu_to_be32(flow->path->pr_pkey |
-			      (scb->padcnt << HFI_BTH_EXTRA_BYTE_SHIFT) |
 			      (scb->opcode << HFI_BTH_OPCODE_SHIFT));
 	p_hdr->bth[2] = __cpu_to_be32(flow->xmit_seq_num.psn_num |
 				      (scb->flags & IPS_SEND_FLAG_ACKREQ));
