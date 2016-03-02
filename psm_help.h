@@ -153,6 +153,21 @@ PSMI_ALWAYS_INLINE(psm2_error_t psmi_err_only(psm2_error_t err))
 
 #define PSMI_MAKE_DRIVER_VERSION(major, minor) ((major)<<16 | ((minor) & 0xffff))
 
+#ifdef PSM_DEBUG
+
+/* The intent of the following two macros is to emit an internal error if a size of a
+   'member' is not as expected, violating an assumption in the code. There are some
+   problems with the implementation of this code:
+
+   The first macro creates a static const variable with ABSOLUTELY NO references
+   to them.  For example there are ABSOLUTELY NO uses of the second macro in the
+   PSM code. This is not completely pure. GCC version 5, for example, emits a
+   warning for defining a static const when it is not referenced.
+
+   A better implementation of the intent of this code is to use static_assert()
+   so that at compile time the violations can be caught and corrected - not at
+   run time.  */
+
 #define PSMI_STRICT_SIZE_DECL(member, sz) static const size_t __psm2_ss_ ## member = sz
 #define PSMI_STRICT_SIZE_VERIFY(member, sz)				\
 	do {								\
@@ -164,5 +179,12 @@ PSMI_ALWAYS_INLINE(psm2_error_t psmi_err_only(psm2_error_t err))
 			exit(-1);					\
 		}							\
 	} while (0)
+
+#else
+
+#define PSMI_STRICT_SIZE_DECL(member, sz)   /* nothing */
+#define PSMI_STRICT_SIZE_VERIFY(member, sz) /* nothing */
+
+#endif /*  PSM_DEBUG */
 
 #endif /* _PSMI_HELP_H */
