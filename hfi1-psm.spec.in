@@ -62,6 +62,7 @@ Prefix: /usr
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 Requires(post): /sbin/ldconfig
 Requires(postun): /sbin/ldconfig
+ExclusiveArch: x86_64
 %if 0%{?rhel}
 Requires: libuuid
 %else
