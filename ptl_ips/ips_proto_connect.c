@@ -212,13 +212,10 @@ ips_ipsaddr_set_req_params(struct ips_proto *proto,
 		piosize &= ~(PSM_CACHE_LINE_BYTES - 1);
 
 	/*
-	 * Setup the fragment size for ipsaddr->flow[proto->msgflowid].
+	 * Setup the mtu and pio sizes for ipsaddr.
 	 */
-	if (proto->flags & IPS_PROTO_FLAG_SDMA) {
-		ipsaddr->frag_size = peer_mtu;
-	} else {
-		ipsaddr->frag_size = piosize;
-	}
+	ipsaddr->mtu_size = peer_mtu;
+	ipsaddr->pio_size = piosize;
 
 	/*
 	 * For static routes i.e. "none" path resolution update all paths to
@@ -465,10 +462,13 @@ ips_flow_init(struct ips_flow *flow, struct ips_proto *proto,
 	psmi_assert_always(flow_index < EP_FLOW_LAST);
 
 	SLIST_NEXT(flow, next) = NULL;
-	if (transfer_type == PSM_TRANSFER_PIO)
+	if (transfer_type == PSM_TRANSFER_PIO) {
 		flow->flush = ips_proto_flow_flush_pio;
-	else
+		flow->frag_size = ipsaddr->pio_size;
+	} else {
 		flow->flush = ips_proto_flow_flush_dma;
+		flow->frag_size = ipsaddr->mtu_size;
+	}
 
 	flow->path =
 	    ips_select_path(proto, path_type, ipsaddr, ipsaddr->pathgrp);
@@ -559,11 +559,9 @@ ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
 	ipsaddr->ctrl_msg_queued = 0;
 	ipsaddr->msg_toggle = 0;
 
-	/* Initial frag size */
-	if (proto->flags & IPS_PROTO_FLAG_SDMA)
-		ipsaddr->frag_size = proto->epinfo.ep_mtu;
-	else
-		ipsaddr->frag_size = proto->epinfo.ep_piosize;
+	/* Setup MTU and PIO size */
+	ipsaddr->mtu_size = proto->epinfo.ep_mtu;
+	ipsaddr->pio_size = proto->epinfo.ep_piosize;
 
 	/* Actual context of peer */
 	ipsaddr->context = PSMI_EPID_GET_CONTEXT(epid);
@@ -740,12 +738,8 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 				/* If the send fails because of pio_busy, don't let ips queue
 				 * the request on an invalid ipsaddr, just drop the reply */
 				ipsaddr_f.ctrl_msg_queued = ~0;
-				if (proto->flags & IPS_PROTO_FLAG_SDMA)
-					ipsaddr_f.frag_size =
-						proto->epinfo.ep_mtu;
-				else
-					ipsaddr_f.frag_size =
-						proto->epinfo.ep_piosize;
+				ipsaddr->mtu_size = proto->epinfo.ep_mtu;
+				ipsaddr->pio_size = proto->epinfo.ep_piosize;
 
 				psmi_assert(proto->msgflowid < EP_FLOW_LAST);
 

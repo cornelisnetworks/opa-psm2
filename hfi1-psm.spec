@@ -53,7 +53,7 @@
 Summary: Intel PSM Libraries
 Name: hfi1-psm
 Version: 0.7
-Release: 221
+Release: 223
 License: GPL
 Group: System Environment/Libraries
 URL: http://www.intel.com/
@@ -155,6 +155,12 @@ rm -rf $RPM_BUILD_ROOT
 /etc/modprobe.d/hfi1-psm-compat.conf
 /usr/sbin/hfi1-psm-compat.cmds
 %changelog
+* Fri Mar 25 2016 <russell.w.mcguire@intel.com>
+- Fixup for 10KB MTU PIO
+
+* Fri Mar 4 2016 <paul.j.reger@intel.com>
+- Clip length before attempt to update tids to avoid EINVAL error from driver.
+
 * Fri Jan 29 2016 <paul.j.reger@intel.com>
 - Fixes another case of write-to-heap-after-free.
 

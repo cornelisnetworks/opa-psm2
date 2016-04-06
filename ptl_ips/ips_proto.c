@@ -732,10 +732,8 @@ proto_sdma_init(struct ips_proto *proto, const psmi_context_t *context)
 				 PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
 				 (union psmi_envvar_val)
 				 MQ_HFI_THRESH_EGR_SDMA_SQ, &env_hfiegr)) {
-			/* Has to be at least 1 MTU */
-			proto->iovec_thresh_eager =
-			    proto->iovec_thresh_eager_blocking =
-			    max(proto->epinfo.ep_piosize, env_hfiegr.e_uint);
+			proto->iovec_thresh_eager = proto->iovec_thresh_eager_blocking =
+				 env_hfiegr.e_uint;
 		}
 	} else if (proto->flags & IPS_PROTO_FLAG_SDMA) {	/* all sdma */
 		proto->iovec_thresh_eager = proto->iovec_thresh_eager_blocking =
@@ -920,7 +918,7 @@ ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 	psmi_assert(message_type >= OPCODE_ACK &&
 			message_type <= OPCODE_DISCONNECT_REPLY);
 	psmi_assert((paylen & 0x3) == 0);	/* require 4-byte multiple */
-	psmi_assert(flow->ipsaddr->frag_size >=
+	psmi_assert(flow->frag_size >=
 			(paylen + PSM_CRC_SIZE_IN_BYTES));
 
 	/* Drain queue if non-empty */
@@ -1464,7 +1462,7 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 	 */
 	sdmahdr = psmi_get_sdma_req_info(scb);
 	sdmahdr->npkts = 1;
-	sdmahdr->fragsize = flow->ipsaddr->frag_size;
+	sdmahdr->fragsize = flow->frag_size;
 
 	sdmahdr->comp_idx = proto->sdma_fill_index;
 	psmi_assert(proto->sdma_comp_queue
@@ -1659,7 +1657,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 		sdmahdr->npkts =
 		    scb->nfrag > 1 ? scb->nfrag_remaining : scb->nfrag;
 		sdmahdr->fragsize =
-		    scb->frag_size ? scb->frag_size : flow->ipsaddr->frag_size;
+		    scb->frag_size ? scb->frag_size : flow->frag_size;
 
 		sdmahdr->comp_idx = fillidx;
 		psmi_assert(proto->sdma_comp_queue[fillidx].status != QUEUED);

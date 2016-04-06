@@ -408,6 +408,8 @@ struct ips_flow {
 	struct ips_epaddr *ipsaddr;	/* back pointer, remote endpoint */
 	ips_path_rec_t *path;	/* Path to use for flow */
 
+	uint16_t frag_size; /* fragment size */
+
 	uint16_t flowid:2;	/* flow id: pio(0) or dma(1) or tidflow(2) */
 	uint16_t transfer:3;	/* spio or sdma */
 	uint16_t protocol:3;	/* go-back-n or tidflow */
@@ -453,7 +455,8 @@ struct ips_epaddr {
 	uint32_t connidx_from;	/* my connection idx */
 
 	uint16_t ctrl_msg_queued;	/* bitmap of queued control messages to be send */
-	uint16_t frag_size;	/* flow[proto->msgflowid] fragment size */
+	uint16_t mtu_size;	/* flow[proto->msgflowid] fragment size */
+	uint16_t pio_size;	/* flow[proto->msgflowid] fragment size */
 
 	uint8_t  hpp_index;	/* high priority index */
 	uint8_t  context;	/* real context value */

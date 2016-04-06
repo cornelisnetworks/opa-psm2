@@ -231,7 +231,7 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 		chunk_size = proto->mq->hfi_window_rv;
 	} else {
 		psmi_assert((proto->flags & IPS_PROTO_FLAG_SDMA) == 0);
-		chunk_size = frag_size = ipsaddr->frag_size;
+		chunk_size = frag_size = flow->frag_size;
 	}
 	msgseq = ipsaddr->msgctl->mq_send_seqnum++;
 
@@ -241,7 +241,6 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 	 */
 	if (len <= frag_size) {
 		uint32_t paylen = len & ~0x3;
-
 		scb = mq_alloc_pkts(proto, 1, 0, 0);
 		psmi_assert(scb);
 
@@ -385,7 +384,7 @@ ips_ptl_mq_rndv(struct ips_proto *proto, psm2_mq_req_t req,
 	ips_scb_hdrdata(scb).u32w1 = len;
 	ips_scb_hdrdata(scb).u32w0 = psmi_mpool_get_obj_index(req);
 
-	if (len <= ipsaddr->frag_size && !(len & 0x3)) {
+	if (len <= flow->frag_size && !(len & 0x3)) {
 		ips_scb_buffer(scb) = (void *)buf;
 		ips_scb_length(scb) = len;
 		req->send_msgoff = len;
@@ -467,7 +466,7 @@ ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 		     psmi_epaddr_get_name(mq->ep->epid),
 		     psmi_epaddr_get_name(((psm2_epaddr_t) ipsaddr)->epid), ubuf,
 		     len, tag->tag[0], tag->tag[1], tag->tag[2], req);
-	} else if (len <= ipsaddr->frag_size) {
+	} else if (len <= ipsaddr->flows[proto->msgflowid].frag_size) {
 		uint32_t paylen = len & ~0x3;
 
 		scb = mq_alloc_pkts(proto, 1, 0, 0);
@@ -607,7 +606,7 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 			  psmi_epaddr_get_name(mq->ep->epid),
 			  psmi_epaddr_get_name(((psm2_epaddr_t) ipsaddr)->epid),
 			  ubuf, len, tag->tag[0], tag->tag[1], tag->tag[2]);
-	} else if (len <= ipsaddr->frag_size) {
+	} else if (len <= ipsaddr->flows[proto->msgflowid].frag_size) {
 		uint32_t paylen = len & ~0x3;
 
 		scb = mq_alloc_pkts(proto, 1, 0, 0);
@@ -737,7 +736,6 @@ ips_proto_mq_rts_match_callback(psm2_mq_req_t req, int was_posted)
 	 * We may already set with first packet,
 	 * If we're doing eager-based r-v, just send back the sreq and length and
 	 * have the sender complete the send.
-	 *
 	 */
 	PSM2_LOG_MSG("entering");
 	if (req->recv_msglen <= proto->mq->hfi_thresh_rv ||	/* less rv theshold */
@@ -846,7 +844,7 @@ ips_proto_mq_push_rts_data(struct ips_proto *proto, psm2_mq_req_t req)
 		/* use PIO transfer */
 		psmi_assert((proto->flags & IPS_PROTO_FLAG_SDMA) == 0);
 		flow = &ipsaddr->flows[EP_FLOW_GO_BACK_N_PIO];
-		chunk_size = frag_size = ipsaddr->frag_size;
+		chunk_size = frag_size = flow->frag_size;
 	}
 
 	do {

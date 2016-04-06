@@ -206,6 +206,14 @@ ips_tid_acquire(struct ips_tid *tidc,
 		goto fail;
 	}
 
+	/* Clip length if it exceeds worst case tid allocation,
+	   where each entry in the tid array can accomodate only
+	   1 page. */
+	if (*length > 4096*tidc->tid_ctrl->tid_num_max)
+	{
+		*length = 4096*tidc->tid_ctrl->tid_num_max;
+	}
+
 	rc = hfi_update_tid(tidc->context->ctrl,
 		    (uint64_t) (uintptr_t) buf, length,
 		    (uint64_t) (uintptr_t) tid_array, tidcnt);

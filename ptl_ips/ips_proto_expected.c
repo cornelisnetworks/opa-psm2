@@ -993,7 +993,7 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 
 	if (protoexp->tid_xfer_type == PSM_TRANSFER_PIO)
 		tidsendc->frag_size =
-		    min(protoexp->tid_send_fragsize, ipsaddr->frag_size);
+		    min(protoexp->tid_send_fragsize, ipsaddr->pio_size);
 	else
 		tidsendc->frag_size =
 		    min(protoexp->tid_send_fragsize,

@@ -152,9 +152,17 @@ ips_tidcache_register(struct ips_tid *tidc,
 	}
 	psmi_assert(NTID < tidc->tid_cachesize);
 
+	/* Clip length if it exceeds worst case tid allocation,
+	   where each entry in the tid array can accomodate only
+	   1 page. */
+	if (length > 4096*tidc->tid_ctrl->tid_num_max)
+	{
+		length = 4096*tidc->tid_ctrl->tid_num_max;
+	}
 	/*
 	 * register the new buffer.
 	 */
+
 retry:
 	tidcnt = 0;
 	if (hfi_update_tid(tidc->context->ctrl,
