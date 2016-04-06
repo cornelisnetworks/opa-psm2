@@ -323,6 +323,22 @@ psm2_error_t psmi_epdir_extend(ptl_t *ptl)
 
 	return PSM2_OK;
 }
+
+/**
+ * Unmap shm regions upon proper disconnect with other processes
+ */
+psm2_error_t psmi_do_unmap(uintptr_t shmbase)
+{
+	psm2_error_t err = PSM2_OK;
+	if (munmap((void *)shmbase, am_ctl_sizeof_block())) {
+		err =
+		    psmi_handle_error(NULL, PSM2_SHMEM_SEGMENT_ERR,
+				      "Error with munmap of shared segment: %s",
+				      strerror(errno));
+	}
+	return err;
+}
+
 /**
  * Map a remote process' shared memory object.
  *
@@ -583,7 +599,7 @@ psm2_error_t psmi_shm_detach(ptl_t *ptl)
 	if (munmap((void *)shmbase, am_ctl_sizeof_block())) {
 		err =
 		    psmi_handle_error(NULL, PSM2_SHMEM_SEGMENT_ERR,
-				      "Error with munamp of shared segment: %s",
+				      "Error with munmap of shared segment: %s",
 				      strerror(errno));
 		goto fail;
 	}
@@ -933,6 +949,17 @@ amsh_ep_connreq_poll(ptl_t *ptl, struct ptl_connection_req *req)
 							amsh_conn_handler_hidx,
 							req->args, 4, NULL, 0,
 							0);
+				AMSH_CSTATE_TO_SET((am_epaddr_t *) epaddr,
+				           DISC_REQUESTED);
+				/**
+				* Only munmap if we have nothing more to
+				* communicate with the other node, i.e. we
+				* already recieved a disconnect req from the
+				* other node.
+				*/
+				if (AMSH_CSTATE_FROM_GET((am_epaddr_t *) epaddr) ==
+					AMSH_CSTATE_FROM_DISC_REQUESTED)
+					err = psmi_do_unmap(ptl->am_ep[shmidx].amsh_shmbase);
 				req->epid_mask[i] = AMSH_CMASK_POSTREQ;
 			} else if (req->epid_mask[i] == AMSH_CMASK_POSTREQ) {
 				cstate =
@@ -2047,6 +2074,7 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 	uint16_t shmidx = tok->shmidx;
 	int is_valid;
 	ptl_t *ptl = tok->ptl;
+	int cstate;
 
 	/* We do this because it's an assumption below */
 	psmi_assert_always(buf == NULL && len == 0);
@@ -2129,7 +2157,7 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 		}
 		args[0].u32w0 = PSMI_AM_DISC_REP;
 		args[2].u32w1 = PSM2_OK;
-		AMSH_CSTATE_FROM_SET((am_epaddr_t *) epaddr, DISC_REQ);
+		AMSH_CSTATE_FROM_SET((am_epaddr_t *) epaddr, DISC_REQUESTED);
 		ptl->connect_from--;
 		/* Before sending the reply, make sure the process
 		 * is still connected */
@@ -2139,9 +2167,19 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 		else
 			is_valid = 1;
 
-		if (is_valid)
+		if (is_valid) {
 			psmi_amsh_short_reply(tok, amsh_conn_handler_hidx,
 					      args, narg, NULL, 0, 0);
+			/**
+			* Only munmap if we have nothing more to
+			* communicate with the other node, i.e. we are
+			* already disconnected with the other node
+			* or have sent a disconnect request.
+			*/
+			cstate = AMSH_CSTATE_TO_GET((am_epaddr_t *) epaddr);
+			if (cstate == AMSH_CSTATE_TO_DISC_REQUESTED)
+				err = psmi_do_unmap(ptl->am_ep[shmidx].amsh_shmbase);
+		}
 		break;
 
 	case PSMI_AM_DISC_REP:

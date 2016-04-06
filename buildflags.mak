@@ -60,35 +60,25 @@ endif
 export os ?= $(shell uname -s | tr '[A-Z]' '[a-z]')
 export arch := $(shell uname -p | sed -e 's,\(i[456]86\|athlon$$\),i386,')
 
-ifeq (${CCARCH},pathcc)
-	export CC := pathcc -fno-fast-stdlib
-	export PATH := ${PATH}:/opt/pathscale/bin/
+ifeq (${CCARCH},gcc)
+	export CC := gcc
 else
-	ifeq (${CCARCH},gcc)
-		export CC := gcc
+	ifeq (${CCARCH},gcc4)
+		export CC := gcc4
 	else
-		ifeq (${CCARCH},gcc4)
-			export CC := gcc4
+		ifeq (${CCARCH},icc)
+		     export CC := icc
 		else
-			ifeq (${CCARCH},icc)
-			     export CC := icc
-			else
-			     anerr := $(error Unknown C compiler arch: ${CCARCH})
-			endif # ICC
-		endif # gcc4
-	endif # gcc
-endif # pathcc
+		     anerr := $(error Unknown C compiler arch: ${CCARCH})
+		endif # ICC
+	endif # gcc4
+endif # gcc
 
-ifeq (${FCARCH},pathf90)
-	export FC := pathf90
-	export PATH := ${PATH}:/opt/pathscale/bin/
+ifeq (${FCARCH},gfortran)
+	export FC := gfortran
 else
-	ifeq (${FCARCH},gfortran)
-		export FC := gfortran
-	else
-		anerr := $(error Unknown Fortran compiler arch: ${FCARCH})
-	endif # gfortran
-endif # pathf90
+	anerr := $(error Unknown Fortran compiler arch: ${FCARCH})
+endif # gfortran
 
 BASECFLAGS += $(BASE_FLAGS)
 LDFLAGS += $(BASE_FLAGS)
@@ -148,6 +138,9 @@ endif
 ifneq (,${PSM_LOG})
    BASECFLAGS += -DPSM_LOG
 endif
+ifneq (,${PSM_HEAP_DEBUG})
+   BASECFLAGS += -DPSM_HEAP_DEBUG
+endif
 ifneq (,${PSM_PROFILE})
   BASECFLAGS += -DPSM_PROFILE
 endif
@@ -175,12 +168,6 @@ ifeq (${CCARCH},icc)
     CFLAGS += $(BASECFLAGS)
     LDFLAGS += -static-intel
 else
-    ifeq (${CCARCH},pathcc)
-	CFLAGS += $(BASECFLAGS)
-	ifeq (,${PSM_DEBUG})
-	    CFLAGS += -OPT:Ofast
-	endif
-    else
 	ifeq (${CCARCH},gcc)
 	    CFLAGS += $(BASECFLAGS) -Wno-strict-aliasing 
 	else
@@ -190,6 +177,5 @@ else
 		$(error Unknown compiler arch "${CCARCH}")
 	    endif # gcc4
 	endif # gcc
-    endif # pathcc
 endif # icc
 

@@ -1044,7 +1044,6 @@ void psmi_log_memstats(psmi_memtype_t type, int64_t nbytes)
 // This can be re-enabled with padding to prevent alignment issues
 // if it is determined that the stats are needed
 
-
 #ifdef PSM_DEBUG
 #define psmi_stats_mask PSMI_STATSTYPE_MEMORY
 #else
@@ -1054,6 +1053,328 @@ void psmi_log_memstats(psmi_memtype_t type, int64_t nbytes)
 #ifdef malloc
 #undef malloc
 #endif
+
+#ifdef PSM_HEAP_DEBUG
+
+/* PSM HEAP DEBUG documentation:
+
+   In the following code, the acronym: 'HD' is short for "Heap Debug".
+
+   Each actual heap allocation will have a header and a trailer surrounding it,
+   and the header itself may have some vacant space preceding it due to alignment
+   needs:
+
+   0. This area is the actual return value of posix_memalign and is due to
+      alignment requirements.  (This area does not exist for heap allocations
+      from malloc()).
+   1. HD HEADER
+   2. Actual allocation
+   3. HD TRAILER
+
+   malloc() / posix_memalign returns area 0 through 3 to the Heap Debug (HD) code,
+   then the HD code writes areas 1 and 3, and then returns a pointer to area 2 to
+   the caller.  Thereafter, the HD code will inspect areas 1 and 3 of all heap
+   allocations to make sure they have retained their integrity.
+
+   Surrounding the actual allocation like this enables:
+
+   1. Checking for heap overrun / underrun of all allocations.
+   2. Checking for double frees.
+   3. Use of an area that has been freed.
+   4. Identifying orphaned heap allocations.
+
+Constant no-mans-land written to areas that no-one should be writing to:
+
+ */
+
+#define HD_NO_MANS_LAND -15
+
+/*   The following is the declaration of the HD header. */
+
+/* Heap debug header magic number type: */
+typedef char HD_Hdr_Magic_Type[8];
+
+typedef struct HD_Header_Struct
+{
+	HD_Hdr_Magic_Type        magic1;         /* Magic number to ensure this
+						    allocation has integrity.
+						    (guards against heap
+						    overrun from above). */
+	const char              *allocLoc;       /* Source file name/line
+						    number where this heap
+						    allocation was made. */
+	const char              *freeLoc;        /* Source filename/line number
+						    where this heap allocation
+						    was freed. */
+	struct HD_Header_Struct *nextHD_header;  /* Creates a singly-linked
+						    list of all heap
+						    allocations. */
+	uint64_t                 sizeOfAlloc;    /* size of this heap
+						    allocation. */
+	void                    *systemAlloc;    /* The actual return value
+						    from malloc()/posix_memaligh(). */
+	uint64_t                 systemAllocSize;/* The size that is actually allocated
+						    by malloc()/posix_memalign(). */
+	HD_Hdr_Magic_Type        magic2;         /* Second magic number to
+						    ensure this allocation
+						    has integrity.
+						    (guards against heap
+						    underrun from the actual
+						    allocation that follows). */
+} __attribute__ ((packed)) HD_Header_Type;
+
+typedef struct HD_free_list_struct
+{
+	HD_Header_Type *freedStuct;
+	struct HD_free_list_struct *next_free_struct;
+} HD_Free_Struct_Type;
+
+static HD_Free_Struct_Type  *HD_free_list_root   = NULL;
+static HD_Free_Struct_Type **HD_free_list_bottom = &HD_free_list_root;
+
+typedef char HD_Trlr_Magic_Type[16];
+
+static const HD_Hdr_Magic_Type  HD_HDR_MGC_1 = "Eric";
+static const HD_Hdr_Magic_Type  HD_HDR_MGC_2 = "Emily";
+static const HD_Trlr_Magic_Type HD_TRLR_MGC  = "Erin&Elaine";
+
+/* Convert a pointer of an acual allocation to a pointer to its HD header: */
+static inline HD_Header_Type *HD_AA_TO_HD_HDR(void *aa)
+{
+	char *p = (char*)aa;
+	return (HD_Header_Type*)(p - sizeof(HD_Header_Type));
+}
+
+/* Convert a pointer to an HD header to the actual allocation: */
+static inline void *HD_HDR_TO_AA(HD_Header_Type *phdHdr)
+{
+	char *p = (char*)phdHdr;
+	return p + sizeof(HD_Header_Type);
+}
+
+/* Get the address of the trailer that follows the actual allocation: */
+static inline void *HD_GET_HD_TRLR(HD_Header_Type *phdr)
+{
+	char *p = (char*)HD_HDR_TO_AA(phdr);
+	return p + phdr->sizeOfAlloc;
+}
+
+static HD_Header_Type * HD_root_of_list = NULL;   /* Root of singly linked list
+						     of all heap allocations */
+static HD_Header_Type **HD_end_of_list = &HD_root_of_list;  /* Pointer to the
+	       last pointer of the singly linked list of all heap allocations. */
+
+/* Number of allocations in the list.  Maintained to assert the integrity
+   of the singly linked list of heap allocations. */
+static int n_allocations = 0;
+
+/* HD_check_one_struct() checks one heap allocation for inegrity. */
+static inline void HD_check_one_struct(HD_Header_Type *p, int checkAA,const char *curloc)
+{
+	/* First check the magic values in the header and trailer: */
+	psmi_assert_always(0 == memcmp(p->magic1,HD_HDR_MGC_1,sizeof(HD_HDR_MGC_1)));
+	psmi_assert_always(0 == memcmp(p->magic2,HD_HDR_MGC_2,sizeof(HD_HDR_MGC_2)));
+	psmi_assert_always(0 == memcmp(HD_GET_HD_TRLR(p),HD_TRLR_MGC,sizeof(HD_TRLR_MGC)));
+
+	/* Next, check the area between systemAlloc and the start of the header */
+	signed char *pchr = (signed char *)p->systemAlloc;
+	while (pchr < (signed char*)p)
+	{
+		psmi_assert_always(*pchr == (signed char) HD_NO_MANS_LAND);
+		pchr++;
+	}
+
+	/* Lastly, check the actual allocation area if directed to do so: */
+	if (checkAA)
+	{
+		uint64_t i;
+		signed char *pchr = HD_HDR_TO_AA(p);
+		for (i=0;i < p->sizeOfAlloc;i++)
+			if (pchr[i] != (signed char) HD_NO_MANS_LAND)
+			{
+				fprintf(stderr,
+					"use after free; ptr: %p,\n"
+					" allocated from: %s,\n"
+					" validated from: %s\n"
+					" freed from: %s\n",
+					pchr+i,p->allocLoc,curloc,p->freeLoc);
+				fflush(0);
+				psmi_assert_always(0);
+			}
+	}
+}
+
+/* _HD_validate_heap_allocations() walks the singly linked list and inspects all
+ *  heap allocations to ensure all of them have integrity still. */
+void _HD_validate_heap_allocations(const char *curloc)
+{
+	/* first check current allocation list: */
+	HD_Header_Type *p = HD_root_of_list;
+	int cnt = 0;
+
+	while (p)
+	{
+		HD_check_one_struct(p,0,curloc);
+		p = p->nextHD_header;
+		cnt++;
+	}
+	psmi_assert_always(cnt == n_allocations);
+	/* Next check free list */
+	HD_Free_Struct_Type *pfreestruct = HD_free_list_root;
+	while (pfreestruct)
+	{
+		HD_check_one_struct(pfreestruct->freedStuct,1,curloc);
+		pfreestruct = pfreestruct->next_free_struct;
+	}
+}
+
+/* hd_est_hdr_trlr() establishes the new allocation to the singly linked list, and adds
+ * the header and trailer to the allocation.  Lastly, it validates the existing singly-linked
+ * list for integrity. */
+static void hd_est_hdr_trlr(HD_Header_Type *hd_alloc,
+			    void *systemAlloc,
+			    uint64_t systemSize,
+			    uint64_t actualSize,
+			    const char *curloc)
+{
+#if 0
+	/* if we use this block of code, psm hangs runing mpistress.  See JIRA STL-5244.  */
+	memset(systemAlloc,HD_NO_MANS_LAND,systemSize);
+#else
+	/* write HD_NO_MANS_LAND to the area between the system allocation and the start of the hd header. */
+	signed char *pchr = systemAlloc;
+	for (;pchr < (signed char*) hd_alloc;pchr++)
+		*pchr = (signed char) HD_NO_MANS_LAND;
+#endif
+	/* Write the HD header info: */
+	memcpy(hd_alloc->magic1,HD_HDR_MGC_1,sizeof(HD_HDR_MGC_1));
+	hd_alloc->allocLoc = curloc;
+	hd_alloc->freeLoc = NULL;
+	hd_alloc->nextHD_header = NULL;
+	hd_alloc->sizeOfAlloc = actualSize;
+	hd_alloc->systemAlloc = systemAlloc;
+	hd_alloc->systemAllocSize = systemSize;
+	memcpy(hd_alloc->magic2,HD_HDR_MGC_2,sizeof(HD_HDR_MGC_2));
+	memcpy(HD_GET_HD_TRLR(hd_alloc),HD_TRLR_MGC,sizeof(HD_TRLR_MGC));
+	*HD_end_of_list = hd_alloc;
+	HD_end_of_list = &hd_alloc->nextHD_header;
+	n_allocations++;
+	HD_validate_heap_allocations();
+}
+
+/* hd_malloc() is the heap debug version of malloc that will create the header and trailer
+ * and link the allocation into the singly linked list. */
+static inline void *hd_malloc(size_t sz, const char *curloc)
+{
+	const uint64_t wholeSize = sizeof(HD_Header_Type) + sz + sizeof(HD_TRLR_MGC);
+	HD_Header_Type *hd_alloc = (HD_Header_Type*)malloc(wholeSize);
+
+	hd_est_hdr_trlr(hd_alloc,hd_alloc,wholeSize,sz,curloc);
+	return HD_HDR_TO_AA(hd_alloc);
+}
+
+/* hd_memalign() is the heap debug version of posix_memalign(). */
+static inline int hd_memalign(void **ptr,uint64_t alignment, size_t sz, const char *curloc)
+{
+	void *systemAlloc = NULL;
+	const uint64_t alignMask = alignment - 1;
+	uint64_t systemSize = sizeof(HD_Header_Type) + alignMask + sz + sizeof(HD_TRLR_MGC);
+	int rv = posix_memalign(&systemAlloc,alignment,systemSize);
+	char *actualAlloc = NULL;
+	const char *endOfSystemAlloc = ((char*)systemAlloc) + systemSize;
+
+	if (rv)
+		return rv;
+
+	uint64_t actualAllocu64 = (uint64_t) systemAlloc;
+	actualAllocu64 += sizeof(HD_Header_Type) + alignMask;
+	actualAllocu64 &= ~ alignMask;
+	actualAlloc = (char*)actualAllocu64;
+	psmi_assert_always((actualAllocu64 & alignMask) == 0);
+	psmi_assert_always((actualAlloc+sz+sizeof(HD_TRLR_MGC)) <= endOfSystemAlloc);
+	psmi_assert_always((actualAlloc - (char*)systemAlloc) >= sizeof(HD_Header_Type));
+
+	hd_est_hdr_trlr(HD_AA_TO_HD_HDR(actualAlloc),systemAlloc,systemSize,sz,curloc);
+	*ptr = actualAlloc;
+	return rv;
+}
+
+/* hd_free() is the heap debug version of free().  First, hd_free() ensures that the ptr to be
+ * freed infact is known by the HD code.  Next, hd_free() removes the ptr from the list. Then,
+ * hd_free scribbbles to the ptr's area and actually frees the heap space. */
+static inline void hd_free(void *ptr,const char *curloc)
+{
+	HD_Header_Type *hd_alloc = HD_AA_TO_HD_HDR(ptr);
+	HD_Header_Type *p = HD_root_of_list, *q = NULL;
+
+	HD_validate_heap_allocations();
+	while (p)
+	{
+		if (p == hd_alloc)
+		{
+			/* first, fix the next pointers: */
+			if (q)
+			{
+				q->nextHD_header = p->nextHD_header;
+			}
+			else
+			{
+				psmi_assert_always(p == HD_root_of_list);
+				HD_root_of_list = p->nextHD_header;
+			}
+			/* Now, handle the case of removing the last entry in the list. */
+			if (&p->nextHD_header == HD_end_of_list)
+			{
+				if (q)
+				{
+					q->nextHD_header = NULL;
+					HD_end_of_list = &q->nextHD_header;
+				}
+				else
+				{
+					HD_root_of_list = NULL;
+					HD_end_of_list = &HD_root_of_list;
+				}
+			}
+			/* Scribble to the actual allocation to make further access to the heap
+			   area unusable. */
+			n_allocations--;
+			memset(HD_HDR_TO_AA(hd_alloc),HD_NO_MANS_LAND,hd_alloc->sizeOfAlloc);
+			hd_alloc->freeLoc = curloc;
+			/* Add this allocation to the free list. */
+			HD_Free_Struct_Type *pfreestruct = (HD_Free_Struct_Type*)malloc(sizeof(HD_Free_Struct_Type));
+			*HD_free_list_bottom = pfreestruct;
+			HD_free_list_bottom = &pfreestruct->next_free_struct;
+			pfreestruct->freedStuct = hd_alloc;
+			pfreestruct->next_free_struct = NULL;
+			HD_validate_heap_allocations();
+			return;
+		}
+		q = p;
+		p = p->nextHD_header;
+	}
+	/* trying to free a heap allocation that we did not allocate. */
+	psmi_assert_always(0);
+}
+
+#endif
+
+#ifdef PSM_HEAP_DEBUG
+/* For HD code, we retarget the malloc, memaligh and free calls to the hd versions
+ * of the code. */
+#define my_malloc(SZ,CURLOC)             hd_malloc(SZ,CURLOC)
+#define my_memalign(PTR,ALIGN,SZ,CURLOC) hd_memalign(PTR,ALIGN,SZ,CURLOC)
+#define my_free(PTR,CURLOC)              hd_free(PTR,CURLOC)
+
+#else
+
+/* For non-HD code, we target the code to the usual functions: */
+#define my_malloc(SZ,CURLOC)             malloc(SZ)
+#define my_memalign(PTR,ALIGN,SZ,CURLOC) posix_memalign(PTR,ALIGN,SZ)
+#define my_free(PTR,CURLOC)              free(PTR)
+
+#endif
+
 void *psmi_malloc_internal(psm2_ep_t ep, psmi_memtype_t type,
 			   size_t sz, const char *curloc)
 {
@@ -1065,7 +1386,7 @@ void *psmi_malloc_internal(psm2_ep_t ep, psmi_memtype_t type,
 	if_pf(psmi_stats_mask & PSMI_STATSTYPE_MEMORY)
 	    newsz += sizeof(struct psmi_memtype_hdr);
 
-	newa = malloc(newsz);
+	newa = my_malloc(newsz,curloc);
 	if (newa == NULL) {
 		psmi_handle_error(PSMI_EP_NORETURN, PSM2_NO_MEMORY,
 				  "Out of memory for malloc at %s", curloc);
@@ -1099,7 +1420,7 @@ void *psmi_memalign_internal(psm2_ep_t ep, psmi_memtype_t type,
 	if_pf(psmi_stats_mask & PSMI_STATSTYPE_MEMORY)
 		newsz += sizeof(struct psmi_memtype_hdr);
 
-	ret = posix_memalign(&newa, alignment, newsz);
+	ret = my_memalign(&newa, alignment, newsz, curloc);
 	if (ret) {
 		psmi_handle_error(PSMI_EP_NORETURN, PSM2_NO_MEMORY,
 				  "Out of memory for malloc at %s", curloc);
@@ -1121,6 +1442,7 @@ void *psmi_memalign_internal(psm2_ep_t ep, psmi_memtype_t type,
 #ifdef calloc
 #undef calloc
 #endif
+
 void *psmi_calloc_internal(psm2_ep_t ep, psmi_memtype_t type, size_t nelem,
 			   size_t elemsz, const char *curloc)
 {
@@ -1134,6 +1456,7 @@ void *psmi_calloc_internal(psm2_ep_t ep, psmi_memtype_t type, size_t nelem,
 #ifdef strdup
 #undef strdup
 #endif
+
 void *psmi_strdup_internal(psm2_ep_t ep, const char *string, const char *curloc)
 {
 	size_t len = strlen(string) + 1;
@@ -1148,7 +1471,7 @@ void *psmi_strdup_internal(psm2_ep_t ep, const char *string, const char *curloc)
 #undef free
 #endif
 
-void psmi_free_internal(void *ptr)
+void psmi_free_internal(void *ptr,const char *curloc)
 {
 	if_pf(psmi_stats_mask & PSMI_STATSTYPE_MEMORY) {
 		struct psmi_memtype_hdr *hdr =
@@ -1161,7 +1484,7 @@ void psmi_free_internal(void *ptr)
 		psmi_assert_always(magic == 0x8c);
 		ptr = (void *)hdr;
 	}
-	free(ptr);
+	my_free(ptr,curloc);
 }
 
 PSMI_ALWAYS_INLINE(
@@ -1872,5 +2195,4 @@ void psmi_log_message(const char *fileName,
 
 	va_end(ap);
 }
-
 #endif /* #ifdef PSM_LOG */

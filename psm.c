@@ -139,7 +139,7 @@ psm2_error_t __psm2_init(int *major, int *minor)
 			"!!! WARNING !!! You are running with fault injection enabled!\n");
 
 	/* Make sure, as an internal check, that this version knows how to detect
-	 * cmopatibility with other library versions it may communicate with */
+	 * compatibility with other library versions it may communicate with */
 	if (psmi_verno_isinteroperable(psmi_verno) != 1) {
 		err = psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 					"psmi_verno_isinteroperable() not updated for current version!");
@@ -159,6 +159,29 @@ psm2_error_t __psm2_init(int *major, int *minor)
 	 * number than we are */
 	psmi_verno_client_val =
 	    min(PSMI_VERNO_MAKE(*major, *minor), psmi_verno);
+
+	/* Check to see if we need to set Architecture flags to something
+	 * besides big core Xeons */
+	cpuid_t id;
+	psmi_cpu_model = CPUID_MODEL_UNDEFINED;
+
+	/* First check to ensure Genuine Intel */
+	get_cpuid(0x0, 0, &id);
+	if(id.ebx == CPUID_GENUINE_INTEL_EBX
+		&& id.ecx == CPUID_GENUINE_INTEL_ECX
+		&& id.edx == CPUID_GENUINE_INTEL_EDX)
+	{
+		/* Use cpuid with EAX=1 to get processor info */
+		get_cpuid(0x1, 0, &id);
+		psmi_cpu_model = CPUID_GENUINE_INTEL;
+	}
+
+	if( (psmi_cpu_model == CPUID_GENUINE_INTEL) &&
+		(id.eax & CPUID_FAMILY_MASK) == CPUID_FAMILY_XEON)
+	{
+		psmi_cpu_model = ((id.eax & CPUID_MODEL_MASK) >> 4) |
+				((id.eax & CPUID_EXMODEL_MASK) >> 12);
+	}
 
 	psmi_isinit = PSMI_INITIALIZED;
 	/* hfi_debug lives in libhfi.so */

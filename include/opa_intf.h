@@ -75,14 +75,7 @@ typedef struct _atomic {
 #define atomic_set(a, v) ((a)->counter = (v))
 #define atomic_inc_return(a)  (++(a)->counter)
 
-#if defined(__PATHCC__) && __PATHCC__ < 3
-#define likely(x)	(x)
-#define unlikely(x)	(x)
-#define if_pt(cond) if (cond)
-#define if_pf(cond) if (cond)
-#define _Pragma_unlikely _Pragma("mips_frequency_hint never")
-#define _Pragma_likely   _Pragma("mips_frequency_hint frequent")
-#elif defined(__GNUC__) || (defined(__PATHCC__) && __PATHCC__ >= 3)
+#if defined(__GNUC__)
 #define likely(x)    __builtin_expect(!!(x), 1L)
 #define unlikely(x)  __builtin_expect(!!(x), 0L)
 #define if_pt(cond) if (likely(cond))

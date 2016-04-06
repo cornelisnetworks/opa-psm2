@@ -132,6 +132,10 @@ int hfi_get_num_contexts(int unit);
 /* Open hfi device file, return -1 on error. */
 int hfi_context_open(int unit, int port, uint64_t open_timeout);
 void hfi_context_close(int fd);
+/* hfi_get_user_major_version() returns the major version of the driver
+   that should be used for this session of psm. Valid only after
+   hfi_context_open has been called. */
+int hfi_get_user_major_version(void);
 int hfi_cmd_write(int fd, struct hfi1_cmd *, size_t count);
 int hfi_cmd_writev(int fd, const struct iovec *iov, int iovcnt);
 
@@ -161,6 +165,10 @@ int hfi_get_ctrs_port_names(int unitno, char **namep);
 
 /* sysfs helper routines (only those currently used are exported;
  * try to avoid using others) */
+
+/* Calls stat() for the given attribute, return value is unchanged
+   from stat() sbuf is populated from stat() too. */
+int hfi_sysfs_stat(const char *attr,struct stat *sbuf);
 
 /* read a signed 64-bit quantity, in some arbitrary base */
 int hfi_sysfs_read_s64(const char *attr, int64_t *valp, int base);

@@ -108,6 +108,11 @@ static void init_hfi_mylabel(void)
 	__hfi_mylabel = strdup(lbl);
 }
 
+/* FIXME: This signal handler does not conform to the posix standards described
+   in 'man 7 signal' due to it calling unsafe functions.
+
+   See 'CALLS UNSAFE FUNCTION' notes below for examples.
+ */
 static void hfi_sighdlr(int sig, siginfo_t *p1, void *ucv)
 {
 	/* we make these static to try and avoid issues caused
@@ -118,12 +123,15 @@ static void hfi_sighdlr(int sig, siginfo_t *p1, void *ucv)
 	extern char *__progname;
 	PSM_LOG_DECLARE_BT_BUFFER();
 
+	/* CALLS UNSAFE FUNCTION when PSM_LOG is defined. */
 	PSM_LOG_BT(100,__FUNCTION__);
 	/* If this is a SIGINT do not display backtrace. Just invoke exit
 	   handlers */
 	if ((sig == SIGINT) || (sig == SIGTERM))
+		/* CALLS UNSAFE FUNCTION (exit) */
 		exit(1);
 
+	/* CALLS UNSAFE FUNCTION (snprintf) */
 	id = snprintf(buf, sizeof(buf),
 		      "\n%.60s:%u terminated with signal %d", __progname,
 		      getpid(), sig);
@@ -143,6 +151,7 @@ static void hfi_sighdlr(int sig, siginfo_t *p1, void *ucv)
 #endif
 	}
 	id += snprintf(buf + id, sizeof(buf) - id, ". Backtrace:\n");
+	/* CALLS UNSAFE FUNCTION (fprintf) */
 	fprintf(stderr, "%.*s", id, buf);
 
 	i = backtrace(backaddr, sizeof(backaddr) / sizeof(backaddr[0]));
@@ -150,6 +159,7 @@ static void hfi_sighdlr(int sig, siginfo_t *p1, void *ucv)
 		j = 2, i -= j;
 	else
 		j = 0;
+
 	backtrace_symbols_fd(backaddr + j, i, 2);
 	(void)fsync(2);
 
@@ -159,16 +169,19 @@ static void hfi_sighdlr(int sig, siginfo_t *p1, void *ucv)
 	   btr file, to aid debugging, but not for now.  Truncate the program
 	   name if overly long, so we always get pid and (at least part of)
 	   hostname. */
+	/* CALLS UNSAFE FUNCTION (gethostname) */
 	(void)gethostname(hname, sizeof(hname));
 	hname[sizeof(hname) - 1] = '\0';
 	snprintf(fname, sizeof(fname), "%s.80s-%u,%.32s.btr", __progname,
 		 getpid(), hname);
 	if ((fd = open(fname, O_CREAT | O_WRONLY, 0644)) >= 0) {
+		/* CALLS UNSAFE FUNCTION (fdopen) */
 		FILE *fp = fdopen(fd, "w");
 		if (fp)
 			fprintf(fp, "%.*s", id, buf);
 		backtrace_symbols_fd(backaddr + j, i, fd);
 		if (fp)
+			/* CALLS UNSAFE FUNCTION (fclose) */
 			fclose(fp);
 	}
 	switch (sig){
@@ -201,7 +214,7 @@ static void init_hfi_backtrace(void)
 	act.sa_sigaction = hfi_sighdlr;
 	act.sa_flags = SA_SIGINFO;
 
-	if (!getenv("HFI_NO_BACKTRACE")) {
+	if (getenv("HFI_BACKTRACE")) {
 		/* permanent, although probably
 		   undocumented way to disable backtraces. */
 		(void)sigaction(SIGSEGV, &act, &SIGSEGV_old_act);

@@ -255,9 +255,7 @@ void psmi_am_reqq_add(int amtype, ptl_t *ptl, psm2_epaddr_t epaddr,
 #define QREADYLONG 4
 
 #define QISEMPTY(flag) (flag < QREADY)
-#ifdef __powerpc__
-#  define _QMARK_FLAG_FENCE()  asm volatile("lwsync" : : : "memory")
-#elif defined(__x86_64__) || defined(__i386__)
+#if defined(__x86_64__) || defined(__i386__)
 #  define _QMARK_FLAG_FENCE()  asm volatile("" : : : "memory")	/* compilerfence */
 #else
 #  error No _QMARK_FLAG_FENCE() defined for this platform
@@ -288,20 +286,21 @@ void psmi_am_reqq_add(int amtype, ptl_t *ptl, psm2_epaddr_t epaddr,
 #define AMSH_CMASK_POSTREQ 2
 #define AMSH_CMASK_DONE    3
 
-#define AMSH_CSTATE_TO_MASK         0x0f
-#define AMSH_CSTATE_TO_NONE         0x01
-#define AMSH_CSTATE_TO_REPLIED      0x02
-#define AMSH_CSTATE_TO_ESTABLISHED  0x03
-#define AMSH_CSTATE_TO_DISC_REPLIED 0x04
+#define AMSH_CSTATE_TO_MASK                0x0f
+#define AMSH_CSTATE_TO_NONE                0x01
+#define AMSH_CSTATE_TO_REPLIED             0x02
+#define AMSH_CSTATE_TO_ESTABLISHED         0x03
+#define AMSH_CSTATE_TO_DISC_REPLIED        0x04
+#define AMSH_CSTATE_TO_DISC_REQUESTED      0x05
 #define AMSH_CSTATE_TO_GET(amaddr)  ((amaddr)->_cstate & AMSH_CSTATE_TO_MASK)
 #define AMSH_CSTATE_TO_SET(amaddr, state)                                      \
 	(amaddr)->_cstate = (((amaddr)->_cstate & ~AMSH_CSTATE_TO_MASK) | \
 			    ((AMSH_CSTATE_TO_ ## state) & AMSH_CSTATE_TO_MASK))
 
-#define AMSH_CSTATE_FROM_MASK         0xf0
-#define AMSH_CSTATE_FROM_NONE         0x10
-#define AMSH_CSTATE_FROM_DISC_REQ     0x40
-#define AMSH_CSTATE_FROM_ESTABLISHED  0x50
+#define AMSH_CSTATE_FROM_MASK              0xf0
+#define AMSH_CSTATE_FROM_NONE              0x10
+#define AMSH_CSTATE_FROM_DISC_REQUESTED    0x40
+#define AMSH_CSTATE_FROM_ESTABLISHED       0x50
 #define AMSH_CSTATE_FROM_GET(amaddr)  ((amaddr)->_cstate & AMSH_CSTATE_FROM_MASK)
 #define AMSH_CSTATE_FROM_SET(amaddr, state)                             \
 	(amaddr)->_cstate = (((amaddr)->_cstate & ~AMSH_CSTATE_FROM_MASK) | \

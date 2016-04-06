@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,12 +51,53 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/*
 
-#ifndef OPA_COMMON_H
-#define OPA_COMMON_H
+  hfi1_deprecated.h
+
+  Contains certain features of the hfi1 module that have been deprecated.
+
+  These features may still need to be supported by the psm library for
+  reasons of backwards compatibility.
+ */
+
+#ifndef __HFI1_DEPRECATED_H__
+
+#define __HFI1_DEPRECATED_H__
+
+/* First, include the current hfi1_user.h file: */
 
 #include <rdma/hfi/hfi1_user.h>
-#include "hfi1_deprecated.h"
 
-#endif /* OPA_COMMON_H */
+/* Determine if we need to define and declare deprecated
+   entities based on the IB_IOCTL_MAGIC macro. */
+
+#if defined( IB_IOCTL_MAGIC )
+
+/* The macro: PSM2_SUPPORT_IW_CMD_API is used to stipulate
+   adding compile-time support of either the ioctl() or write()
+   command interfaces to the driver.  Note though that the
+   final decision whether to support this depends on factors
+   only known at runtime. */
+#define PSM2_SUPPORT_IW_CMD_API 1
+/* IOCTL_CMD_API_MODULE_MAJOR defines the first version of the hfi1
+ * module that supports the ioctl() command interface.  Prior to this
+ * (IOCTL_CMD_API_MODULE_MAJOR - 1 and smaller), the module used
+ * write() for the command interface. */
+#define IOCTL_CMD_API_MODULE_MAJOR        6
+
+struct hfi1_cmd_deprecated {
+	__u32 type;        /* command type */
+	__u32 len;         /* length of struct pointed to by add */
+	__u64 addr;        /* pointer to user structure */
+};
+
+#define hfi1_cmd hfi1_cmd_deprecated
+
+#else
+
+#define HFI1_SWMAJOR_SHIFT 16
+
+#endif /* defined( IB_IOCTL_MAGIC )*/
+
+#endif /* #ifndef __HFI1_DEPRECATED_H__ */
