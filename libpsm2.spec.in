@@ -48,35 +48,84 @@
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-COMPATLIB := libpsm_infinipath
-COMPAT_LIB_TARG := $(INSTALL_LIB_TARG)/psm2-compat
-compat_build_dir := .
+# Copyright (c) 2014-2015 Intel Corporation. All rights reserved.
+#
+Summary: Intel PSM Libraries
+Name: @RPM_NAME@
+Version: @VERSION@
+Release: 1@SPEC_FILE_RELEASE_DIST@
+License: BSD or GPLv2
+URL: https://github.com/01org/opa-psm2/
 
-MAJOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_COMPAT_MAJOR.*0x0\?\([1-9a-f]\?[0-9a-f]\+\).*/\1/p' ../psm2.h)
+# The tarball can be created by:
+# git clone https://github.com/01org/opa-psm2
+# cd opa-psm2
+# git checkout @DIST_SHA@
+# make dist
+Source0: %{name}-%{version}.tar.gz
 
-top_srcdir := ..
-include $(compat_build_dir)/buildflags.mak
-INCLUDES += -I..
+# The OPA product is supported on x86 64 only:
+ExclusiveArch: x86_64
+BuildRequires: libuuid-devel
+BuildRequires: systemd
+BuildRequires: gcc
+Obsoletes: hfi1-psm < 1.0.0
 
-${COMPATLIB}-objs := psm-compat.o
+%package devel
+Summary: Development files for Intel PSM
+Requires: %{name}%{?_isa} = %{version}-%{release}
+Requires: libuuid-devel
 
-DEPS:= $(${COMPATLIB}-objs:.o=.d)
--include $(DEPS)
+%package compat
+Summary: Compat library for Intel PSM
+Requires: %{name}%{?_isa} = %{version}-%{release}
+Requires: systemd-udev
 
-all .DEFAULT: ${${COMPATLIB}-objs} ${COMPATLIB}.so.${MAJOR}
+%description
+The PSM Messaging API, or PSM API, is the low-level
+user-level communications interface for the Intel(R) OPA
+family of products. PSM users are enabled with mechanisms
+necessary to implement higher level communications
+interfaces in parallel environments.
 
-install: all
-	install -m 0644 -D 40-psm-compat.rules ${DESTDIR}$(UDEVDIR)/rules.d/40-psm-compat.rules
-	install -m 0644 -D libpsm2-compat.conf ${DESTDIR}${LIBPSM2_COMPAT_CONF_DIR}/modprobe.d/libpsm2-compat.conf
-	install -m 0755 -D libpsm2-compat.cmds ${DESTDIR}/usr/lib/libpsm2/libpsm2-compat.cmds
-	install -D ${COMPATLIB}.so.${MAJOR} ${DESTDIR}${COMPAT_LIB_TARG}/${COMPATLIB}.so.${MAJOR}
+%description devel
+Development files for the Intel PSM library
 
-%.o: %.c
-	$(CC) $(CFLAGS) $(INCLUDES) -MMD -c $< -o $@
+%description compat
+Support for MPIs linked with PSM versions < 2
 
-${COMPATLIB}.so.${MAJOR}: ${${COMPATLIB}-objs}
-	$(CC) $(BASECFLAGS) $(LDFLAGS) -Wl,-soname=${COMPATLIB}.so.${MAJOR} -shared \
-		 -L$(top_srcdir) -lpsm2 -o ${COMPATLIB}.so.${MAJOR} ${${COMPATLIB}-objs}
+%prep
+%setup -q -n @RPM_NAME@-%{version}
 
-clean:
-	rm -f *.o *.d *.gcda *.gcno ${COMPATLIB}.*
+%build
+export CFLAGS="%{optflags}"
+make %{?_smp_mflags}
+
+%install
+%make_install
+
+%post -p /sbin/ldconfig
+%postun -p /sbin/ldconfig
+
+%files
+%license COPYING
+%{_libdir}/@TARGLIB@.so.@MAJOR@.@MINOR@
+%{_libdir}/@TARGLIB@.so.@MAJOR@
+@40_PSM_RULES@
+
+%files devel
+%{_libdir}/@TARGLIB@.so
+%{_includedir}/psm2.h
+%{_includedir}/psm2_mq.h
+%{_includedir}/psm2_am.h
+%{_includedir}/hfi1diag
+
+%files compat
+%{_libdir}/psm2-compat
+%{_udevrulesdir}/40-psm-compat.rules
+@LIBPSM2_COMPAT_SYM_CONF_DIR@/modprobe.d/@RPM_NAME@-compat.conf
+%{_prefix}/lib/libpsm2
+
+%changelog
+* Tue Apr 05 2016 Paul Reger <paul.j.reger@intel.com> - @VERSION@
+- Upstream PSM2 source code for Fedora.

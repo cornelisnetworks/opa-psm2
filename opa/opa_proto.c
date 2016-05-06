@@ -69,8 +69,10 @@
 #include <fcntl.h>
 #include <malloc.h>
 
+#ifdef PSM_VALGRIND
 #include "valgrind/valgrind.h"
 #include "valgrind/memcheck.h"
+#endif
 
 #include "ipserror.h"
 #include "opa_user.h"
@@ -121,8 +123,15 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info *uinfo)
 	c.addr = (__u64) uinfo;
 
 	if (hfi_cmd_write(fd, &c, sizeof(c)) == -1) {
-		_HFI_INFO("assign_context command failed: %s\n",
-			  strerror(errno));
+		if (errno == ENODEV) {
+			_HFI_INFO("PSM2 and driver version mismatch\n");
+			/* Overwrite errno. One would wish that the driver
+			 * didn't return ENODEV for a version mismatch */
+			errno = EPROTONOSUPPORT;
+		} else {
+			_HFI_INFO("assign_context command failed: %s\n",
+				  strerror(errno));
+		}
 		goto err;
 	}
 

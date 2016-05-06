@@ -1,3 +1,4 @@
+#!/bin/bash
 #
 #  This file is provided under a dual BSD/GPLv2 license.  When using or
 #  redistributing this file, you may do so under either license.
@@ -48,35 +49,37 @@
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-COMPATLIB := libpsm_infinipath
-COMPAT_LIB_TARG := $(INSTALL_LIB_TARG)/psm2-compat
-compat_build_dir := .
 
-MAJOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_COMPAT_MAJOR.*0x0\?\([1-9a-f]\?[0-9a-f]\+\).*/\1/p' ../psm2.h)
+BUILDARG=s
 
-top_srcdir := ..
-include $(compat_build_dir)/buildflags.mak
-INCLUDES += -I..
+err=0
+if [ $# -gt 1 ]; then
+    err=1
+elif [ $# -eq 1 ]; then
+    case $1 in
+	a|b|p|c|i|l)
+	    BUILDARG=$1
+	    ;;
+	*)
+	    err=1
+    esac
+fi
 
-${COMPATLIB}-objs := psm-compat.o
+if [ $err -ne 0 ]; then
+    echo "usage: $0 [rpmbuild arg (a|b|p|c|i|l)]"
+    exit 1
+fi
 
-DEPS:= $(${COMPATLIB}-objs:.o=.d)
--include $(DEPS)
+RPM_NAME=libpsm2
+make distclean
+rm -rf temp.$$
 
-all .DEFAULT: ${${COMPATLIB}-objs} ${COMPATLIB}.so.${MAJOR}
+make dist
 
-install: all
-	install -m 0644 -D 40-psm-compat.rules ${DESTDIR}$(UDEVDIR)/rules.d/40-psm-compat.rules
-	install -m 0644 -D libpsm2-compat.conf ${DESTDIR}${LIBPSM2_COMPAT_CONF_DIR}/modprobe.d/libpsm2-compat.conf
-	install -m 0755 -D libpsm2-compat.cmds ${DESTDIR}/usr/lib/libpsm2/libpsm2-compat.cmds
-	install -D ${COMPATLIB}.so.${MAJOR} ${DESTDIR}${COMPAT_LIB_TARG}/${COMPATLIB}.so.${MAJOR}
+mkdir -p temp.$$/{BUILD,RPMS,SOURCES,SPECS,SRPMS,BUILDROOT}
+cp ./$RPM_NAME-*.tar.gz temp.$$/SOURCES
+make specfile
+cp $RPM_NAME.spec temp.$$/SPECS
+rpmbuild -b$BUILDARG --define "_topdir $PWD/temp.$$" --nodeps temp.$$/SPECS/$RPM_NAME.spec
 
-%.o: %.c
-	$(CC) $(CFLAGS) $(INCLUDES) -MMD -c $< -o $@
-
-${COMPATLIB}.so.${MAJOR}: ${${COMPATLIB}-objs}
-	$(CC) $(BASECFLAGS) $(LDFLAGS) -Wl,-soname=${COMPATLIB}.so.${MAJOR} -shared \
-		 -L$(top_srcdir) -lpsm2 -o ${COMPATLIB}.so.${MAJOR} ${${COMPATLIB}-objs}
-
-clean:
-	rm -f *.o *.d *.gcda *.gcno ${COMPATLIB}.*
+echo The source rpm is in temp.$$/SRPMS/`ls temp.$$/SRPMS`

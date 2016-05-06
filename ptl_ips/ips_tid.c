@@ -223,7 +223,7 @@ ips_tid_acquire(struct ips_tid *tidc,
 		goto fail;
 	}
 
-	psmi_assert((*tidcnt) > 0);
+	psmi_assert_always((*tidcnt) > 0);
 	psmi_assert(ctrl->tid_num_avail >= (*tidcnt));
 	ctrl->tid_num_avail -= (*tidcnt);
 	tidc->tid_num_total += (*tidcnt);

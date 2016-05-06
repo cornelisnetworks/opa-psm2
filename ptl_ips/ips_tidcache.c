@@ -179,7 +179,7 @@ retry:
 		/* Unable to pin pages? retry later */
 		return PSM2_EP_DEVICE_FAILURE;
 	}
-	psmi_assert(tidcnt > 0);
+	psmi_assert_always(tidcnt > 0);
 	psmi_assert((tidcnt+NTID) <= tidc->tid_cachesize);
 
 	/*

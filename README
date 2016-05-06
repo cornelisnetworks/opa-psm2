@@ -89,7 +89,7 @@ if you wait until the hfi1 driver is upstreamed and becomes part of the RHEL 7.X
 There are two mechanisms for building and installing the PSM 2 library:
 
   1. Use provided Makefiles to build and install or
-  2. Generate a tarball that can be used to build source and binary RPMs using
+  2. Generate a src rpm that can be used to build source and binary RPMs using
      rpmbuild
 
 
@@ -130,28 +130,24 @@ BUILDING USING MAKEFILES
 BUILDING USING RPMBUILD
 -----------------------
 
-This is a two step process: Generate a PSM distribution tarball which can then
-be used to generate source and binary RPMs using the rpmbuild command with the
--ta option.
-1. Untar the tarball:
-	$ tar zxvf opa-psm-$PRODUCT-$RELEASE.tar.gz
-2. Change directory into the untarred location:
-	$ cd opa-psm-$PRODUCT-$RELEASE
-3. Generate distribution tarball
-   	$ make dist
-4. Generate source and binary packages
-   	$ rpmbuild -ta hfi1-psm-$PRODUCT-$RELEASE.tar.gz
+This is a two step process: Generate a PSM src rpm which can then
+be used to generate source and binary RPMs using the rpmbuild command.
 
-As of this writing (July 21, 2015), this command results in the following
+1. Generate a src rpm
+   	$ ./makesrpm.sh
+2. Generate all rpm packages (one example, your temp. directory will be differnt)
+   	$ rpmbuild -ba --define "_topdir $PWD/temp.1234" --nodeps temp.*/SPECS/*.spec
+
+As of this writing (April 25, 2016), this command results in the following
 collection of rpm's and source code rpm's to populate your rpmbuild directory
 tree in your home directory:
 
-RPMS/x86_64/hfi1-psm-0.7-95.x86_64.rpm
-RPMS/x86_64/hfi1-psm-devel-0.7-95.x86_64.rpm
-RPMS/x86_64/hfi1-psm-compat-0.7-95.x86_64.rpm
-RPMS/x86_64/hfi1-psm-compat-devel-0.7-95.x86_64.rpm
-RPMS/x86_64/hfi1-psm-debuginfo-0.7-95.x86_64.rpm
-SRPMS/hfi1-psm-0.7-95.src.rpm
+
+RPMS/x86_64/libpsm2-compat-10.2.13-1x86_64.rpm
+RPMS/x86_64/libpsm2-devel-10.2.13-1x86_64.rpm
+RPMS/x86_64/libpsm2-10.2.13-1x86_64.rpm
+RPMS/x86_64/libpsm2-debuginfo-10.2.13-1x86_64.rpm
+SRPMS/libpsm2-10.2.13-1.src.rpm
 
 INSTALLING USING MAKEFILE
 -------------------------
