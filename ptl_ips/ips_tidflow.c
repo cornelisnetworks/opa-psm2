@@ -98,6 +98,7 @@ psm2_error_t ips_tf_init(struct ips_protoexp *protoexp,
 		tfc->tidrecvc[tf_idx].rdescid._desc_idx = tf_idx;
 		tfc->tidrecvc[tf_idx].rdescid._desc_genc = tf_idx;
 		tfc->tidrecvc[tf_idx].tidflow.flowid = EP_FLOW_TIDFLOW;
+		tfc->tidrecvc[tf_idx].tidflow.frag_size = protoexp->proto->epinfo.ep_mtu;
 	}
 
 	/* Shared control structure, it will be in shared memory
