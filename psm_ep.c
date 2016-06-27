@@ -768,7 +768,6 @@ __psm2_ep_open_internal(psm2_uuid_t const unique_job_key, int *devid_enabled,
 
 	ep = (psm2_ep_t) psmi_memalign(PSMI_EP_NONE, UNDEFINED, 64,
 				      sizeof(struct psm2_ep) + ptl_sizes);
-	memset(ep, 0, sizeof(struct psm2_ep) + ptl_sizes);
 	epaddr = (psm2_epaddr_t) psmi_calloc(PSMI_EP_NONE, PER_PEER_ENDPOINT,
 					    1, sizeof(struct psm2_epaddr));
 	if (ep == NULL || epaddr == NULL) {
@@ -777,6 +776,7 @@ __psm2_ep_open_internal(psm2_uuid_t const unique_job_key, int *devid_enabled,
 					ep == NULL ? "psm2_ep" : "psm2_epaddr");
 		goto fail;
 	}
+	memset(ep, 0, sizeof(struct psm2_ep) + ptl_sizes);
 
 	/* Copy PTL enabled status */
 	for (i = 0; i < PTL_MAX_INIT; i++)

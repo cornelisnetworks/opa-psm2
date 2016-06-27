@@ -152,7 +152,7 @@ static psm2_error_t ips_gen_cct_table(struct ips_proto *proto)
 			cct_table[ipdidx + cca_divisor] =
 			    (((cca_divisor ^ 0x3) << CCA_DIVISOR_SHIFT) |
 			     (ipdval & 0x3FFF));
-			_HFI_VDBG("CCT[%d] = %x. Divisor: %x, IPD: %x\n",
+			_HFI_CCADBG("CCT[%d] = %x. Divisor: %x, IPD: %x\n",
 				  ipdidx + cca_divisor,
 				  cct_table[ipdidx + cca_divisor],
 				  (cct_table[ipdidx + cca_divisor] >>
@@ -296,6 +296,8 @@ ips_none_get_path_rec(struct ips_proto *proto,
 		path_rec->pr_static_ipd =
 		    proto->ips_ipd_delay[ips_default_hfi_rate(desthfi_type)];
 
+		_HFI_CCADBG("pr_static_ipd = %d\n", (int) path_rec->pr_static_ipd);
+
 		/* Setup CCA parameters for path */
 		if (path_rec->pr_sl > PSMI_SL_MAX) {
 			psmi_free(elid.key);
@@ -321,19 +323,35 @@ ips_none_get_path_rec(struct ips_proto *proto,
 
 		/* Determine active IPD for path. Is max of static rate and CCT table */
 		if (!(proto->flags & IPS_PROTO_FLAG_CCA)) {
+			_HFI_CCADBG("No IPS_PROTO_FLAG_CCA\n");
+
 			path_rec->pr_active_ipd = 0;
 			path_rec->pr_cca_divisor = 0;
+
+			_HFI_CCADBG("pr_active_ipd = %d\n", (int) path_rec->pr_active_ipd);
+			_HFI_CCADBG("pr_cca_divisor = %d\n", (int) path_rec->pr_cca_divisor);
 		} else if ((path_rec->pr_static_ipd) &&
 		    ((path_rec->pr_static_ipd + 1) >
 		     (proto->cct[path_rec->pr_ccti] & CCA_IPD_MASK))) {
+			_HFI_CCADBG("IPS_PROTO_FLAG_CCA set, Setting pr_active_ipd.\n");
+
 			path_rec->pr_active_ipd = path_rec->pr_static_ipd + 1;
 			path_rec->pr_cca_divisor = 0;
+
+			_HFI_CCADBG("pr_active_ipd = %d\n", (int) path_rec->pr_active_ipd);
+			_HFI_CCADBG("pr_cca_divisor = %d\n", (int) path_rec->pr_cca_divisor);
 		} else {
 			/* Pick it from the CCT table */
+			_HFI_CCADBG("Picking up active IPD from CCT table, index %d, value 0x%x\n",
+				    (int) path_rec->pr_ccti, (int) proto->cct[path_rec->pr_ccti]);
+
 			path_rec->pr_active_ipd =
 			    proto->cct[path_rec->pr_ccti] & CCA_IPD_MASK;
 			path_rec->pr_cca_divisor =
 			    proto->cct[path_rec->pr_ccti] >> CCA_DIVISOR_SHIFT;
+
+			_HFI_CCADBG("pr_active_ipd = %d\n", (int) path_rec->pr_active_ipd);
+			_HFI_CCADBG("pr_cca_divisor = %d\n", (int) path_rec->pr_cca_divisor);
 		}
 
 		/* Add path record into cache */
@@ -708,6 +726,12 @@ psm2_error_t ips_ibta_init(struct ips_proto *proto)
 		}
 		proto->ccti_limit = i;
 		proto->ccti_size = proto->ccti_limit + 1;
+
+		_HFI_CCADBG("ccti_limit = %d\n", (int) proto->ccti_limit);
+		for (i = 0; i < proto->ccti_limit; i++)
+			_HFI_CCADBG("cct[%d] = 0x%04x\n", i, (int) proto->cct[i]);
+
+
 		goto finishcca;
 
 /*

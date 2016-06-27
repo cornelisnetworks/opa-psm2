@@ -53,7 +53,7 @@
 Summary: Intel PSM Libraries
 Name: hfi1-psm
 Version: 0.7
-Release: 238
+Release: 244
 License: GPLv2
 Group: System Environment/Libraries
 URL: http://www.intel.com/

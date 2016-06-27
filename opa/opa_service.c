@@ -208,6 +208,12 @@ int hfi_context_open(int unit, int port, uint64_t open_timeout)
 				/* unpack the major version stored in user_major_minor into major:; */
 				major = (user_major_minor >> HFI1_SWMAJOR_SHIFT) &
 					((1 << HFI1_SWMAJOR_SHIFT)-1);
+				if (major != hfi1_user_major_version) {
+					/* PSM can only work with the version of the driver
+					 * it has been compiled for */
+					_HFI_INFO("PSM2 and driver version mismatch\n");
+					return -1;
+				}
 			}
 		}
 		if (major == -1)
@@ -769,6 +775,9 @@ int hfi_get_cc_table_bin(int unit, int port, uint16_t **cctp)
 		close(fd);
 		return 0;
 	}
+
+	_HFI_CCADBG("ccti_limit = %d\n", ccti_limit);
+
 	if (ccti_limit < 63) {
 		_HFI_CCADBG("Read ccti_limit %d not in range [63, 65535], "
 			    "using static CCA.\n", ccti_limit);
@@ -790,6 +799,8 @@ int hfi_get_cc_table_bin(int unit, int port, uint16_t **cctp)
 	}
 
 	close(fd);
+
+	_HFI_CCADBG("cct[0] = 0x%04x\n", cct[0]);
 
 	*cctp = cct;
 	return ccti_limit;
