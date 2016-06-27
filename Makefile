@@ -110,8 +110,11 @@ VERSION := $(shell if [ -e .git ] ; then  git  describe --tags --abbrev=0 --matc
 #
 # The desired release number comes the git describe following the version which
 # is the number of commits since the version tag was planted suffixed by the g<commitid>
-RELEASE := $(shell if [ -e .git ] ; then git describe --tags --long --match='v*' | sed -e 's/v[0-9.]*-\(.*\)/\1/' -e 's/-/_/' | sed -e 's/_g.*$$//'; else echo "release" ; fi)
-#
+RELEASE := $(shell if [ -f RELEASE_VER ]; then cat RELEASE_VER;\
+                  elif [ -e .git ] ; then git describe --tags --long --match='v*' | \
+                               sed -e 's/v[0-9.]*-\(.*\)/\1/' -e 's/-/_/' | \
+                               sed -e 's/_g.*$$//'; \
+                  else echo "release" ; fi)
 
 # Concatenated version and release
 VERSION_RELEASE := $(VERSION)-$(RELEASE)
