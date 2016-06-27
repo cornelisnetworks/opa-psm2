@@ -111,7 +111,7 @@ static __inline__ void ips_mb()
 
 /* gcc-3.4 has a bug with this function body at -O0 */
 static
-#if defined(__GNUC__) && !defined(__PATHCC__) && __GNUC__ == 3 && __GNUC_MINOR__ == 4
+#if defined(__GNUC__) && __GNUC__ == 3 && __GNUC_MINOR__ == 4
 #else
 __inline__
 #endif

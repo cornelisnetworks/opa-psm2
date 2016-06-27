@@ -54,7 +54,7 @@ Summary: Intel PSM Libraries
 Name: hfi1-psm
 Version: @VERSION@
 Release: @RELEASE@
-License: GPL
+License: GPLv2
 Group: System Environment/Libraries
 URL: http://www.intel.com/
 Source0: %{name}-%{version}-%{release}.tar.gz
@@ -63,7 +63,7 @@ BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 Requires(post): /sbin/ldconfig
 Requires(postun): /sbin/ldconfig
 ExclusiveArch: x86_64
-%if 0%{?rhel}
+%if 0%{?rhel}%{?rhl}%{?fedora}
 Requires: libuuid
 %else
 Requires: libuuid1
@@ -92,8 +92,8 @@ Requires(postun): /sbin/ldconfig
 Obsoletes: hfi-psm-compat
 
 %description
-The PSM Messaging API, or PSM API, is Intel's low-level
-user-level communications interface for the Truescale
+The PSM Messaging API, or PSM API, is the low-level
+user-level communications interface for the Intel(R) OPA
 family of products. PSM users are enabled with mechanisms
 necessary to implement higher level communications
 interfaces in parallel environments.
@@ -147,6 +147,7 @@ rm -rf $RPM_BUILD_ROOT
 /usr/include/hfi1diag/opa_service.h
 /usr/include/hfi1diag/opa_common.h
 /usr/include/hfi1diag/opa_byteorder.h
+/usr/include/hfi1diag/hfi1_deprecated.h
 
 %files compat
 %defattr(-,root,root,-)
@@ -154,3 +155,8 @@ rm -rf $RPM_BUILD_ROOT
 @UDEVDIR@/rules.d/40-psm-compat.rules
 /etc/modprobe.d/hfi1-psm-compat.conf
 /usr/sbin/hfi1-psm-compat.cmds
+
+%changelog
+* Tue Apr 05 2016 -0700-
+- Upstream PSM2 source code for Fedora.
+

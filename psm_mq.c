@@ -1222,8 +1222,14 @@ psm2_error_t psmi_mq_malloc(psm2_mq_t *mqo)
 
 	/* The values are overwritten in initialize_defaults, they're just set to
 	 * sensible defaults until then */
-	mq->hfi_thresh_rv = 64000;
-	mq->hfi_window_rv = 131072;
+	if(psmi_cpu_model == CPUID_MODEL_PHI_GEN2)
+	{
+		mq->hfi_thresh_rv = 200000; /* 200k, splitting diff 128K & 256K */
+		mq->hfi_window_rv = 4*1024*1024; /* 4MB */
+	} else {
+		mq->hfi_thresh_rv = 64000;
+		mq->hfi_window_rv = 131072;
+	}
 	mq->shm_thresh_rv = 16000;
 
 	memset(&mq->stats, 0, sizeof(psm2_mq_stats_t));

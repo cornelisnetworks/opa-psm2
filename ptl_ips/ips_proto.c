@@ -155,12 +155,12 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	/*
 	 * The PIO size should not include the ICRC because it is
 	 * stripped by HW before delivering to receiving buffer.
-	 * We decide to use minimum 3 PIO buffers so that PSM has
+	 * We decide to use minimum 2 PIO buffers so that PSM has
 	 * turn-around time to do PIO transfer. Each credit is a
 	 * block of 64 bytes. Also PIO buffer size must not be
 	 * bigger than MTU.
 	 */
-	proto->epinfo.ep_piosize = (ctxt_info->credits / 3) * 64 -
+	proto->epinfo.ep_piosize = (ctxt_info->credits / 2) * 64 -
 	    (sizeof(struct ips_message_header) + HFI_PCB_SIZE_IN_BYTES +
 	     cksum_sz);
 	proto->epinfo.ep_piosize =
@@ -724,14 +724,20 @@ proto_sdma_init(struct ips_proto *proto, const psmi_context_t *context)
 
 	if (!(proto->flags & (IPS_PROTO_FLAG_SDMA | IPS_PROTO_FLAG_SPIO))) {
 		/* use both spio and sdma */
-		proto->iovec_thresh_eager = MQ_HFI_THRESH_EGR_SDMA_SQ;
-		proto->iovec_thresh_eager_blocking = MQ_HFI_THRESH_EGR_SDMA;
+		if(psmi_cpu_model == CPUID_MODEL_PHI_GEN2)
+		{
+			proto->iovec_thresh_eager = MQ_HFI_THRESH_EGR_SDMA_SQ_PHI2;
+			proto->iovec_thresh_eager_blocking = MQ_HFI_THRESH_EGR_SDMA_PHI2;
+		} else {
+			proto->iovec_thresh_eager = MQ_HFI_THRESH_EGR_SDMA_SQ_XEON;
+			proto->iovec_thresh_eager_blocking = MQ_HFI_THRESH_EGR_SDMA_XEON;
+		}
 
 		if (!psmi_getenv("PSM2_MQ_EAGER_SDMA_SZ",
-				 "hfi pio-to-sdma eager switchover",
-				 PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
-				 (union psmi_envvar_val)
-				 MQ_HFI_THRESH_EGR_SDMA_SQ, &env_hfiegr)) {
+				"hfi pio-to-sdma eager switchover",
+				PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
+				(union psmi_envvar_val) proto->iovec_thresh_eager,
+				&env_hfiegr)) {
 			proto->iovec_thresh_eager = proto->iovec_thresh_eager_blocking =
 				 env_hfiegr.e_uint;
 		}

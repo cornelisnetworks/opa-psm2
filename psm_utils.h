@@ -170,7 +170,21 @@ void *psmi_memalign_internal(psm2_ep_t ep, psmi_memtype_t mt, size_t alignment,
 void *psmi_calloc_internal(psm2_ep_t ep, psmi_memtype_t mt, size_t num,
 			   size_t sz, const char *curloc);
 void *psmi_strdup_internal(psm2_ep_t ep, const char *string, const char *curloc);
-void psmi_free_internal(void *ptr);
+void psmi_free_internal(void *ptr, const char *curLoc);
+
+#ifdef PSM_HEAP_DEBUG
+/* During heap debug code, we can sprinkle function calls:
+   HD_validate_heap_allocations(), that will examine all of the heap allocations
+   to ensure interity. */
+void _HD_validate_heap_allocations(const char *curloc);
+
+#define HD_validate_heap_allocations() _HD_validate_heap_allocations(PSMI_CURLOC)
+
+#else
+
+#define HD_validate_heap_allocations() /* nothing */
+
+#endif
 
 #define psmi_strdup(ep, string) psmi_strdup_internal(ep, string, PSMI_CURLOC)
 #define psmi_calloc(ep, mt, nelem, elemsz) \
@@ -178,12 +192,12 @@ void psmi_free_internal(void *ptr);
 #define psmi_malloc(ep, mt, sz) psmi_malloc_internal(ep, mt, sz, PSMI_CURLOC)
 #define psmi_memalign(ep, mt, al, sz) \
 	psmi_memalign_internal(ep, mt, al, sz, PSMI_CURLOC)
-#define psmi_free(sz)	psmi_free_internal(sz)
+#define psmi_free(sz)	psmi_free_internal(sz, PSMI_CURLOC)
 
 #ifndef PSM_IS_TEST
 #define malloc(sz)       _use_psmi_malloc_instead_of_plain_malloc
-#define memalign(sz)       _use_psmi_malloc_instead_of_plain_malloc
-#define calloc(sz, nelm)  _use_psmi_calloc_instead_of_plain_calloc
+#define memalign(sz)     _use_psmi_memalign_instead_of_plain_memalign
+#define calloc(sz, nelm) _use_psmi_calloc_instead_of_plain_calloc
 #ifdef strdup
 #undef strdup
 #endif
@@ -269,6 +283,37 @@ int psmi_uuid_compare(const psm2_uuid_t uuA, const psm2_uuid_t uuB);
 void *psmi_memcpyo(void *dst, const void *src, size_t n);
 uint32_t psmi_crc(unsigned char *buf, int len);
 uint32_t psmi_get_hfi_type(psmi_context_t *context);
+
+/*
+ * Internal CPUID detection
+ */
+#define CPUID_FAMILY_MASK       0x00000f00
+#define CPUID_MODEL_MASK        0x000000f0
+#define CPUID_EXMODEL_MASK      0x000f0000
+
+/*
+ * CPUID return values
+ */
+#define CPUID_FAMILY_XEON       0x00000600
+#define CPUID_MODEL_PHI_GEN2    87
+/*
+ * cpuid function 0, returns "GeniuneIntel" in EBX,ECX,EDX
+ * due to Little Endian and Hex it is not so obvious
+ */
+#define CPUID_GENUINE_INTEL_EBX 0x756e6547 /* "uneG" - Little Endian "Genu" */
+#define CPUID_GENUINE_INTEL_ECX 0x6c65746e /* "Ieni" - Little Endian "ineI" */
+#define CPUID_GENUINE_INTEL_EDX 0x49656e69 /* "letn" - Little Endian "ntel" */
+
+/*
+ * These values are internal only, not real register values
+ */
+#define CPUID_GENUINE_INTEL     0xf0000000
+#define CPUID_MODEL_UNDEFINED   -1
+
+/*
+ * Global model so we can tune defaults better for specific cpu's
+ */
+uint32_t psmi_cpu_model;
 
 /*
  * Diagnostics, all in psm_diags.c

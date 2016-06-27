@@ -392,7 +392,7 @@ psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
 	static int subcontext_id_start;
 
 	memset(user_info, 0, sizeof(*user_info));
-	user_info->userversion = HFI1_USER_SWMINOR|(HFI1_USER_SWMAJOR<<16);
+	user_info->userversion = HFI1_USER_SWMINOR|(hfi_get_user_major_version()<<HFI1_SWMAJOR_SHIFT);
 
 	user_info->hfi1_alg = psmi_get_hfi_selection_algorithm();
 
@@ -416,11 +416,21 @@ psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
 	}
 
 	/* See if the user wants finer control over context assignments */
-	if (!psmi_getenv("PSM2_SHAREDCONTEXTS_MAX",
+	if (!psmi_getenv("PSM2_MAX_CONTEXTS_PER_JOB",
 			 "Maximum number of contexts for this PSM job",
 			 PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
 			 (union psmi_envvar_val)avail_contexts, &env_maxctxt)) {
-		max_contexts = max(env_maxctxt.e_int, 1);	/* needs to be non-negative */
+		max_contexts = max(env_maxctxt.e_int, 1);		/* needs to be non-negative */
+		ask_contexts = min(max_contexts, avail_contexts);	/* needs to be available */
+	} else if (!psmi_getenv("PSM2_SHAREDCONTEXTS_MAX",
+			 "Maximum number of contexts for this PSM job",
+			 PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
+			 (union psmi_envvar_val)avail_contexts, &env_maxctxt)) {
+
+		_HFI_INFO
+		    ("This env variable is deprecated. Please use PSM2_MAX_CONTEXTS_PER_JOB in future.\n");
+
+		max_contexts = max(env_maxctxt.e_int, 1);		/* needs to be non-negative */
 		ask_contexts = min(max_contexts, avail_contexts);	/* needs to be available */
 	} else
 		ask_contexts = max_contexts = avail_contexts;
@@ -450,7 +460,7 @@ psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
 	 */
 	if (rankid >= nranks) {
 		_HFI_PRDBG
-		    ("PSM_SHAREDCONTEXTS disabled because lrank=%d,ppn=%d\n",
+		    ("PSM2_SHAREDCONTEXTS disabled because lrank=%d,ppn=%d\n",
 		     rankid, nranks);
 		goto fail;
 	}
@@ -461,7 +471,7 @@ psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
 		if (contexts > ask_contexts) {
 			err = psmi_handle_error(NULL, PSM2_EP_NO_DEVICE,
 						"Incompatible settings for "
-						"PSM_SHAREDCONTEXTS_MAX and PSM_RANKS_PER_CONTEXT");
+						"(PSM2_SHAREDCONTEXTS_MAX / PSM2_MAX_CONTEXTS_PER_JOB) and PSM2_RANKS_PER_CONTEXT");
 			goto fail;
 		}
 		ask_contexts = contexts;

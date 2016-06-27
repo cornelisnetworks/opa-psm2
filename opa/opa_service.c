@@ -70,8 +70,11 @@
 #include <stdio.h>
 #include <time.h>
 #include <poll.h>
-
 #include "opa_service.h"
+
+#if defined( IB_IOCTL_MAGIC )
+#include <sys/ioctl.h>
+#endif
 
 /*
  * This function is necessary in a udev-based world.  There can be an
@@ -151,6 +154,28 @@ int hfi_wait_for_device(const char *path, long timeout)
 	return ret;
 }
 
+/* fwd declaration */
+static int _hfi_cmd_write(int fd, struct hfi1_cmd *cmd, size_t count);
+
+#ifdef PSM2_SUPPORT_IW_CMD_API
+
+/* fwd declaration */
+static int _hfi_cmd_ioctl(int fd, struct hfi1_cmd *cmd, size_t count);
+/* Function pointer. */
+static int (*_hfi_cmd_send)(int fd, struct hfi1_cmd *cmd, size_t count) = _hfi_cmd_ioctl;
+
+#else
+/* Function pointer. */
+static int (*const _hfi_cmd_send)(int fd, struct hfi1_cmd *cmd, size_t count) = _hfi_cmd_write;
+#endif
+
+static int hfi1_user_major_version = HFI1_USER_SWMAJOR;
+
+int hfi_get_user_major_version(void)
+{
+	return hfi1_user_major_version;
+}
+
 int hfi_context_open(int unit, int port, uint64_t open_timeout)
 {
 	int fd;
@@ -168,6 +193,38 @@ int hfi_context_open(int unit, int port, uint64_t open_timeout)
 			 (long)open_timeout / 1000);
 		return -1;
 	}
+
+#ifdef PSM2_SUPPORT_IW_CMD_API
+	{
+		int major = -1;
+		struct stat sbuf;
+
+		if ((!hfi_sysfs_stat("user_sw_version", &sbuf)) &&
+		    S_ISREG(sbuf.st_mode))
+		{
+			int64_t user_major_minor;
+			if (hfi_sysfs_read_s64("user_sw_version", &user_major_minor, 0) >= 0)
+			{
+				/* unpack the major version stored in user_major_minor into major:; */
+				major = (user_major_minor >> HFI1_SWMAJOR_SHIFT) &
+					((1 << HFI1_SWMAJOR_SHIFT)-1);
+			}
+		}
+		if (major == -1)
+		{
+			major = IOCTL_CMD_API_MODULE_MAJOR - 1;
+			if (HFI1_USER_SWMAJOR == IOCTL_CMD_API_MODULE_MAJOR)
+			{
+				hfi1_user_major_version = major;
+			}
+		}
+
+		if (major < IOCTL_CMD_API_MODULE_MAJOR)
+		{
+			_hfi_cmd_send = _hfi_cmd_write;
+		}
+	}
+#endif /* #ifdef PSM2_SUPPORT_IW_CMD_API */
 
 	if ((fd = open(dev_name, O_RDWR)) == -1) {
 		_HFI_DBG("(host:Can't open %s for reading and writing",
@@ -194,8 +251,53 @@ int hfi_cmd_writev(int fd, const struct iovec *iov, int iovcnt)
 
 int hfi_cmd_write(int fd, struct hfi1_cmd *cmd, size_t count)
 {
+	return _hfi_cmd_send(fd, cmd, count);
+}
+
+static
+int _hfi_cmd_write(int fd, struct hfi1_cmd *cmd, size_t count)
+{
 	return write(fd, cmd, count);
 }
+
+#ifdef PSM2_SUPPORT_IW_CMD_API
+static
+int _hfi_cmd_ioctl(int fd, struct hfi1_cmd *cmd, size_t count)
+{
+	uint64_t addrOrLiteral[2] = { (uint64_t)cmd->addr, (uint64_t)&cmd->addr };
+	const static struct
+	{
+		unsigned int ioctlCmd;
+		unsigned int addrOrLiteralIdx;
+	} cmdTypeToIoctlNum[HFI1_CMD_TID_INVAL_READ+1] = {
+		{-1                       , 0},    /*  0 */
+		{HFI1_IOCTL_ASSIGN_CTXT   , 0},    /*  1 */
+		{HFI1_IOCTL_CTXT_INFO     , 0},    /*  2 */
+		{HFI1_IOCTL_USER_INFO     , 0},    /*  3 */
+		{HFI1_IOCTL_TID_UPDATE    , 0},    /*  4 */
+		{HFI1_IOCTL_TID_FREE      , 0},    /*  5 */
+		{HFI1_IOCTL_CREDIT_UPD    , 1},    /*  6 */
+		{-1 /*HFI1_IOCTL_SDMA_STATUS_UPD */,0},/*  7 */
+		{HFI1_IOCTL_RECV_CTRL     , 1},    /*  8 */
+		{HFI1_IOCTL_POLL_TYPE     , 1},    /*  9 */
+		{HFI1_IOCTL_ACK_EVENT     , 1},    /* 10 */
+		{HFI1_IOCTL_SET_PKEY      , 1},    /* 11 */
+		{HFI1_IOCTL_CTXT_RESET    , 1},    /* 12 */
+		{HFI1_IOCTL_TID_INVAL_READ, 0}     /* 13 */
+	};
+
+	if ((cmd->type <= HFI1_CMD_TID_INVAL_READ) &&
+	    (cmdTypeToIoctlNum[cmd->type].ioctlCmd != (unsigned int)-1))
+		return ioctl(fd,
+			     cmdTypeToIoctlNum[cmd->type].ioctlCmd,
+			     addrOrLiteral[cmdTypeToIoctlNum[cmd->type].addrOrLiteralIdx]);
+	else
+	{
+		errno = EINVAL;
+		return -1;
+	}
+}
+#endif /* #ifdef PSM2_SUPPORT_IW_CMD_API */
 
 /* we use mmap64() because we compile in both 32 and 64 bit mode,
    and we have to map physical addresses that are > 32 bits long.

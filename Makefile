@@ -172,16 +172,17 @@ install: all
 	mkdir -p ${DESTDIR}/usr/include/hfi1diag
 	mkdir -p ${DESTDIR}/usr/include/hfi1diag/linux-x86_64
 	mkdir -p ${DESTDIR}/usr/include/hfi1diag/ptl_ips
-	install -D ptl_ips/ipserror.h ${DESTDIR}/usr/include/hfi1diag/ptl_ips/ipserror.h
-	install -D include/linux-x86_64/bit_ops.h ${DESTDIR}/usr/include/hfi1diag/linux-x86_64/bit_ops.h
-	install -D include/linux-x86_64/sysdep.h ${DESTDIR}/usr/include/hfi1diag/linux-x86_64/sysdep.h
-	install -D include/opa_udebug.h ${DESTDIR}/usr/include/hfi1diag/opa_udebug.h
-	install -D include/opa_debug.h ${DESTDIR}/usr/include/hfi1diag/opa_debug.h
-	install -D include/opa_intf.h ${DESTDIR}/usr/include/hfi1diag/opa_intf.h
-	install -D include/opa_user.h ${DESTDIR}/usr/include/hfi1diag/opa_user.h
-	install -D include/opa_service.h ${DESTDIR}/usr/include/hfi1diag/opa_service.h
-	install -D include/opa_common.h ${DESTDIR}/usr/include/hfi1diag/opa_common.h
-	install -D include/opa_byteorder.h ${DESTDIR}/usr/include/hfi1diag/opa_byteorder.h
+	install -m 0644 -D ptl_ips/ipserror.h ${DESTDIR}/usr/include/hfi1diag/ptl_ips/ipserror.h
+	install -m 0644 -D include/linux-x86_64/bit_ops.h ${DESTDIR}/usr/include/hfi1diag/linux-x86_64/bit_ops.h
+	install -m 0644 -D include/linux-x86_64/sysdep.h ${DESTDIR}/usr/include/hfi1diag/linux-x86_64/sysdep.h
+	install -m 0644 -D include/opa_udebug.h ${DESTDIR}/usr/include/hfi1diag/opa_udebug.h
+	install -m 0644 -D include/opa_debug.h ${DESTDIR}/usr/include/hfi1diag/opa_debug.h
+	install -m 0644 -D include/opa_intf.h ${DESTDIR}/usr/include/hfi1diag/opa_intf.h
+	install -m 0644 -D include/opa_user.h ${DESTDIR}/usr/include/hfi1diag/opa_user.h
+	install -m 0644 -D include/opa_service.h ${DESTDIR}/usr/include/hfi1diag/opa_service.h
+	install -m 0644 -D include/opa_common.h ${DESTDIR}/usr/include/hfi1diag/opa_common.h
+	install -m 0644 -D include/opa_byteorder.h ${DESTDIR}/usr/include/hfi1diag/opa_byteorder.h
+	install -m 0644 -D include/hfi1_deprecated.h ${DESTDIR}/usr/include/hfi1diag/hfi1_deprecated.h
 
 specfile:
 	sed -e 's/@VERSION@/'${VERSION}'/g' ${RPM_NAME}.spec.in | \
@@ -193,14 +194,6 @@ specfile:
 			-e 's/@MINOR@/'${MINOR}'/g' \
 			-e 's/@RELEASE@/'${RELEASE}'/g' > \
 		${RPM_NAME}.spec
-	if [ -e .git ]; then \
-		echo '%changelog' >> ${RPM_NAME}.spec; \
-		git log --no-merges v$(BASEVERSION)..HEAD --format="* %cd <%ae>%n- %s%n" \
-		| sed 's/-[0-9][0-9][0-9][0-9] //' \
-		| sed 's/ [0-9][0-9]:[0-9][0-9]:[0-9][0-9]//' \
-                >> ${RPM_NAME}.spec; \
-        fi
-
 
 # The tar is done twice with the first one discarded. This is because of
 # file system stat issues causing the first tar to fail with errors due
@@ -216,11 +209,9 @@ dist: distclean specfile
 			-name "#*"                             -prune -o	\
 			-name ".gitignore"                     -prune -o	\
 			-name "doc"                            -prune -o	\
-			-name ".hgignore"                      -prune -o	\
 			-name "libcm"                          -prune -o	\
 			-name "makesrpm.sh"                    -prune -o	\
 			-name "psm.supp"                       -prune -o	\
-			-name "README.OLD"                     -prune -o	\
 			-name "test"                           -prune -o	\
 			-name "tools"                          -prune -o	\
 			-print); do \

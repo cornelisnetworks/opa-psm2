@@ -136,7 +136,7 @@ ips_do_cksum(struct ips_proto *proto, struct ips_message_header *p_hdr,
 
 /* Get pbc static rate value for flow for a given message length */
 PSMI_ALWAYS_INLINE(
-uint32_t
+uint16_t
 ips_proto_pbc_static_rate(struct ips_proto *proto, struct ips_flow *flow,
 			  uint32_t msgLen))
 {
@@ -161,6 +161,10 @@ ips_proto_pbc_static_rate(struct ips_proto *proto, struct ips_flow *flow,
 		uint32_t time_to_send = (8 * msgLen * 805) / (100000);
 		rate = (time_to_send >> flow->path->pr_cca_divisor) *
 				(flow->path->pr_active_ipd);
+
+		if (rate > 65535)
+			rate = 65535;
+
 		}
 		break;
 
@@ -168,7 +172,7 @@ ips_proto_pbc_static_rate(struct ips_proto *proto, struct ips_flow *flow,
 		rate = 0;
 	}
 
-	return rate;
+	return (uint16_t) rate;
 }
 
 /* This is only used for SDMA cases; pbc is really a pointer to

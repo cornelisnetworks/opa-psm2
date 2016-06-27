@@ -180,7 +180,8 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info *uinfo)
 		  cinfo->egrtids, cinfo->sdma_ring_size);
 
 	/* if affinity has not been setup, set it */
-	if (!getenv("HFI_NO_CPUAFFINITY") && cinfo->rec_cpu != (__u16) -1) {
+	if ((!getenv("HFI_NO_CPUAFFINITY") && cinfo->rec_cpu != (__u16) -1) ||
+		getenv("HFI_FORCE_CPUAFFINITY")) {
 		cpu_set_t cpuset;
 		CPU_ZERO(&cpuset);
 		CPU_SET(cinfo->rec_cpu, &cpuset);
@@ -220,11 +221,11 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info *uinfo)
 	 * Check if driver version matches PSM version,
 	 * this is different from PSM API version.
 	 */
-	if ((binfo->sw_version >> 16) != HFI1_USER_SWMAJOR) {
+	if ((binfo->sw_version >> HFI1_SWMAJOR_SHIFT) != hfi_get_user_major_version()) {
 		_HFI_INFO
 		    ("User major version 0x%x not same as driver major 0x%x\n",
-		     HFI1_USER_SWMAJOR, binfo->sw_version >> 16);
-		if ((binfo->sw_version >> 16) < HFI1_USER_SWMAJOR)
+		     hfi_get_user_major_version(), binfo->sw_version >> HFI1_SWMAJOR_SHIFT);
+		if ((binfo->sw_version >> HFI1_SWMAJOR_SHIFT) < hfi_get_user_major_version())
 			goto err;	/* else assume driver knows how to be compatible */
 	} else if ((binfo->sw_version & 0xffff) != HFI1_USER_SWMINOR) {
 		_HFI_PRDBG

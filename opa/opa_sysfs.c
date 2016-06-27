@@ -115,6 +115,16 @@ const char *hfi_hfifs_path(void)
 	return hfifs_path;
 }
 
+/* Calls stat() for the given attribute, return value is unchanged
+   from stat() sbuf is populated from stat() too. */
+int hfi_sysfs_stat(const char *attr,struct stat *sbuf)
+{
+	char buf[1024];
+
+	snprintf(buf, sizeof(buf), "%s/%s", hfi_sysfs_path(), attr);
+	return stat(buf,sbuf);
+}
+
 int hfi_sysfs_open(const char *attr, int flags)
 {
 	char buf[1024];
@@ -710,7 +720,7 @@ bail:
 int hfi_sysfs_unit_read_s64(uint32_t unit, const char *attr,
 			    int64_t *valp, int base)
 {
-	char *data, *end;
+	char *data=NULL, *end;
 	int saved_errno;
 	long long val;
 	int ret;
@@ -734,7 +744,8 @@ int hfi_sysfs_unit_read_s64(uint32_t unit, const char *attr,
 	ret = 0;
 
 bail:
-	free(data);
+	if (data)
+		free(data);
 	errno = saved_errno;
 	return ret;
 }

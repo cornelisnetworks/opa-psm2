@@ -63,13 +63,6 @@ ${TARGLIB}-objs := ptl.o ptl_rcvthread.o ips_proto.o ipserror.o ips_recvq.o \
 DEPS:= $(${TARGLIB}-objs:.o=.d)
 -include $(DEPS)
 
-# enable mov,0 -> xor optimization for ips
-ifeq (${CCARCH},pathcc)
-  ifeq (,${PSM_DEBUG})
-    CFLAGS += -CG:use_xortozero=1
-  endif
-endif
-
 all: ${${TARGLIB}-objs}
 
 %.o: %.c

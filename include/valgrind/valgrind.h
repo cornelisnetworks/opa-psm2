@@ -112,9 +112,7 @@
 /* Derive some tags indicating what the target platform is.  Note
    that in this file we're using the compiler's CPP symbols for
    identifying architectures, which are different to the ones we use
-   within the rest of Valgrind.  Note, __powerpc__ is active for both
-   32 and 64-bit PPC, whereas __powerpc64__ is only active for the
-   latter (on Linux, that is).
+   within the rest of Valgrind.
 
    Misc note: how to find out what's predefined in gcc by default:
    gcc -Wp,-dM somefile.c
@@ -150,14 +148,6 @@
 #  define PLAT_x86_linux 1
 #elif defined(__linux__) && defined(__x86_64__)
 #  define PLAT_amd64_linux 1
-#elif defined(__linux__) && defined(__powerpc__) && !defined(__powerpc64__)
-#  define PLAT_ppc32_linux 1
-#elif defined(__linux__) && defined(__powerpc__) && defined(__powerpc64__) && _CALL_ELF != 2
-/* Big Endian uses ELF version 1 */
-#  define PLAT_ppc64be_linux 1
-#elif defined(__linux__) && defined(__powerpc__) && defined(__powerpc64__) && _CALL_ELF == 2
-/* Little Endian uses ELF version 2 */
-#  define PLAT_ppc64le_linux 1
 #elif defined(__linux__) && defined(__arm__) && !defined(__aarch64__)
 #  define PLAT_arm_linux 1
 #elif defined(__linux__) && defined(__aarch64__) && !defined(__arm__)
