@@ -84,7 +84,14 @@ BASECFLAGS += $(BASE_FLAGS)
 LDFLAGS += $(BASE_FLAGS)
 ASFLAGS += $(BASE_FLAGS)
 
+ifeq ($(TESTING),1)
+BASECFLAGS += -DTESTING=1
+# we skip the linker script for testing version, we want all symbols to be
+# reachable from outside the library
+else
 LDFLAGS += -Wl,--version-script psm2_linker_script.map
+endif
+
 WERROR := -Werror
 INCLUDES := -I. -I$(top_srcdir)/include -I$(top_srcdir)/mpspawn -I$(top_srcdir)/include/$(os)-$(arch)
 

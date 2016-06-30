@@ -301,7 +301,7 @@ char *hfi_get_mylabel()
 
 static void fini_hfi_backtrace(void)
 {
-  if(!getenv("HFI_NO_BACKTRACE"))  {
+  if (getenv("HFI_BACKTRACE")) {
     (void)sigaction(SIGSEGV, &SIGSEGV_old_act, NULL);
     (void)sigaction(SIGBUS,  &SIGBUS_old_act, NULL);
     (void)sigaction(SIGILL,  &SIGILL_old_act, NULL);

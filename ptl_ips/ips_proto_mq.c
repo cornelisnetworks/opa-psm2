@@ -53,6 +53,7 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
+#include "common_defines.h"
 #include "psm_user.h"
 #include "ipserror.h"
 #include "ips_proto.h"
@@ -208,7 +209,7 @@ ips_mq_send_envelope(struct ips_proto *proto, struct ips_flow *flow,
  * Tests on sandy-bridge two HFIs show lower bandwidth if
  * message striping is used.
  */
-static
+ustatic
 psm2_error_t
 ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 		 struct ips_flow *flow, psm2_mq_tag_t *tag, const void *ubuf,
@@ -218,7 +219,7 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 	psm2_error_t err = PSM2_OK;
 	uintptr_t buf = (uintptr_t) ubuf;
 	uint32_t nbytes_left, pktlen, offset, chunk_size;
-	uint16_t frag_size, msgseq, padding;
+	uint16_t msgseq, padding;
 	ips_scb_t *scb;
 
 	psmi_assert(len > 0);
@@ -226,61 +227,27 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 
 	if (flow->transfer == PSM_TRANSFER_DMA) {
 		psmi_assert((proto->flags & IPS_PROTO_FLAG_SPIO) == 0);
-		frag_size = flow->path->pr_mtu;
 		/* max chunk size is the rv window size */
 		chunk_size = proto->mq->hfi_window_rv;
 	} else {
 		psmi_assert((proto->flags & IPS_PROTO_FLAG_SDMA) == 0);
-		chunk_size = frag_size = flow->frag_size;
+		chunk_size = flow->frag_size;
 	}
 	msgseq = ipsaddr->msgctl->mq_send_seqnum++;
-
-	/*
-	 * If we can send this message by a single packet, we prefer
-	 * to use short packet, instead of eager paccket.
-	 */
-	if (len <= frag_size) {
-		uint32_t paylen = len & ~0x3;
-		scb = mq_alloc_pkts(proto, 1, 0, 0);
-		psmi_assert(scb);
-
-		ips_scb_opcode(scb) = OPCODE_SHORT;
-		scb->ips_lrh.khdr.kdeth0 = msgseq;
-		ips_scb_hdrdata(scb).u32w1 = len;
-		ips_scb_copy_tag(scb->ips_lrh.tag, tag->tag);
-
-		ips_scb_buffer(scb) = (void *)buf;
-		ips_scb_length(scb) = paylen;
-		if (len > paylen) {
-			mq_copy_tiny((uint32_t *)&ips_scb_hdrdata(scb).u32w0,
-				(uint32_t *)(buf + paylen),
-				len - paylen);
-
-			/* for complete callback */
-			req->send_msgoff = len - paylen;
-		}
-
-		ips_scb_cb(scb) = ips_proto_mq_eager_complete;
-		ips_scb_cb_param(scb) = req;
-		ips_scb_flags(scb) |= IPS_SEND_FLAG_ACKREQ;
-
-		err = ips_mq_send_envelope(proto, flow, scb, PSMI_TRUE);
-		return err;
-	}
 
 	nbytes_left = len;
 	offset = 0;
 	do {
 		padding = nbytes_left & 0x3;
 		if (padding) {
-			psmi_assert(nbytes_left > frag_size);
+			psmi_assert(nbytes_left > flow->frag_size);
 			/* over reading should be OK on sender because
 			 * the padding area is within the whole buffer,
 			 * receiver will discard the extra bytes via
 			 * padcnt in packet header
 			 */
 			padding = 4 - padding;
-			pktlen = frag_size - padding;
+			pktlen = flow->frag_size - padding;
 		} else {
 			pktlen = min(chunk_size, nbytes_left);
 			psmi_assert((pktlen & 0x3) == 0);
@@ -297,7 +264,7 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 
 		_HFI_VDBG
 		    ("payload=%p, thislen=%d, frag_size=%d, nbytes_left=%d\n",
-		     (void *)buf, pktlen, frag_size, nbytes_left);
+		     (void *)buf, pktlen, flow->frag_size, nbytes_left);
 		ips_scb_buffer(scb) = (void *)buf;
 
 		buf += pktlen;
@@ -307,10 +274,10 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 		pktlen += padding;
 		psmi_assert((pktlen & 0x3) == 0);
 
-		scb->frag_size = frag_size;
-		scb->nfrag = (pktlen + frag_size - 1) / frag_size;
+		scb->frag_size = flow->frag_size;
+		scb->nfrag = (pktlen + flow->frag_size - 1) / flow->frag_size;
 		if (scb->nfrag > 1) {
-			ips_scb_length(scb) = frag_size;
+			ips_scb_length(scb) = flow->frag_size;
 			scb->nfrag_remaining = scb->nfrag;
 			scb->chunk_size =
 				scb->chunk_size_remaining = pktlen;
@@ -487,6 +454,8 @@ ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 
 			/* for complete callback */
 			req->send_msgoff = len - paylen;
+		} else {
+			req->send_msgoff = 0;
 		}
 
 		/*

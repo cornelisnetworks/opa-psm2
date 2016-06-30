@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,17 +51,40 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+#ifndef __RBTREE_H__
 
-#include <assert.h>
-#include <stdlib.h>
+#define __RBTREE_H__
+
 #include <stdint.h>
-#include <string.h>
 
-#include "psm_mq_internal.h"
+#ifndef RBTREE_MAP_PL
+#error "You must define RBTREE_MAP_PL before including rbtree.h"
+#endif
 
-void *psmi_memcpyo(void *dst, const void *src, size_t n)
-{
-	psmi_mq_mtucpy(dst, src, n);
-	return dst;
-}
+#ifndef RBTREE_MI_PL
+#error "You must define RBTREE_MI_PL before including rbtree.h"
+#endif
+
+/*
+ * Red-Black tid cache definition.
+ */
+typedef struct _cl_map_item {
+	struct _cl_map_item	*p_left;	/* left pointer */
+	struct _cl_map_item	*p_right;	/* right pointer */
+	struct _cl_map_item	*p_up;		/* up pointer */
+	uint16_t		color;		/* red-black color */
+
+	RBTREE_MI_PL            payload;
+} cl_map_item_t;
+
+typedef struct _cl_qmap {
+	cl_map_item_t		*root;		/* root node pointer */
+	cl_map_item_t		*nil_item;	/* terminator node pointer */
+
+	RBTREE_MAP_PL            payload;
+} cl_qmap_t;
+
+#define CL_MAP_RED   0
+#define CL_MAP_BLACK 1
+
+#endif

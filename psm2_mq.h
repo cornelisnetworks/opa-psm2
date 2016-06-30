@@ -64,7 +64,7 @@ extern "C" {
 
 /*!
  * @file psm2_mq.h
- * @brief PSM Matched Queues
+ * @brief PSM2 Matched Queues
  *
  * @page psm2_mq Matched Queues interface
  *
@@ -107,39 +107,39 @@ extern "C" {
  * rank, send tag. The following code example shows how the triple can be
  * packed into 64 bits:
  *
- * @verbatim
- *    //
- *    // 64-bit send tag formed by packing the triple:
- *    //
- *    // ( context_id_16bits | source_rank_16bits | send_tag_32bits )
- *    //
- *    stag = ( (((context_id)&0xffffULL)<<48)|    \
- *             (((source_rank)&0xffffULL)<<32)|   \
- *             (((send_tag)&0xffffffffULL)) );
- * @endverbatim
+ * @code{.c}
+ 	//
+ 	// 64-bit send tag formed by packing the triple:
+ 	//
+ 	// ( context_id_16bits | source_rank_16bits | send_tag_32bits )
+ 	//
+ 	stag = ( (((context_id)&0xffffULL)<<48)|    \
+ 	         (((source_rank)&0xffffULL)<<32)|   \
+ 	         (((send_tag)&0xffffffffULL)) );
+   @endcode
  *
- * Similarly, the receiver applies the @c rtag matching bits and @rtagsel
+ * Similarly, the receiver applies the @c rtag matching bits and @c rtagsel
  * masking bits against a list of send tags and returns the first successful
  * match.  Zero bits in the @c tagsel can be used to indicate wildcarded bits
  * in the 64-bit tag which can be useful for implementing MPI's
  * @c MPI_ANY_SOURCE and @c MPI_ANY_TAG.  Following the example bit splicing in
  * the above @c stag example:
  *
- * @verbatim
- * // Example MPI implementation where MPI_COMM_WORLD implemented as 0x3333
- *
- * // MPI_Irecv source_rank=MPI_ANY_SOURCE, tag=7, comm=MPI_COMM_WORLD
- * rtag    = 0x3333000000000007;
- * rtagsel = 0xffff0000ffffffff;
- *
- * // MPI_Irecv source_rank=3, tag=MPI_ANY_TAG, comm=MPI_COMM_WORLD
- * rtag    = 0x3333000300000000;
- * rtagsel = 0xffffffff80000000; // can't ignore sign bit in tag
- *
- * // MPI_Irecv source_rank=MPI_ANY_SOURCE, tag=MPI_ANY_TAG, comm=MPI_COMM_WORLD
- * rtag    = 0x3333000300000000;
- * rtagsel = 0xffff000080000000; // can't ignore sign bit in tag
- * @endverbatim
+ * @code{.c}
+   	// Example MPI implementation where MPI_COMM_WORLD implemented as 0x3333
+  
+   	// MPI_Irecv source_rank=MPI_ANY_SOURCE, tag=7, comm=MPI_COMM_WORLD
+   	rtag    = 0x3333000000000007;
+   	rtagsel = 0xffff0000ffffffff;
+  
+   	// MPI_Irecv source_rank=3, tag=MPI_ANY_TAG, comm=MPI_COMM_WORLD
+   	rtag    = 0x3333000300000000;
+   	rtagsel = 0xffffffff80000000; // can't ignore sign bit in tag
+  
+   	// MPI_Irecv source_rank=MPI_ANY_SOURCE, tag=MPI_ANY_TAG, comm=MPI_COMM_WORLD
+   	rtag    = 0x3333000300000000;
+   	rtagsel = 0xffff000080000000; // can't ignore sign bit in tag
+   @endcode
  *
  *
  * Applications that do not follow tag matching semantics can simply always
@@ -284,33 +284,33 @@ extern "C" {
  * @retval PSM2_OK A new Matched Queue has been instantiated across all the
  *         members of the group.
  *
- * @verbatim
- * int try_open_endpoint_and_initialize_mq(
- *	  psm2_ep_t *ep,	// endpoint handle
- *	  psm2_epid_t *epid, // unique endpoint ID
- *	  psm2_uuid_t job_uuid, // unique job uuid, for ep_open
- *	  psm2_mq_t *mq, // MQ handle initialized on endpoint 'ep'
- *        uint64_t communicator_bits) // Where we store our communicator or
- *                                    // context bits in the 64-bit tag.
- * {
- *     // Simplifed open, see psm2_ep_open documentation for more info
- *     psm2_ep_open(job_uuid,
- *                 NULL, // no options
- *                 ep, epid);
- *
- *     // We initialize a matched queue by telling PSM the bits that are
- *     // order-significant in the tag.  Point-to-point ordering will not be
- *     // maintained between senders where the communicator bits are not the
- *     // same.
- *     psm2_mq_init(ep,
- *                 communicator_bits,
- *                 NULL, // no other MQ options
- *                 0,    // 0 options passed
- *                 mq);  // newly initialized matched Queue
- *
- *     return 1;
- * }
- * @endverbatim
+ * @code{.c}
+   	int try_open_endpoint_and_initialize_mq(
+   	       psm2_ep_t *ep,	// endpoint handle
+   	       psm2_epid_t *epid, // unique endpoint ID
+   	       psm2_uuid_t job_uuid, // unique job uuid, for ep_open
+   	       psm2_mq_t *mq, // MQ handle initialized on endpoint 'ep'
+   	       uint64_t communicator_bits) // Where we store our communicator or
+   	                                   // context bits in the 64-bit tag.
+   	{
+   	    // Simplifed open, see psm2_ep_open documentation for more info
+   	    psm2_ep_open(job_uuid,
+   	                NULL, // no options
+   	                ep, epid);
+  
+   	    // We initialize a matched queue by telling PSM the bits that are
+   	    // order-significant in the tag.  Point-to-point ordering will not be
+   	    // maintained between senders where the communicator bits are not the
+   	    // same.
+   	    psm2_mq_init(ep,
+   	                communicator_bits,
+   	                NULL, // no other MQ options
+   	                0,    // 0 options passed
+   	                mq);  // newly initialized matched Queue
+  
+   	    return 1;
+   	}
+   @endcode
  */
 psm2_error_t
 psm2_mq_init(psm2_ep_t ep, uint64_t tag_order_mask,
@@ -333,13 +333,15 @@ psm2_mq_init(psm2_ep_t ep, uint64_t tag_order_mask,
  * @retval PSM2_OK A given Matched Queue has been freed and use of the future
  * use of the handle produces undefined results.
  */
-	 psm2_error_t psm2_mq_finalize(psm2_mq_t mq);
+psm2_error_t
+psm2_mq_finalize(psm2_mq_t mq);
 
 #define PSM2_MQ_TAG_ELEMENTS 3
 	/**< Represents the number of 32-bit tag elements in the psm2_mq_tag_t
 	 *   type. */
 
-/** @brief MQ Message tag
+/** @struct psm2_mq_tag
+ ** @brief MQ Message tag
  *
  * Extended message tag type introduced in PSM 2.0.  The previous 64 bit tag
  * values are replaced by a struct containing three 32 bit tag values for a
@@ -353,15 +355,17 @@ psm2_mq_init(psm2_ep_t ep, uint64_t tag_order_mask,
  * @ref psm2_mq_irecv2, provided the tags match as described above.
  */
 typedef
-struct psm2_mq_tag {
-	union {
+//struct psm2_mq_tag {
+union psm2_mq_tag {
+//    union {
 		uint32_t tag[PSM2_MQ_TAG_ELEMENTS] __attribute__ ((aligned(16)));
+            /**< 3 x 32bit array representation of @ref psm2_mq_tag */
 		struct {
-			uint32_t tag0;
-			uint32_t tag1;
-			uint32_t tag2;
+			uint32_t tag0; /**< 1 of 3 uint32_t tag values */
+			uint32_t tag1; /**< 2 of 3 uint32_t tag values */
+			uint32_t tag2; /**< 3 of 3 uint32_t tag values */
 		};
-	};
+//	};
 } psm2_mq_tag_t;
 
 /** @brief MQ Non-blocking operation status
@@ -424,14 +428,14 @@ typedef struct psm2_mq_req *psm2_mq_req_t;
  * The following example shows how to retrieve the current message size at
  * which messages are sent as synchronous.
  *
- * @verbatim
- * uint32_t get_hfirv_size(psm2_mq_t mq)
- * {
- *     uint32_t rvsize;
- *     psm2_getopt(mq, PSM2_MQ_RNDV_HFI_SZ, &rvsize);
- *     return rvsize;
- * }
- * @endverbatim
+ * @code{.c}
+   	uint32_t get_hfirv_size(psm2_mq_t mq)
+   	{
+   	    uint32_t rvsize;
+   	    psm2_getopt(mq, PSM2_MQ_RNDV_HFI_SZ, &rvsize);
+   	    return rvsize;
+   	}
+   @endcode
  */
 
 /** @brief Get an MQ option (Deprecated. Use psm2_getopt with PSM2_COMPONENT_MQ)
@@ -571,7 +575,7 @@ psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *rtag,
  * @param[in] len Receive buffer length
  * @param[in] context User context pointer, available in @ref psm2_mq_status_t
  *                    upon completion
- * @param[inout] req PSM MQ Request handle matched previously by a matched
+ * @param[inout] reqo PSM MQ Request handle matched previously by a matched
  *		     probe routine (@ref psm2_mq_improbe or @ref
  *		     psm2_mq_improbe2), also to be used for explicitly
  *		     controlling message receive completion.
@@ -679,30 +683,30 @@ psm2_mq_send2(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags,
  *
  * @retval PSM2_OK The message has been successfully initiated.
  *
- * @verbatim
- * psm2_mq_req_t
- * non_blocking_send(const psm2_mq_t mq, psm2_epaddr_t dest_ep,
- *                       const void *buf, uint32_t len,
- *			 int context_id, int send_tag, const my_request_t *req)
- * {
- *     psm2_mq_req_t req_mq;
- *     // Set up our send tag, assume that "my_rank" is global and represents
- *     // the rank of this process in the job
- *     uint64_t tag = ( ((context_id & 0xffff) << 48) |
- *                      ((my_rank & 0xffff) << 32)    |
- *                      ((send_tag & 0xffffffff)) );
- *
- *     psm2_mq_isend(mq, dest_ep,
- *                  0, // no flags
- *                  tag,
- *                  buf,
- *                  len,
- *                  req, // this req is available in psm2_mq_status_t when one
- *                       // of the synchronization functions is called.
- *                  &req_mq);
- *     return req_mq;
- * }
- * @endverbatim
+ * @code{.c}
+   	psm2_mq_req_t
+   	non_blocking_send(const psm2_mq_t mq, psm2_epaddr_t dest_ep,
+   	                      const void *buf, uint32_t len,
+   	     		 int context_id, int send_tag, const my_request_t *req)
+   	{
+   	    psm2_mq_req_t req_mq;
+   	    // Set up our send tag, assume that "my_rank" is global and represents
+   	    // the rank of this process in the job
+   	    uint64_t tag = ( ((context_id & 0xffff) << 48) |
+   	                     ((my_rank & 0xffff) << 32)    |
+   	                     ((send_tag & 0xffffffff)) );
+  
+   	    psm2_mq_isend(mq, dest_ep,
+   	                 0, // no flags
+   	                 tag,
+   	                 buf,
+   	                 len,
+   	                 req, // this req is available in psm2_mq_status_t when one
+   	                      // of the synchronization functions is called.
+   	                 &req_mq);
+   	    return req_mq;
+   	}
+   @endcode
  */
 psm2_error_t
 psm2_mq_isend(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags, uint64_t stag,
@@ -741,31 +745,31 @@ psm2_mq_isend(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags, uint64_t stag,
  *
  * @retval PSM2_OK The message has been successfully initiated.
  *
- * @verbatim
- * psm2_mq_req_t
- * non_blocking_send(const psm2_mq_t mq, psm2_epaddr_t dest_ep,
- *                       const void *buf, uint32_t len,
- *			 int context_id, int send_tag, const my_request_t *req)
- * {
- *     psm2_mq_req_t req_mq;
- *     // Set up our send tag, assume that "my_rank" is global and represents
- *     // the rank of this process in the job
- *     psm2_mq_tag_t tag;
- *     tag.tag[0] = send_tag;
- *     tag.tag[1] = my_rank;
- *     tag.tag[2] = context_id;
- *
- *     psm2_mq_isend(mq, dest_ep,
- *                  0, // no flags
- *                  &tag,
- *                  buf,
- *                  len,
- *                  req, // this req is available in psm2_mq_status2_t when one
- *                       // of the synchronization functions is called.
- *                  &req_mq);
- *     return req_mq;
- * }
- * @endverbatim
+ * @code{.c}
+   	psm2_mq_req_t
+   	non_blocking_send(const psm2_mq_t mq, psm2_epaddr_t dest_ep,
+   	                      const void *buf, uint32_t len,
+   	     		 int context_id, int send_tag, const my_request_t *req)
+   	{
+   	    psm2_mq_req_t req_mq;
+   	    // Set up our send tag, assume that "my_rank" is global and represents
+   	    // the rank of this process in the job
+   	    psm2_mq_tag_t tag;
+   	    tag.tag[0] = send_tag;
+   	    tag.tag[1] = my_rank;
+   	    tag.tag[2] = context_id;
+  
+   	    psm2_mq_isend(mq, dest_ep,
+   	                 0, // no flags
+   	                 &tag,
+   	                 buf,
+   	                 len,
+   	                 req, // this req is available in psm2_mq_status2_t when one
+   	                      // of the synchronization functions is called.
+   	                 &req_mq);
+   	    return req_mq;
+   	}
+   @endcode
  */
 psm2_error_t
 psm2_mq_isend2(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags,
@@ -874,6 +878,8 @@ psm2_mq_improbe(psm2_mq_t mq, uint64_t rtag, uint64_t rtagsel, psm2_mq_req_t *re
  * @param[in] src Source (sender's) epaddr (may be PSM2_MQ_ANY_ADDR)
  * @param[in] rtag Message receive tag
  * @param[in] rtagsel Message receive tag selector
+ * @param[out] reqo PSM MQ Request handle, to be used for receiving the matched
+ *                  message.
  * @param[out] status Upon return, @c status is filled with information
  *                    regarding the matching send.
  *
@@ -885,7 +891,7 @@ psm2_mq_improbe(psm2_mq_t mq, uint64_t rtag, uint64_t rtagsel, psm2_mq_req_t *re
  */
 psm2_error_t
 psm2_mq_improbe2(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *rtag,
-		psm2_mq_tag_t *rtagsel, psm2_mq_req_t *req,
+		psm2_mq_tag_t *rtagsel, psm2_mq_req_t *reqo,
 		psm2_mq_status2_t *status);
 
 /** @brief Query for non-blocking requests ready for completion.
@@ -920,39 +926,40 @@ psm2_mq_improbe2(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *rtag,
  *                               are no further requests ready for completion.
  *                               The contents of @c req and @c status remain
  *                               unchanged.
- * @verbatim
- * // Example that uses ipeek_mq_ipeek to make progress instead of psm2_poll
- * // We return the amount of non-blocking requests that we've completed
- * int main_progress_loop(psm2_mq_t mq)
- * {
- *     int num_completed = 0;
- *     psm2_mq_req_t req;
- *     psm2_mq_status_t status;
- *     psm2_error_t err;
- *     my_request_t *myreq;
- *
- *     do {
- *         err = psm2_mq_ipeek(mq, &req,
- *                            NULL); // No need for status in ipeek here
- *         if (err == PSM2_MQ_NO_COMPLETIONS)
- *             return num_completed;
- *         else if (err != PSM2_OK)
- *             goto errh;
- *         num_completed++;
- *
- *         // We obtained 'req' at the head of the completion queue.  We can
- *         // now free the request with PSM and obtain our original reques
- *         // from the status' context
- *         err = psm2_mq_test(&req, // will be marked as invalid
- *                           &status); // we need the status
- *         myreq = (my_request_t *) status.context;
- *
- *         // handle the completion for myreq whether myreq is a posted receive
- *         // or a non-blocking send.
- *    }
- *    while (1);
- * }
- * @endverbatim */
+ * @code{.c}
+   	// Example that uses ipeek_mq_ipeek to make progress instead of psm2_poll
+   	// We return the amount of non-blocking requests that we've completed
+   	int main_progress_loop(psm2_mq_t mq)
+   	{
+   	    int num_completed = 0;
+   	    psm2_mq_req_t req;
+   	    psm2_mq_status_t status;
+   	    psm2_error_t err;
+   	    my_request_t *myreq;
+  
+   	    do {
+   	        err = psm2_mq_ipeek(mq, &req,
+   	                           NULL); // No need for status in ipeek here
+   	        if (err == PSM2_MQ_NO_COMPLETIONS)
+   	            return num_completed;
+   	        else if (err != PSM2_OK)
+   	            goto errh;
+   	        num_completed++;
+  
+   	        // We obtained 'req' at the head of the completion queue.  We can
+   	        // now free the request with PSM and obtain our original reques
+   	        // from the status' context
+   	        err = psm2_mq_test(&req, // will be marked as invalid
+   	                          &status); // we need the status
+   	        myreq = (my_request_t *) status.context;
+  
+   	        // handle the completion for myreq whether myreq is a posted receive
+   	        // or a non-blocking send.
+   	   }
+   	   while (1);
+   	}
+   @endcode
+ */
 psm2_error_t
 psm2_mq_ipeek(psm2_mq_t mq, psm2_mq_req_t *req, psm2_mq_status_t *status);
 
@@ -988,39 +995,40 @@ psm2_mq_ipeek(psm2_mq_t mq, psm2_mq_req_t *req, psm2_mq_status_t *status);
  *                            are no further requests ready for completion.
  *                            The contents of @c req and @c status remain
  *                            unchanged.
- * @verbatim
- * // Example that uses ipeek_mq_ipeek to make progress instead of psm2_poll
- * // We return the amount of non-blocking requests that we've completed
- * int main_progress_loop(psm2_mq_t mq)
- * {
- *     int num_completed = 0;
- *     psm2_mq_req_t req;
- *     psm2_mq_status2_t status;
- *     psm2_error_t err;
- *     my_request_t *myreq;
- *
- *     do {
- *         err = psm2_mq_ipeek2(mq, &req,
- *                            NULL); // No need for status in ipeek here
- *         if (err == PSM2_MQ_NO_COMPLETIONS)
- *             return num_completed;
- *         else if (err != PSM2_OK)
- *             goto errh;
- *         num_completed++;
- *
- *         // We obtained 'req' at the head of the completion queue.  We can
- *         // now free the request with PSM and obtain our original reques
- *         // from the status' context
- *         err = psm2_mq_test2(&req, // will be marked as invalid
- *                           &status); // we need the status
- *         myreq = (my_request_t *) status.context;
- *
- *         // handle the completion for myreq whether myreq is a posted receive
- *         // or a non-blocking send.
- *    }
- *    while (1);
- * }
- * @endverbatim */
+ * @code{.c}
+   	// Example that uses ipeek_mq_ipeek to make progress instead of psm2_poll
+   	// We return the amount of non-blocking requests that we've completed
+   	int main_progress_loop(psm2_mq_t mq)
+   	{
+   	    int num_completed = 0;
+   	    psm2_mq_req_t req;
+   	    psm2_mq_status2_t status;
+   	    psm2_error_t err;
+   	    my_request_t *myreq;
+  
+   	    do {
+   	        err = psm2_mq_ipeek2(mq, &req,
+   	                           NULL); // No need for status in ipeek here
+   	        if (err == PSM2_MQ_NO_COMPLETIONS)
+   	            return num_completed;
+   	        else if (err != PSM2_OK)
+   	            goto errh;
+   	        num_completed++;
+  
+   	        // We obtained 'req' at the head of the completion queue.  We can
+   	        // now free the request with PSM and obtain our original reques
+   	        // from the status' context
+   	        err = psm2_mq_test2(&req, // will be marked as invalid
+   	                          &status); // we need the status
+   	        myreq = (my_request_t *) status.context;
+  
+   	        // handle the completion for myreq whether myreq is a posted receive
+   	        // or a non-blocking send.
+   	   }
+   	   while (1);
+   	}
+   @endcode
+ */
 psm2_error_t
 psm2_mq_ipeek2(psm2_mq_t mq, psm2_mq_req_t *req, psm2_mq_status2_t *status);
 
@@ -1148,29 +1156,29 @@ psm2_mq_wait2(psm2_mq_req_t *request, psm2_mq_status2_t *status);
  * @retval PSM2_MQ_NO_COMPLETIONS The request is not complete and @c request is
  *                           unchanged.
  *
- * @verbatim
- * // Function that returns the first completed request in an array
- * // of requests.
- * void *
- * user_testany(psm2_mq_t mq, psm2_mq_req_t *allreqs, int nreqs)
- * {
- *   int i;
- *   void *context = NULL;
- *
- *   // Ensure progress only once
- *   psm2_poll(mq);
- *
- *   // Test for at least one completion and return it's context
- *   psm2_mq_status_t stat;
- *   for (i = 0; i < nreqs; i++) {
- *     if (psm2_mq_test(&allreqs[i], &stat) == PSM2_OK) {
- *       context = stat.context;
- *       break;
- *     }
- *   }
- *   return context;
- * }
- * @endverbatim
+ * @code{.c}
+  	// Function that returns the first completed request in an array
+  	// of requests.
+  	void *
+  	user_testany(psm2_ep_t ep, psm2_mq_req_t *allreqs, int nreqs)
+  	{
+  	  int i;
+  	  void *context = NULL;
+  	
+  	  // Ensure progress only once
+  	  psm2_poll(ep);
+  	
+  	  // Test for at least one completion and return it's context
+  	  psm2_mq_status_t stat;
+  	  for (i = 0; i < nreqs; i++) {
+  	    if (psm2_mq_test(&allreqs[i], &stat) == PSM2_OK) {
+  	      context = stat.context;
+  	      break;
+  	    }
+  	  }
+  	  return context;
+  	}
+  @endcode
  */
 psm2_error_t
 psm2_mq_test(psm2_mq_req_t *request, psm2_mq_status_t *status);
@@ -1219,29 +1227,29 @@ psm2_mq_test(psm2_mq_req_t *request, psm2_mq_status_t *status);
  * @retval PSM2_MQ_NO_COMPLETIONS The request is not complete and @c request is
  *                           unchanged.
  *
- * @verbatim
- * // Function that returns the first completed request in an array
- * // of requests.
- * void *
- * user_testany(psm2_mq_t mq, psm2_mq_req_t *allreqs, int nreqs)
- * {
- *   int i;
- *   void *context = NULL;
- *
- *   // Ensure progress only once
- *   psm2_poll(mq);
- *
- *   // Test for at least one completion and return it's context
- *   psm2_mq_status2_t stat;
- *   for (i = 0; i < nreqs; i++) {
- *     if (psm2_mq_test2(&allreqs[i], &stat) == PSM2_OK) {
- *       context = stat.context;
- *       break;
- *     }
- *   }
- *   return context;
- * }
- * @endverbatim
+ * @code{.c}
+  	// Function that returns the first completed request in an array
+  	// of requests.
+  	void *
+  	user_testany(psm2_ep_t ep, psm2_mq_req_t *allreqs, int nreqs)
+  	{
+  	  int i;
+  	  void *context = NULL;
+  	
+  	  // Ensure progress only once
+  	  psm2_poll(ep);
+  	
+  	  // Test for at least one completion and return it's context
+  	  psm2_mq_status2_t stat;
+  	  for (i = 0; i < nreqs; i++) {
+  	    if (psm2_mq_test2(&allreqs[i], &stat) == PSM2_OK) {
+  	      context = stat.context;
+  	      break;
+  	    }
+  	  }
+  	  return context;
+  	}
+   @endcode
  */
 psm2_error_t
 psm2_mq_test2(psm2_mq_req_t *request, psm2_mq_status2_t *status);

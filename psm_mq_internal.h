@@ -66,6 +66,8 @@
 #include <smmintrin.h>
 #include "psm_user.h"
 
+#include "common_defines.h"
+
 #if 0
 typedef psm2_error_t(*psm_mq_unexpected_callback_fn_t)
 	(psm2_mq_t mq, uint16_t mode, psm2_epaddr_t epaddr,
@@ -245,7 +247,8 @@ hash_32(uint32_t a))
 	return _mm_crc32_u32(0, a);
 }
 
-void psmi_mq_mtucpy(void *vdest, const void *vsrc, uint32_t nchars);
+void MOCKABLE(psmi_mq_mtucpy)(void *vdest, const void *vsrc, uint32_t nchars);
+MOCK_DCL_EPILOGUE(psmi_mq_mtucpy);
 
 #if defined(__x86_64__)
 void psmi_mq_mtucpy_safe(void *vdest, const void *vsrc, uint32_t nchars);
@@ -433,7 +436,8 @@ PSMI_ALWAYS_INLINE(void mq_qq_remove_which(psm2_mq_req_t req, int table))
 
 psm2_error_t psmi_mq_req_init(psm2_mq_t mq);
 psm2_error_t psmi_mq_req_fini(psm2_mq_t mq);
-psm2_mq_req_t psmi_mq_req_alloc(psm2_mq_t mq, uint32_t type);
+psm2_mq_req_t MOCKABLE(psmi_mq_req_alloc)(psm2_mq_t mq, uint32_t type);
+MOCK_DCL_EPILOGUE(psmi_mq_req_alloc);
 #define      psmi_mq_req_free(req)  psmi_mpool_put(req)
 
 /*

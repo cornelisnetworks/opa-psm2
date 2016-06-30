@@ -279,7 +279,7 @@ int mq_req_remove_single(psm2_mq_t mq, psm2_mq_req_t req)
 	return 1;
 }
 
-void psmi_mq_mtucpy(void *vdest, const void *vsrc, uint32_t nchars)
+void MOCKABLE(psmi_mq_mtucpy)(void *vdest, const void *vsrc, uint32_t nchars)
 {
 	unsigned char *dest = (unsigned char *)vdest;
 	const unsigned char *src = (const unsigned char *)vsrc;
@@ -296,6 +296,7 @@ void psmi_mq_mtucpy(void *vdest, const void *vsrc, uint32_t nchars)
 		*dest++ = *src++;
 	}
 }
+MOCK_DEF_EPILOGUE(psmi_mq_mtucpy);
 
 #if 0				/* defined(__x86_64__) No consumers of mtucpy safe */
 void psmi_mq_mtucpy_safe(void *vdest, const void *vsrc, uint32_t nchars)

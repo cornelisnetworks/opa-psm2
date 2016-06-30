@@ -136,14 +136,35 @@ export 	LIBPSM2_COMPAT_CONF_DIR
 
 # The desired version number comes from the most recent tag starting with "v"
 VERSION := $(shell if [ -e .git ] ; then  git  describe --tags --abbrev=0 --match='v*' | sed -e 's/^v//' -e 's/-/_/'; else echo "version" ; fi)
-#
+
+# If we have a file called 'rpm_release_extension' (as on github),
+# we take the release extension number from this file
+RELEASE_EXT := $(shell if [ -e rpm_release_extension ] ; then cat rpm_release_extension; fi)
+CURRENTSHA := $(shell if [ -e .git -a -f rpm_release_extension ] ; then git log --pretty=format:'%h' -n 1; fi)
+RPMEXTHASH := $(shell if [ -e .git -a -f rpm_release_extension ] ; then git log --pretty=format:'%h' -n 1 rpm_release_extension; fi)
+
+# On github, the last commit for each release should be the one to bump up
+# the release extension number in 'rpm_release_extension'. Further commits
+# are counted here and appended to the final rpm name to distinguish commits
+# present only on github
+NCOMMITS := $(shell if [ -e .git -a -f rpm_release_extension ] ; then git log $(RPMEXTHASH)..$(CURRENTSHA) --pretty=oneline | wc -l; fi)
+
+# This logic should kick-in only on github
+ifdef RELEASE_EXT
+ifneq ($(CURRENTSHA), $(RPMEXTHASH))
+RELEASE := $(RELEASE_EXT)_$(NCOMMITS)
+endif
+endif
+
 # The desired release number comes the git describe following the version which
 # is the number of commits since the version tag was planted suffixed by the g<commitid>
-RELEASE := $(shell if [ -f RELEASE ]; then cat RELEASE;\
+ifndef RELEASE
+RELEASE := $(shell if [ -f rpm_release_extension ]; then cat rpm_release_extension;\
 		   elif [ -e .git ] ; then git describe --tags --long --match='v*' | \
 				sed -e 's/v[0-9.]*-\(.*\)/\1/' -e 's/-/_/' | \
 				sed -e 's/_g.*$$//'; \
 		   else echo "release" ; fi)
+endif
 
 DIST_SHA := ${shell if [ -e .git ] ; then git log -n1 --pretty=format:%H ; \
 		else echo DIST_SHA ; fi}
@@ -267,7 +288,7 @@ dist: distclean
 		[ ! -d $$x ] && cp $$x ${DIST}/$$dir; \
 	done
 	if [ -e .git ] ; then git log -n1 --pretty=format:%H > ${DIST}/COMMIT ; fi
-	echo ${RELEASE} > ${DIST}/RELEASE
+	echo ${RELEASE} > ${DIST}/rpm_release_extension
 	tar czvf ${DIST}.tar.gz ${DIST}
 	rm -rf ${DIST}
 
@@ -314,7 +335,6 @@ ${TARGLIB}-objs := ptl_am/am_reqrep_shmem.o	\
 		   ptl_ips/ips_proto_expected.o \
 		   ptl_ips/ips_tid.o		\
 		   ptl_ips/ips_tidcache.o       \
-		   ptl_ips/ips_rbtree.o         \
 		   ptl_ips/ips_tidflow.o        \
 		   ptl_ips/ips_crc32.o 		\
 		   ptl_ips/ips_proto_dump.o	\

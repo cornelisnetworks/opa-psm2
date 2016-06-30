@@ -242,7 +242,7 @@ psm2_error_t ips_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 	uint32_t num_of_send_desc = ep->hfi_num_descriptors;
 	uint32_t imm_size = ep->hfi_imm_size;
 	const psmi_context_t *context = &ep->context;
-	const struct hfi1_user_info *user_info = &context->user_info;
+	const struct hfi1_user_info_dep *user_info = &context->user_info;
 	const struct hfi1_ctxt_info *ctxt_info = &context->ctrl->ctxt_info;
 	const int enable_shcontexts = (user_info->subctxt_cnt > 0);
 	const uint64_t current_count = get_cycles();
@@ -426,7 +426,7 @@ fail:
 
 static psm2_error_t ips_ptl_fini(ptl_t *ptl, int force, uint64_t timeout_in)
 {
-	const struct hfi1_user_info *user_info = &ptl->context->user_info;
+	const struct hfi1_user_info_dep *user_info = &ptl->context->user_info;
 	const int enable_shcontexts = (user_info->subctxt_cnt > 0);
 	psm2_error_t err = PSM2_OK;
 

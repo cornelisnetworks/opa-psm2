@@ -167,7 +167,7 @@ struct ips_proto;
 typedef struct ips_path_rec {
 	uint16_t pr_slid;	/* For Torus/non zero LMC fabrics this can be diff */
 	uint16_t pr_dlid;
-	uint16_t pr_mtu;
+	uint16_t pr_mtu;	/* < Path's MTU */
 	uint16_t pr_pkey;
 	uint16_t pr_static_ipd;	/* Static rate IPD from path record */
 	uint8_t pr_sl;

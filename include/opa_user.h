@@ -419,7 +419,7 @@ struct _hfi_ctrl {
    else is returned by this routine.
 */
 
-struct _hfi_ctrl *hfi_userinit(int32_t, struct hfi1_user_info *);
+struct _hfi_ctrl *hfi_userinit(int32_t, struct hfi1_user_info_dep *);
 
 /* don't inline these; it's all init code, and not inlining makes the */
 /* overall code shorter and easier to debug */

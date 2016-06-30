@@ -111,13 +111,13 @@ int hfi_wait_for_device(const char *path, long timeout)
 		if (ret == 0 || (ret == -1 && errno != ENOENT))
 			break;
 
-		if (timeout - elapsed == 0) {
+		if ((timeout > 0) && ((timeout - elapsed) <= 0)) {
 			saved_errno = ETIMEDOUT;
 			break;
 		}
 
 		if (elapsed == 0) {
-			if (timeout == -1)
+			if (timeout < 0)
 				_HFI_DBG
 				    ("Device file %s not present on first check; "
 				     "waiting indefinitely...\n", path);
@@ -178,14 +178,23 @@ int hfi_get_user_major_version(void)
 
 int hfi_context_open(int unit, int port, uint64_t open_timeout)
 {
+	char dev_name_ignored[256];
+
+	return hfi_context_open_ex(unit, port, open_timeout,
+				   dev_name_ignored, sizeof(dev_name_ignored));
+}
+
+int hfi_context_open_ex(int unit, int port, uint64_t open_timeout,
+		     char *dev_name,size_t dev_name_len)
+{
 	int fd;
-	char dev_name[MAXPATHLEN];
 
 	if (unit != HFI_UNIT_ID_ANY && unit >= 0)
-		snprintf(dev_name, sizeof(dev_name), "%s_%u", HFI_DEVICE_PATH,
+		snprintf(dev_name, dev_name_len, "%s_%u", HFI_DEVICE_PATH,
 			 unit);
 	else
-		snprintf(dev_name, sizeof(dev_name), "%s", HFI_DEVICE_PATH);
+		snprintf(dev_name, dev_name_len, "%s_%u", HFI_DEVICE_PATH,
+			 0);
 
 	if (hfi_wait_for_device(dev_name, (long)open_timeout) == -1) {
 		_HFI_DBG("Could not find an HFI Unit on device "
@@ -193,44 +202,6 @@ int hfi_context_open(int unit, int port, uint64_t open_timeout)
 			 (long)open_timeout / 1000);
 		return -1;
 	}
-
-#ifdef PSM2_SUPPORT_IW_CMD_API
-	{
-		int major = -1;
-		struct stat sbuf;
-
-		if ((!hfi_sysfs_stat("user_sw_version", &sbuf)) &&
-		    S_ISREG(sbuf.st_mode))
-		{
-			int64_t user_major_minor;
-			if (hfi_sysfs_read_s64("user_sw_version", &user_major_minor, 0) >= 0)
-			{
-				/* unpack the major version stored in user_major_minor into major:; */
-				major = (user_major_minor >> HFI1_SWMAJOR_SHIFT) &
-					((1 << HFI1_SWMAJOR_SHIFT)-1);
-				if (major != hfi1_user_major_version) {
-					/* PSM can only work with the version of the driver
-					 * it has been compiled for */
-					_HFI_INFO("PSM2 and driver version mismatch\n");
-					return -1;
-				}
-			}
-		}
-		if (major == -1)
-		{
-			major = IOCTL_CMD_API_MODULE_MAJOR - 1;
-			if (HFI1_USER_SWMAJOR == IOCTL_CMD_API_MODULE_MAJOR)
-			{
-				hfi1_user_major_version = major;
-			}
-		}
-
-		if (major < IOCTL_CMD_API_MODULE_MAJOR)
-		{
-			_hfi_cmd_send = _hfi_cmd_write;
-		}
-	}
-#endif /* #ifdef PSM2_SUPPORT_IW_CMD_API */
 
 	if ((fd = open(dev_name, O_RDWR)) == -1) {
 		_HFI_DBG("(host:Can't open %s for reading and writing",
@@ -242,6 +213,39 @@ int hfi_context_open(int unit, int port, uint64_t open_timeout)
 		_HFI_INFO("Failed to set close on exec for device: %s\n",
 			  strerror(errno));
 
+#ifdef PSM2_SUPPORT_IW_CMD_API
+	{
+		/* if hfi1DriverMajor == -1, then we are potentially talking to a new driver.
+		   Let's confirm by issuing an ioctl version request: */
+		struct hfi1_cmd c;
+
+		memset(&c, 0, sizeof(struct hfi1_cmd));
+		c.type = HFI1_CMD_GET_VERS;
+		c.len  = 0;
+		c.addr = 0;
+
+		if (hfi_cmd_write(fd, &c, sizeof(c)) == -1) {
+			/* Let's assume that the driver is the old driver */
+			hfi1_user_major_version = IOCTL_CMD_API_MODULE_MAJOR - 1;
+			/* the old driver uses write() for its command interface: */
+			_hfi_cmd_send = _hfi_cmd_write;
+		}
+		else
+		{
+			int major = c.addr >> HFI1_SWMAJOR_SHIFT;
+			if (major != hfi1_user_major_version) {
+				/* If there is a skew between the major version of the driver
+				   that is executing and the major version which was used during
+				   compilation of PSM, we treat that is a fatal error. */
+                                _HFI_INFO("PSM2 and driver version mismatch: (%d != %d)\n",
+					  major, hfi1_user_major_version);
+				close(fd);
+				return -1;
+			}
+		}
+	}
+
+#endif
 	return fd;
 }
 
@@ -275,7 +279,7 @@ int _hfi_cmd_ioctl(int fd, struct hfi1_cmd *cmd, size_t count)
 	{
 		unsigned int ioctlCmd;
 		unsigned int addrOrLiteralIdx;
-	} cmdTypeToIoctlNum[HFI1_CMD_TID_INVAL_READ+1] = {
+	} cmdTypeToIoctlNum[HFI1_CMD_GET_VERS+1] = {
 		{-1                       , 0},    /*  0 */
 		{HFI1_IOCTL_ASSIGN_CTXT   , 0},    /*  1 */
 		{HFI1_IOCTL_CTXT_INFO     , 0},    /*  2 */
@@ -289,10 +293,11 @@ int _hfi_cmd_ioctl(int fd, struct hfi1_cmd *cmd, size_t count)
 		{HFI1_IOCTL_ACK_EVENT     , 1},    /* 10 */
 		{HFI1_IOCTL_SET_PKEY      , 1},    /* 11 */
 		{HFI1_IOCTL_CTXT_RESET    , 1},    /* 12 */
-		{HFI1_IOCTL_TID_INVAL_READ, 0}     /* 13 */
+		{HFI1_IOCTL_TID_INVAL_READ, 0},    /* 13 */
+		{HFI1_IOCTL_GET_VERS      , 1}     /* 14 */
 	};
 
-	if ((cmd->type <= HFI1_CMD_TID_INVAL_READ) &&
+	if ((cmd->type <= HFI1_CMD_GET_VERS) &&
 	    (cmdTypeToIoctlNum[cmd->type].ioctlCmd != (unsigned int)-1))
 		return ioctl(fd,
 			     cmdTypeToIoctlNum[cmd->type].ioctlCmd,
@@ -327,16 +332,45 @@ void *hfi_mmap64(void *addr, size_t length, int prot, int flags, int fd,
 int hfi_get_num_units(void)
 {
 	int ret;
-	char pathname[128];
-	struct stat st;
 
 	for (ret = 0;; ret++) {
-		snprintf(pathname, sizeof(pathname), HFI_CLASS_PATH "_%d", ret);
-		if (stat(pathname, &st) || !S_ISDIR(st.st_mode))
+		char pathname[PATH_MAX];
+		struct stat st;
+		int r;
+
+		snprintf(pathname, sizeof(pathname), HFI_DEVICE_PATH "_%d", ret);
+		if (ret == 0)
+			/* We only wait for the first device to come up.  Not
+			   on subsequent devices in order to save time. */
+			r = hfi_wait_for_device(pathname, 0);
+		else
+			r = stat(pathname, &st);
+		if (!r)
+			continue;
+		else
 			break;
 	}
 
 	return ret;
+}
+
+/* Given a unit number, returns 1 if any port on the unit is active.
+   returns 0 if no port on the unit is active.
+   returns -1 when an error occurred. */
+int hfi_get_unit_active(int unit)
+{
+	int p,rv;
+
+	for (p = HFI_MIN_PORT; p <= HFI_MAX_PORT; p++)
+		if ((rv=hfi_get_port_lid(unit, p)) > 0)
+			break;
+
+	if (p <= HFI_MAX_PORT)
+	{
+		return 1;
+	}
+
+	return rv;
 }
 
 /* get the number of contexts from the unit id. */
@@ -345,31 +379,34 @@ int hfi_get_num_contexts(int unit_id)
 {
 	int n = 0;
 	int units;
+	int64_t val;
+	uint32_t p = HFI_MIN_PORT;
 
 	units = hfi_get_num_units();
-	if (units > 0) {
-		int64_t val;
-		if (unit_id == HFI_UNIT_ID_ANY) {
-			uint32_t u, p;
-			for (u = 0; u < units; u++) {
-				for (p = HFI_MIN_PORT; p <= HFI_MAX_PORT; p++)
-					if (hfi_get_port_lid(u, p) > 0)
-						break;
-				if (p <= HFI_MAX_PORT &&
-				    !hfi_sysfs_unit_read_s64(u, "nctxts", &val,
-							     0))
-					n += (uint32_t) val;
-			}
-		} else {
-			uint32_t p;
+
+	if_pf(units <=  0)
+		return 0;
+
+	if (unit_id == HFI_UNIT_ID_ANY) {
+		uint32_t u;
+
+		for (u = 0; u < units; u++) {
 			for (p = HFI_MIN_PORT; p <= HFI_MAX_PORT; p++)
-				if (hfi_get_port_lid(unit_id, p) > 0)
+				if (hfi_get_port_lid(u, p) > 0)
 					break;
+
 			if (p <= HFI_MAX_PORT &&
-			    !hfi_sysfs_unit_read_s64(unit_id, "nctxts", &val,
-						     0))
+			    !hfi_sysfs_unit_read_s64(u, "nctxts", &val, 0))
 				n += (uint32_t) val;
 		}
+	} else {
+		for (; p <= HFI_MAX_PORT; p++)
+			if (hfi_get_port_lid(unit_id, p) > 0)
+				break;
+
+		if (p <= HFI_MAX_PORT &&
+		    !hfi_sysfs_unit_read_s64(unit_id, "nctxts", &val, 0))
+			n += (uint32_t) val;
 	}
 
 	return n;

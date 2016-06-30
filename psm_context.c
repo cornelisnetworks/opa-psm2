@@ -65,7 +65,7 @@ static int psmi_get_hfi_selection_algorithm(void);
 static psm2_error_t psmi_init_userinfo_params(psm2_ep_t ep,
 					     int unit_id,
 					     psm2_uuid_t const unique_job_key,
-					     struct hfi1_user_info *user_info);
+					     struct hfi1_user_info_dep *user_info);
 
 psm2_error_t psmi_context_interrupt_set(psmi_context_t *context, int enable)
 {
@@ -100,93 +100,213 @@ int psmi_context_interrupt_isenabled(psmi_context_t *context)
 	return context->runtime_flags & PSMI_RUNTIME_INTR_ENABLED;
 }
 
+/* Returns 1 when all of the active units have their free contexts
+ * equal the number of contexts.  This is an indication that no
+ * jobs are currently running.
+ *
+ * Note that this code is clearly racy (this code may happen concurrently
+ * by two or more processes, and this point of observation,
+ * occurs earlier in time to when the decision is made for deciding which
+ * context to assign, which will also occurs earlier in time to when the
+ * context is actually assigned.  And, when the context is finally
+ * assigned, this will change the "nfreectxts" observed below.)
+ */
+static int psmi_all_active_units_have_max_freecontexts(int nunits)
+{
+	int u;
+
+	for (u=0;u < nunits;u++)
+	{
+		if (hfi_get_unit_active(u) > 0)
+		{
+			int64_t nfreectxts=0,nctxts=0;
+
+			if (!hfi_sysfs_unit_read_s64(u, "nctxts", &nctxts, 0) &&
+			    !hfi_sysfs_unit_read_s64(u, "nfreectxts", &nfreectxts, 0))
+			{
+				if (nfreectxts != nctxts)
+					return 0;
+			}
+		}
+	}
+	return 1;
+}
+
+/* returns the integer value of an environment variable, or 0 if the environment
+ * variable is not set. */
+static int psmi_get_envvar(const char *env)
+{
+	const char *env_val = getenv(env);
+
+	if (env_val && *env_val)
+	{
+		int r = atoi(env_val);
+		return (r >= 0) ? r : 0;
+	}
+	return 0;
+}
+
+static
 psm2_error_t
-psmi_context_open(const psm2_ep_t ep, long unit_id, long port,
+psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
+				int nunitsactive,int nunits,psm2_uuid_t const job_key,
+				long *unit_start,long *unit_end)
+{
+	context->user_info.hfi1_alg = HFI1_ALG_ACROSS;
+	/* if the user did not set HFI_UNIT then ... */
+	if (unit_param == HFI_UNIT_ID_ANY)
+	{
+		/* Get the actual selection algorithm from the environment: */
+		context->user_info.hfi1_alg = psmi_get_hfi_selection_algorithm();
+		/* If round-robin is selection algorithm and ... */
+		if ((context->user_info.hfi1_alg == HFI1_ALG_ACROSS) &&
+		    /* there are more than 1 active units then ... */
+		    (nunitsactive > 1))
+		{
+			/* if the number of ranks on the host is 1 and ... */
+			if ((psmi_get_envvar("MPI_LOCALNRANKS") == 1) &&
+			    /* all of the active units have free contexts equal the 
+			       number of contexts. */
+			    psmi_all_active_units_have_max_freecontexts(nunits))
+			{
+				/* we start looking at unit 0, and end at nunits-1: */
+				*unit_start = 0;
+				*unit_end = nunits - 1;
+			}
+			else
+			{
+				int i;
+				uint8_t hashedjk = 0;
+
+				/* else, we are going to being looking at:
+				   (a hash of the job key plus the local rank id ) mod nunits. */
+				for (i=0;i < sizeof(job_key);i++)
+					hashedjk ^= job_key[i];
+				*unit_start = (psmi_get_envvar("MPI_LOCALRANKID") + hashedjk) % nunits;
+				if (*unit_start > 0)
+					*unit_end = *unit_start - 1;
+				else
+					*unit_end = nunits-1;
+			}
+		}
+		else
+		{
+			*unit_start = 0;
+			*unit_end = nunits - 1;
+		}
+	}
+	/* the user specified HFI_UNIT, we use it. */
+	else if (unit_param >= 0)
+	{
+		*unit_start = *unit_end = unit_param;
+	}
+	else
+	{
+		psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
+					"PSM2 can't open unit: %ld for reading and writing",
+					unit_param);
+		return PSM2_EP_DEVICE_FAILURE;
+	}
+	return PSM2_OK;
+}
+
+psm2_error_t
+psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 		  psm2_uuid_t const job_key, int64_t timeout_ns,
 		  psmi_context_t *context)
 {
-	long open_timeout = 0;
+	long open_timeout = 0, unit_start, unit_end, unit_id, unit_id_prev;
 	int lid, sc, vl;
 	uint64_t gid_hi, gid_lo;
 	char dev_name[MAXPATHLEN];
 	psm2_error_t err = PSM2_OK;
 	uint32_t hfi_type;
-	int retry_delay = 0;
+	int nunits = hfi_get_num_units(), nunitsactive=0;
 
 	/*
 	 * If shared contexts are enabled, try our best to schedule processes
 	 * across one or many devices
 	 */
 
+	/* if no units, then no joy. */
+	if (nunits <= 0)
+	{
+		err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
+					"PSM2 no hfi units are available");
+		goto ret;
+	}
+
+	/* Calculate the number of active units: */
+	for (unit_id=0;unit_id < nunits;unit_id++)
+	{
+		if (hfi_get_unit_active(unit_id) > 0)
+			nunitsactive++;
+	}
+	/* if no active units, then no joy. */
+	if (nunitsactive == 0)
+	{
+		err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
+					"PSM2 no hfi units are active");
+		goto ret;
+	}
 	if (timeout_ns > 0)
 		open_timeout = (long)(timeout_ns / MSEC_ULL);
-	if (unit_id != HFI_UNIT_ID_ANY && unit_id >= 0)
-		snprintf(dev_name, sizeof(dev_name), "%s_%u", HFI_DEVICE_PATH,
-			 (unsigned)unit_id);
-	else
-		snprintf(dev_name, sizeof(dev_name), "%s", HFI_DEVICE_PATH);
 
-	context->fd = hfi_context_open(unit_id, port, open_timeout);
-	if (context->fd == -1) {
-		err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
-					"PSM can't open %s for reading and writing",
-					dev_name);
-		goto bail;
-	}
 
-	if ((err = psmi_init_userinfo_params(ep,
-					     (int)unit_id, job_key,
-					     &context->user_info)))
-		goto bail;
+	err = psmi_compute_start_and_end_unit(context, unit_param,
+					      nunitsactive, nunits,
+					      job_key,
+					      &unit_start, &unit_end);
+	if (err != PSM2_OK)
+		return err;
 
-retry_open:
-	context->ctrl = hfi_userinit(context->fd, &context->user_info);
-	if (!context->ctrl) {
-
-		/* hfi_userinit returns EBUSY on hfi and ENODEV on qib when
-		 * no contexts are available. Handle both drivers.
-		 */
-		if ((errno != ENETDOWN) && (errno != EBUSY)
-		    && (errno != ENODEV))
-			goto fail;
-
-		if ((open_timeout == -1L) || (errno == EBUSY)
-		    || (errno == ENODEV)) {
-			if (!retry_delay) {
-				_HFI_PRDBG("retrying open: %s, network down\n",
-					   dev_name);
-				retry_delay = 1;
-			} else if (retry_delay < 17)
-				retry_delay <<= 1;
-
-			/* If device is still busy after 3 attempts give up. No contexts
-			 * available.
-			 */
-			if (((errno == EBUSY) || (errno == ENODEV))
-			    && retry_delay > 4)
-				goto fail;
-
-			sleep(retry_delay);
-			goto retry_open;
+	/* this is the start of a loop that starts at unit_start and goes to unit_end.
+	   but note that the way the loop computes the loop control variable is by
+	   an expression involving the mod operator. */
+	context->fd = -1;
+	context->ctrl = NULL;
+	unit_id_prev = unit_id = unit_start;
+	do
+	{
+		/* close previous opened unit fd before attempting open of current unit. */
+		if (context->fd > 0)
+		{
+			hfi_context_close(context->fd);
+			context->fd = -1;
 		}
 
-		err = psmi_handle_error(NULL, PSM2_EP_NO_NETWORK,
-					"can't open %s, network down",
-					dev_name);
-		goto bail;
-	}
+		/* if the unit_id is not active, go to next one. */
+		if (hfi_get_unit_active(unit_id) <= 0)
+			continue;
 
+		/* open this unit. */
+		context->fd = hfi_context_open_ex(unit_id, port, open_timeout,
+				       dev_name, sizeof(dev_name));
+
+		/* go to next unit if failed to open. */
+		if (context->fd == -1)
+			continue;
+
+		/* collect the userinfo params. */
+		if ((err = psmi_init_userinfo_params(ep,
+						     (int)unit_id, job_key,
+						     &context->user_info)))
+			goto bail;
+
+		/* attempt to assign the context via hfi_userinit() */
+		context->ctrl = hfi_userinit(context->fd, &context->user_info);
+		unit_id_prev = unit_id;
+		unit_id = (unit_id + 1) % nunits;
+	} while (unit_id_prev != unit_end && context->ctrl == NULL);
+
+	if (context->ctrl == NULL)
+	{
+		err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
+					"PSM2 can't open hfi unit: %ld",unit_param);
+		goto ret;
+	}
 	_HFI_VDBG("hfi_userinit() passed.\n");
 
-	if (hfi_get_port_active(context->ctrl->__hfi_unit,
-				    context->ctrl->__hfi_port) != 1) {
-		err = psmi_handle_error(NULL,
-					PSM2_EP_DEVICE_FAILURE,
-					"Unit/port: %d/%d is not active.",
-					context->ctrl->__hfi_unit,
-					context->ctrl->__hfi_port);
-		goto bail;
-	}
 	if ((lid = hfi_get_port_lid(context->ctrl->__hfi_unit,
 				    context->ctrl->__hfi_port)) <= 0) {
 		err = psmi_handle_error(NULL,
@@ -253,28 +373,6 @@ retry_open:
 
 	goto ret;
 
-fail:
-	switch (errno) {
-	case ENOENT:
-	case ENODEV:
-		err = psmi_handle_error(NULL, PSM2_EP_NO_DEVICE,
-					"%s not found", dev_name);
-		break;
-	case ENXIO:
-		err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
-					"%s failure", dev_name);
-		break;
-	case EBUSY:
-		err = psmi_handle_error(NULL, PSM2_EP_NO_PORTS_AVAIL,
-					"No free opa contexts available on %s",
-					dev_name);
-		break;
-	default:
-		err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
-					"Driver initialization failure on %s",
-					dev_name);
-		break;
-	}
 bail:
 	_HFI_PRDBG("%s open failed: %d (%s)\n", dev_name, err, strerror(errno));
 	if (context->fd != -1) {
@@ -351,9 +449,14 @@ psm2_error_t psmi_context_check_status(const psmi_context_t *contexti)
 		else
 		{
 			time_t now = time(NULL);
-			static const double thirtySeconds = 30.0;
+			static const double seventySeconds = 70.0;
 
-			if (difftime(now,context->networkLostTime) > thirtySeconds)
+			/* The linkup time duration for a system should allow the time needed
+			   to complete 3 LNI passes which is:
+			   50 seconds for a passive copper channel
+			   65 seconds for optical channel.
+			   (we add 5 seconds of margin.) */
+			if (difftime(now,context->networkLostTime) > seventySeconds)
 			{
 				volatile char *errmsg_sp =
 					(volatile char *)status->freezemsg;
@@ -380,7 +483,7 @@ static
 psm2_error_t
 psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
 			  psm2_uuid_t const unique_job_key,
-			  struct hfi1_user_info *user_info)
+			  struct hfi1_user_info_dep *user_info)
 {
 	/* static variables, shared among rails */
 	static int shcontexts_enabled = -1, rankid, nranks;
@@ -393,8 +496,6 @@ psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
 
 	memset(user_info, 0, sizeof(*user_info));
 	user_info->userversion = HFI1_USER_SWMINOR|(hfi_get_user_major_version()<<HFI1_SWMAJOR_SHIFT);
-
-	user_info->hfi1_alg = psmi_get_hfi_selection_algorithm();
 
 	user_info->subctxt_id = 0;
 	user_info->subctxt_cnt = 0;
@@ -411,19 +512,19 @@ psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
 
 	if (avail_contexts == 0) {
 		err = psmi_handle_error(NULL, PSM2_EP_NO_DEVICE,
-					"PSM found 0 available contexts on opa device(s).");
+					"PSM2 found 0 available contexts on opa device(s).");
 		goto fail;
 	}
 
 	/* See if the user wants finer control over context assignments */
 	if (!psmi_getenv("PSM2_MAX_CONTEXTS_PER_JOB",
-			 "Maximum number of contexts for this PSM job",
+			 "Maximum number of contexts for this PSM2 job",
 			 PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
 			 (union psmi_envvar_val)avail_contexts, &env_maxctxt)) {
 		max_contexts = max(env_maxctxt.e_int, 1);		/* needs to be non-negative */
 		ask_contexts = min(max_contexts, avail_contexts);	/* needs to be available */
 	} else if (!psmi_getenv("PSM2_SHAREDCONTEXTS_MAX",
-			 "Maximum number of contexts for this PSM job",
+			 "Maximum number of contexts for this PSM2 job",
 			 PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
 			 (union psmi_envvar_val)avail_contexts, &env_maxctxt)) {
 
@@ -507,7 +608,7 @@ psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
 	}
 	/* else subcontext_cnt remains 0 and context sharing is disabled. */
 
-	_HFI_PRDBG("PSM_SHAREDCONTEXTS lrank=%d,ppn=%d,avail_contexts=%d,"
+	_HFI_PRDBG("PSM2_SHAREDCONTEXTS lrank=%d,ppn=%d,avail_contexts=%d,"
 		   "max_contexts=%d,ask_contexts=%d,"
 		   "ranks_per_context=%d,id=%u,cnt=%u\n",
 		   rankid, nranks, avail_contexts, max_contexts,

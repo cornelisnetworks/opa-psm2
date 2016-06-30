@@ -990,14 +990,9 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 				tid_list->tsess_unaligned_start);
 	tidsendc->length = tid_list->tsess_length;
 	tidsendc->ctrl_msg_queued = 0;
+	tidsendc->frag_size = min(protoexp->tid_send_fragsize,
+		tidsendc->tidflow.frag_size);
 
-	if (protoexp->tid_xfer_type == PSM_TRANSFER_PIO)
-		tidsendc->frag_size =
-		    min(protoexp->tid_send_fragsize, ipsaddr->pio_size);
-	else
-		tidsendc->frag_size =
-		    min(protoexp->tid_send_fragsize,
-			tidsendc->tidflow.path->pr_mtu);
 	/* frag size must be 64B multiples */
 	tidsendc->frag_size &= (~63);
 
@@ -1098,7 +1093,7 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 	 * the packet header.
 	 */
 	scb->payload_size = frame_len;
-	scb->payload = (void *)bufptr;
+	ips_scb_buffer(scb) = (void *)bufptr;
 	scb->frag_size = tidsendc->frag_size;
 
 	/*

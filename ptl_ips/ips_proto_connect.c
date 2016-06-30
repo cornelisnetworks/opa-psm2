@@ -176,6 +176,43 @@ struct ips_connect_reqrep {
  *
  */
 
+/**
+ * Configure flows for an ipsaddr. 
+ *
+ * @arg ipsaddr - the ipsaddr to configure the flows for
+ * @arg proto - the protocol used
+ *
+ * @pre ipsaddr's ep_mtu must be set
+ * @pre proto's flags must be set
+ *
+ * Flows should be configured:
+ * - immediately upon creation of an ipsaddr
+ * - whenever a connection is established and the receiver's characteristics
+ *   (e.g. mtu) become known
+ */
+ustatic
+void
+ips_ipsaddr_configure_flows(struct ips_epaddr *ipsaddr, struct ips_proto *proto)
+{
+	/* PIO flow uses the normal priority path, to separate low
+	 * priority path for bulk sdma data packets
+	 */
+	if (!(proto->flags & IPS_PROTO_FLAG_SDMA)) {
+		ips_flow_init(&ipsaddr->flows[EP_FLOW_GO_BACK_N_PIO], proto,
+			      ipsaddr, PSM_TRANSFER_PIO, PSM_PROTOCOL_GO_BACK_N,
+			      IPS_PATH_NORMAL_PRIORITY, EP_FLOW_GO_BACK_N_PIO);
+	}
+
+	/* DMA flow uses the low priority path, multi MTU sized eager
+	 * message uses the same flow to transfer to avoid out of order.
+	 */
+	if (!(proto->flags & IPS_PROTO_FLAG_SPIO)) {
+		ips_flow_init(&ipsaddr->flows[EP_FLOW_GO_BACK_N_DMA], proto,
+			      ipsaddr, PSM_TRANSFER_DMA, PSM_PROTOCOL_GO_BACK_N,
+			      IPS_PATH_LOW_PRIORITY, EP_FLOW_GO_BACK_N_DMA);
+	}
+}
+
 static
 psm2_epaddr_t
 ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
@@ -204,18 +241,10 @@ ips_ipsaddr_set_req_params(struct ips_proto *proto,
 	int i, start, count;
 	uint64_t *data;
 	psmi_assert_always(req->mtu > 0);
-
 	uint16_t peer_sl = min(req->sl, proto->epinfo.ep_sl);
-	uint16_t peer_mtu = min(req->mtu, proto->epinfo.ep_mtu);
-	uint16_t piosize = min(peer_mtu, proto->epinfo.ep_piosize);
-	if (piosize > PSM_CACHE_LINE_BYTES)
-		piosize &= ~(PSM_CACHE_LINE_BYTES - 1);
+	uint16_t common_mtu = min(req->mtu, proto->epinfo.ep_mtu);
 
-	/*
-	 * Setup the mtu and pio sizes for ipsaddr.
-	 */
-	ipsaddr->mtu_size = peer_mtu;
-	ipsaddr->pio_size = piosize;
+	ipsaddr->ep_mtu = req->mtu;
 
 	/*
 	 * For static routes i.e. "none" path resolution update all paths to
@@ -232,11 +261,17 @@ ips_ipsaddr_set_req_params(struct ips_proto *proto,
 			     pidx < ipsaddr->pathgrp->pg_num_paths[ptype];
 			     pidx++) {
 				ipsaddr->pathgrp->pg_path[pidx][ptype]->pr_mtu =
-				    peer_mtu;
+				    common_mtu;
 				ipsaddr->pathgrp->pg_path[pidx][ptype]->pr_sl =
 				    peer_sl;
 			}
 	}
+
+	/*
+	 * We've got updated mtu/path records, need to re-initialize the flows to take
+	 * into account _real_ (updated) remote endpoint characteristics
+	 */
+	ips_ipsaddr_configure_flows(ipsaddr, proto);
 
 	/*
 	 * Save peer's info.
@@ -453,7 +488,7 @@ ips_proto_build_connect_message(struct ips_proto *proto,
 }
 
 void
-ips_flow_init(struct ips_flow *flow, struct ips_proto *proto,
+MOCKABLE(ips_flow_init)(struct ips_flow *flow, struct ips_proto *proto,
 	      ips_epaddr_t *ipsaddr, psm_transfer_type_t transfer_type,
 	      psm_protocol_type_t protocol, ips_path_type_t path_type,
 	      uint32_t flow_index)
@@ -464,14 +499,38 @@ ips_flow_init(struct ips_flow *flow, struct ips_proto *proto,
 	SLIST_NEXT(flow, next) = NULL;
 	if (transfer_type == PSM_TRANSFER_PIO) {
 		flow->flush = ips_proto_flow_flush_pio;
-		flow->frag_size = ipsaddr->pio_size;
 	} else {
 		flow->flush = ips_proto_flow_flush_dma;
-		flow->frag_size = ipsaddr->mtu_size;
 	}
 
 	flow->path =
 	    ips_select_path(proto, path_type, ipsaddr, ipsaddr->pathgrp);
+
+	/* Select the fragment size for this flow. Flow is the common
+	 * denominator between the local endpoint, the remote endpoint,
+	 * the path between those and whether it's a PIO or DMA send.
+	 * Hence, it "owns" the maximum transmission unit in its frag_size
+	 * member.
+	 */
+
+	/* min of local and remote endpoint MTU */
+	flow->frag_size = min(ipsaddr->ep_mtu, proto->epinfo.ep_mtu);
+	/* take the path into the consideration */
+	flow->frag_size = min(flow->frag_size, flow->path->pr_mtu);
+	/* if PIO, need to consider local pio buffer size */
+	if (transfer_type == PSM_TRANSFER_PIO) {
+		flow->frag_size = min(flow->frag_size, proto->epinfo.ep_piosize);
+		_HFI_VDBG("[ipsaddr=%p] PIO flow->frag_size: %u = min(ipsaddr->ep_mtu(%u), "
+			"proto->epinfo.ep_mtu(%u), flow->path->pr_mtu(%u), proto->epinfo.ep_piosize(%u))",
+			ipsaddr, flow->frag_size, ipsaddr->ep_mtu, proto->epinfo.ep_mtu,
+			flow->path->pr_mtu, proto->epinfo.ep_piosize);
+	} else {
+		_HFI_VDBG("[ipsaddr=%p] SDMA flow->frag_size: %u = min(ipsaddr->ep_mtu(%u), "
+			"proto->epinfo.ep_mtu(%u), flow->path->pr_mtu(%u))",
+			ipsaddr, flow->frag_size, ipsaddr->ep_mtu, proto->epinfo.ep_mtu,
+			flow->path->pr_mtu);
+	}
+
 	flow->ipsaddr = ipsaddr;
 	flow->transfer = transfer_type;
 	flow->protocol = protocol;
@@ -496,6 +555,7 @@ ips_flow_init(struct ips_flow *flow, struct ips_proto *proto,
 	SLIST_INIT(&flow->scb_pend);
 	return;
 }
+MOCK_DEF_EPILOGUE(ips_flow_init);
 
 static
 psm2_epaddr_t
@@ -560,8 +620,7 @@ ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
 	ipsaddr->msg_toggle = 0;
 
 	/* Setup MTU and PIO size */
-	ipsaddr->mtu_size = proto->epinfo.ep_mtu;
-	ipsaddr->pio_size = proto->epinfo.ep_piosize;
+	ipsaddr->ep_mtu = proto->epinfo.ep_mtu;
 
 	/* Actual context of peer */
 	ipsaddr->context = PSMI_EPID_GET_CONTEXT(epid);
@@ -594,21 +653,10 @@ ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
 	else			/* Base LID  */
 		ipsaddr->hpp_index = 0;
 
-	/* PIO flow uses the normal priority path, to separate low
-	 * priority path for bulk sdma data packets
+	/*
+	 * Set up the flows on this ipsaddr
 	 */
-	if (!(proto->flags & IPS_PROTO_FLAG_SDMA))
-		ips_flow_init(&ipsaddr->flows[EP_FLOW_GO_BACK_N_PIO], proto,
-			      ipsaddr, PSM_TRANSFER_PIO, PSM_PROTOCOL_GO_BACK_N,
-			      IPS_PATH_NORMAL_PRIORITY, EP_FLOW_GO_BACK_N_PIO);
-
-	/* DMA flow uses the low priority path, multi MTU sized eager
-	 * message uses the same flow to transfer to avoid out of order.
-	 */
-	if (!(proto->flags & IPS_PROTO_FLAG_SPIO))
-		ips_flow_init(&ipsaddr->flows[EP_FLOW_GO_BACK_N_DMA], proto,
-			      ipsaddr, PSM_TRANSFER_DMA, PSM_PROTOCOL_GO_BACK_N,
-			      IPS_PATH_LOW_PRIORITY, EP_FLOW_GO_BACK_N_DMA);
+	ips_ipsaddr_configure_flows(ipsaddr, proto);
 
 	/* clear connection state. */
 	ipsaddr->cstate_to = CSTATE_NONE;
@@ -738,8 +786,7 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 				/* If the send fails because of pio_busy, don't let ips queue
 				 * the request on an invalid ipsaddr, just drop the reply */
 				ipsaddr_f.ctrl_msg_queued = ~0;
-				ipsaddr->mtu_size = proto->epinfo.ep_mtu;
-				ipsaddr->pio_size = proto->epinfo.ep_piosize;
+				ipsaddr->ep_mtu = proto->epinfo.ep_mtu;
 
 				psmi_assert(proto->msgflowid < EP_FLOW_LAST);
 

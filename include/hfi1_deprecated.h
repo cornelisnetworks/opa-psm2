@@ -86,6 +86,18 @@
  * write() for the command interface. */
 #define IOCTL_CMD_API_MODULE_MAJOR        6
 
+/*
+ * round robin contexts across HFIs, then
+ * ports; this is the default
+ */
+#define HFI1_ALG_ACROSS_DEP 0
+
+/*
+ * use all contexts on an HFI (round robin
+ * active ports within), then next HFI
+ */
+#define HFI1_ALG_WITHIN_DEP 1
+
 struct hfi1_cmd_deprecated {
 	__u32 type;        /* command type */
 	__u32 len;         /* length of struct pointed to by add */
@@ -94,10 +106,38 @@ struct hfi1_cmd_deprecated {
 
 #define hfi1_cmd hfi1_cmd_deprecated
 
+#define HFI1_ALG_ACROSS HFI1_ALG_ACROSS_DEP
+
+#define HFI1_ALG_WITHIN HFI1_ALG_WITHIN_DEP
+
 #else
 
 #define HFI1_SWMAJOR_SHIFT 16
 
 #endif /* defined( IB_IOCTL_MAGIC )*/
+
+/* Note that struct hfi1_user_info_dep declaration is identical to
+   the struct hfi1_user_info declaration from MAJOR version 5 of the
+   hfi1_user.h file. */
+struct hfi1_user_info_dep {
+	/*
+	 * version of user software, to detect compatibility issues.
+	 * Should be set to HFI1_USER_SWVERSION.
+	 */
+	__u32 userversion;
+	__u16 pad;
+	/* HFI selection algorithm, if unit has not selected */
+	__u16 hfi1_alg;
+	/*
+	 * If two or more processes wish to share a context, each process
+	 * must set the subcontext_cnt and subcontext_id to the same
+	 * values.  The only restriction on the subcontext_id is that
+	 * it be unique for a given node.
+	 */
+	__u16 subctxt_cnt;
+	__u16 subctxt_id;
+	/* 128bit UUID passed in by PSM. */
+	__u8 uuid[16];
+};
 
 #endif /* #ifndef __HFI1_DEPRECATED_H__ */

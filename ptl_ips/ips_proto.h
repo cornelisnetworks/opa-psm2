@@ -298,7 +298,11 @@ struct ips_proto {
 	uint16_t sdma_avail_counter;
 
 	uint64_t timeout_send;
-	uint32_t flags;
+	uint32_t flags;		/* < if IPS_PROTO_FLAG_SDMA is NOT set, SPIO flow will be initialized
+				 * < if IPS_PROTO_FLAG_SPIO is NOT set, SDMA flow will be initialized
+				 * < so both flows (SDMA and PIO) will be initialized if both of the
+				 * < IPS_PROTO_FLAG_S{DMA,PIO} are CLEARED
+				 */
 	uint32_t iovec_thresh_eager;
 	uint32_t iovec_thresh_eager_blocking;
 	uint32_t psn_mask;
@@ -401,6 +405,13 @@ struct ips_proto {
  */
 typedef psm2_error_t(*ips_flow_flush_fn_t) (struct ips_flow *, int *nflushed);
 
+/**
+ * ips_flow is a structure that combines all information regarding a send
+ * from one endpoint to another one. Specifically, it is the place where
+ * the Maximum Transmission Unit for a send is calculated, given how many
+ * factors could possibly influence the MTU calculation. See ips_flow_init
+ * documentation for more details.
+ */
 struct ips_flow {
 	SLIST_ENTRY(ips_flow) next;	/* List of flows with pending acks */
 	ips_flow_flush_fn_t flush;	/* flush function for this flow */
@@ -408,7 +419,8 @@ struct ips_flow {
 	struct ips_epaddr *ipsaddr;	/* back pointer, remote endpoint */
 	ips_path_rec_t *path;	/* Path to use for flow */
 
-	uint16_t frag_size; /* fragment size */
+	uint16_t frag_size;	/* < This flow's fragment size, calculated as the
+				   < minimum of all relevant MTUs involved */
 
 	uint16_t flowid:2;	/* flow id: pio(0) or dma(1) or tidflow(2) */
 	uint16_t transfer:3;	/* spio or sdma */
@@ -455,8 +467,7 @@ struct ips_epaddr {
 	uint32_t connidx_from;	/* my connection idx */
 
 	uint16_t ctrl_msg_queued;	/* bitmap of queued control messages to be send */
-	uint16_t mtu_size;	/* flow[proto->msgflowid] fragment size */
-	uint16_t pio_size;	/* flow[proto->msgflowid] fragment size */
+	uint16_t ep_mtu;		/* < Remote endpoint's MTU */
 
 	uint8_t  hpp_index;	/* high priority index */
 	uint8_t  context;	/* real context value */
@@ -514,18 +525,22 @@ void IPS_MCTXT_REMOVE(ips_epaddr_t *node)
 }
 
 /*
- * Send support on scbs.
- *
+ * Initialize a flow, setting its attributes. Selects the path the flow will
+ * use as well as calculates the flow's fragment size defined as:
+ * - min(remote EP MTU, selected path's MTU, local EP MTU) for DMA sends
+ * - min(remote EP MTU, selected path's MTU, local EP MTU, local PIO bufsize) for PIO sends
  */
-void ips_flow_init(struct ips_flow *flow, struct ips_proto *proto,
+void MOCKABLE(ips_flow_init)(struct ips_flow *flow, struct ips_proto *proto,
 		   ips_epaddr_t *ipsaddr, psm_transfer_type_t transfer_type,
 		   psm_protocol_type_t protocol, ips_path_type_t path_type,
 		   uint32_t flow_index);
+MOCK_DCL_EPILOGUE(ips_flow_init);
 
 void ips_scb_prepare_flow(ips_scb_t *scb, ips_epaddr_t *ipsaddr,
 			  struct ips_flow *flow);
 
-void ips_proto_flow_enqueue(struct ips_flow *flow, ips_scb_t *scb);
+void MOCKABLE(ips_proto_flow_enqueue)(struct ips_flow *flow, ips_scb_t *scb);
+MOCK_DCL_EPILOGUE(ips_proto_flow_enqueue);
 
 psm2_error_t ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed);
 psm2_error_t ips_proto_flow_flush_dma(struct ips_flow *flow, int *nflushed);

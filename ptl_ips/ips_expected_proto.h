@@ -301,7 +301,7 @@ struct ips_tid_get_request {
  * normal, min and large configurations.
  */
 #define TID_SENDSESSIONS_LIMITS {				\
-	    .env = "PSM_TID_SENDSESSIONS_MAX",			\
+	    .env = "PSM2_TID_SENDSESSIONS_MAX",			\
 	    .descr = "Tid max send session descriptors",	\
 	    .env_level = PSMI_ENVVAR_LEVEL_HIDDEN,		\
 	    .minval = 1,					\

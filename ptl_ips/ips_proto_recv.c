@@ -388,7 +388,7 @@ void ips_tidflow_nak_post_process(struct ips_proto *proto,
 		scb->nfrag_remaining -= npkt;
 		psmi_assert(scb->chunk_size_remaining > nbytes);
 		scb->chunk_size_remaining -= nbytes;
-		scb->payload = (void *)((char *)scb->payload + nbytes);
+		ips_scb_buffer(scb) = (void *)((char *)ips_scb_buffer(scb) + nbytes);
 
 		/* 1. if last packet in sequence, set ACK, clear SH */
 		if (scb->nfrag_remaining == 1) {
@@ -492,7 +492,7 @@ void ips_dmaflow_nak_post_process(struct ips_proto *proto,
 		scb->nfrag_remaining -= npkt;
 		psmi_assert(scb->chunk_size_remaining > nbytes);
 		scb->chunk_size_remaining -= nbytes;
-		scb->payload = (void *)((char *)scb->payload + nbytes);
+		ips_scb_buffer(scb) = (void *)((char *)ips_scb_buffer(scb) + nbytes);
 
 		/* 1. if last packet in sequence, set ACK */
 		if (scb->chunk_size_remaining <= scb->frag_size) {
