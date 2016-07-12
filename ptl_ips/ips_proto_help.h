@@ -326,7 +326,7 @@ ips_proto_hdr(struct ips_proto *proto, struct ips_epaddr *ipsaddr,
 	}
 
 	p_hdr->khdr.job_key = __cpu_to_le32(proto->epinfo.ep_jkey);
-	p_hdr->connidx = ipsaddr->connidx_to;
+	p_hdr->connidx = ipsaddr->connidx_outgoing;
 	p_hdr->flags = flags;
 
 	scb->flow = flow;

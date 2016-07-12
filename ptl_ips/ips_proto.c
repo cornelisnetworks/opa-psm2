@@ -197,8 +197,8 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	proto->flags = env_cksum.e_uint ? IPS_PROTO_FLAG_CKSUM : 0;
 	proto->runid_key = getpid();
 
-	proto->num_connected_to = 0;
-	proto->num_connected_from = 0;
+	proto->num_connected_outgoing = 0;
+	proto->num_connected_incoming = 0;
 	proto->num_disconnect_requests = 0;
 	proto->stray_warn_interval = (uint64_t) -1;
 	proto->done_warning = 0;
@@ -595,7 +595,7 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 	t_start = proto->t_fini = get_cycles();
 
 	/* Close whatever has been left open */
-	if (proto->num_connected_to > 0) {
+	if (proto->num_connected_outgoing > 0) {
 		int num_disc = 0;
 		int *mask;
 		psm2_error_t *errs;
@@ -652,7 +652,7 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 		int num_disconnect_requests = proto->num_disconnect_requests;
 		PSMI_BLOCKUNTIL(
 		    proto->ep, err,
-		    proto->num_connected_from == 0 ||
+		    proto->num_connected_incoming == 0 ||
 			(!psmi_cycles_left(t_start, timeout_in) &&
 			    (!psmi_cycles_left(t_grace_interval_start,
 					       t_grace_interval) ||
@@ -667,7 +667,7 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 
 	_HFI_PRDBG
 	    ("Closing endpoint disconnect left to=%d,from=%d after %d millisec of grace (out of %d)\n",
-	     proto->num_connected_to, proto->num_connected_from,
+	     proto->num_connected_outgoing, proto->num_connected_incoming,
 	     (int)(cycles_to_nanosecs(t_grace_finish - t_grace_start) /
 		   MSEC_ULL), (int)(t_grace_time / MSEC_ULL));
 
@@ -848,7 +848,7 @@ static __inline__ void _build_ctrl_message(struct ips_proto *proto,
 	/* p_hdr->bth[2] already set by caller, or don't care */
 	/* p_hdr->ack_seq_num already set by caller, or don't care */
 
-	p_hdr->connidx = ipsaddr->connidx_to;
+	p_hdr->connidx = ipsaddr->connidx_outgoing;
 	p_hdr->flags = 0;
 
 	p_hdr->khdr.kdeth0 = __cpu_to_le32(

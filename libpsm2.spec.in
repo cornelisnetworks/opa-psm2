@@ -69,17 +69,24 @@ ExclusiveArch: x86_64
 BuildRequires: libuuid-devel
 BuildRequires: systemd
 BuildRequires: gcc
+Provides: hfi1-psm
 Obsoletes: hfi1-psm < 1.0.0
 
 %package devel
 Summary: Development files for Intel PSM
 Requires: %{name}%{?_isa} = %{version}-%{release}
 Requires: libuuid-devel
+Provides: hfi1-psm-devel
+Obsoletes: hfi1-psm-devel < 1.0.0
 
 %package compat
 Summary: Compat library for Intel PSM
 Requires: %{name}%{?_isa} = %{version}-%{release}
+%if 0%{?fedora}
 Requires: systemd-udev
+%endif
+Provides: hfi1-psm-compat
+Obsoletes: hfi1-psm-compat < 1.0.0
 
 %description
 The PSM Messaging API, or PSM API, is the low-level

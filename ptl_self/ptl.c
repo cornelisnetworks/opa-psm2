@@ -210,7 +210,7 @@ self_am_short_request(psm2_epaddr_t epaddr,
 	psm2_ep_t ep = epaddr->ptlctl->ptl->ep;
 	struct psmi_am_token tok;
 
-	tok.epaddr_from = epaddr;
+	tok.epaddr_incoming = epaddr;
 
 	hfn = psm_am_get_handler_function(ep, handler);
 	hfn(&tok, args, nargs, src, len);
@@ -231,7 +231,7 @@ self_am_short_reply(psm2_am_token_t token,
 {
 	psm2_am_handler_fn_t hfn;
 	struct psmi_am_token *tok = token;
-	psm2_ep_t ep = tok->epaddr_from->ptlctl->ptl->ep;
+	psm2_ep_t ep = tok->epaddr_incoming->ptlctl->ptl->ep;
 
 	hfn = psm_am_get_handler_function(ep, handler);
 	hfn(token, args, nargs, src, len);

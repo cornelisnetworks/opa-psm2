@@ -412,7 +412,7 @@ ips_am_run_handler(const struct ips_message_header *p_hdr,
 	psm2_amarg_t *args = (psm2_amarg_t *)p_hdr->data;
 
 	token.tok.flags = p_hdr->flags;
-	token.tok.epaddr_from = (psm2_epaddr_t)&ipsaddr->msgctl->master_epaddr;
+	token.tok.epaddr_incoming = (psm2_epaddr_t)&ipsaddr->msgctl->master_epaddr;
 	token.tok.can_reply =
 		(_get_proto_hfi_opcode(p_hdr) == OPCODE_AM_REQUEST);
 	token.epaddr_rail = ipsaddr;

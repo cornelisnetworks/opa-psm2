@@ -116,7 +116,7 @@ ips_protoexp_init(const psmi_context_t *context,
 	protoexp->ptl = (const struct ptl *)proto->ptl;
 	protoexp->proto = (struct ips_proto *)proto;
 	protoexp->timerq = proto->timerq;
-	protoexp->tidflow_seed = (unsigned int)getpid();
+	srand48_r((long int) getpid(), &protoexp->tidflow_drand48_data);
 	protoexp->tid_flags = protoexp_flags;
 	if (context->runtime_flags & HFI1_CAP_HDRSUPP) {
 		union psmi_envvar_val env_hdrsupp;
@@ -1510,8 +1510,9 @@ ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 
 	tidrecvc->tidflow_nswap_gen = 0;
 	tidrecvc->tidflow_genseq.psn_gen = tidrecvc->tidflow_active_gen;
-	tidrecvc->tidflow_genseq.psn_seq =
-	    rand_r(&protoexp->tidflow_seed) & 0x3ff;
+	long int rnum;
+	lrand48_r(&protoexp->tidflow_drand48_data, &rnum);
+	tidrecvc->tidflow_genseq.psn_seq = ((int)(rnum % INT_MAX)) & 0x3ff;
 	hfi_tidflow_set_entry(tidrecvc->context->ctrl,
 			      tidrecvc->rdescid._desc_idx,
 			      tidrecvc->tidflow_genseq.psn_gen,

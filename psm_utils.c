@@ -810,7 +810,7 @@ struct psmi_faultinj_spec {
 	unsigned long long num_faults;
 	unsigned long long num_calls;
 
-	unsigned int seedp;
+	struct drand48_data drand48_data;
 	int num;
 	int denom;
 
@@ -957,7 +957,7 @@ struct psmi_faultinj_spec *psmi_faultinj_getspec(char *spec_name, int num,
 			if (n_parsed >= 2)
 				fi->denom = fvals[1];
 			if (n_parsed >= 3)
-				fi->seedp = fvals[2];
+				srand48_r((long int) fvals[2], &fi->drand48_data);
 		}
 	}
 
@@ -967,15 +967,15 @@ struct psmi_faultinj_spec *psmi_faultinj_getspec(char *spec_name, int num,
 
 int psmi_faultinj_is_fault(struct psmi_faultinj_spec *fi)
 {
-	int r;
 	if (!psmi_faultinj_enabled)	/* never fault if disabled */
 		return 0;
 	if (fi->num == 0)
 		return 0;
 
 	fi->num_calls++;
-	r = rand_r(&fi->seedp);
-	if (r % fi->denom <= fi->num) {
+	long int rnum;
+	lrand48_r(&fi->drand48_data, &rnum);
+	if (((int) (rnum % INT_MAX)) % fi->denom <= fi->num) {
 		fi->num_faults++;
 		return 1;
 	} else

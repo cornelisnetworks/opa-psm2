@@ -133,6 +133,11 @@ else
   $(error SSE4.2 compiler support required )
 endif
 
+#
+# feature test macros for drand48_r
+#
+BASECFLAGS += -D_DEFAULT_SOURCE -D_SVID_SOURCE -D_BSD_SOURCE
+
 ifneq (,${PSM_DEBUG})
   BASECFLAGS += -O -g3 -DPSM_DEBUG -D_HFI_DEBUGGING -funit-at-a-time -Wp,-D_FORTIFY_SOURCE=2
 else

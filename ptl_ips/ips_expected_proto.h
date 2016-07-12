@@ -105,7 +105,7 @@ struct ips_protoexp {
 	mpool_t tid_getreq_pool;
 	mpool_t tid_sreq_pool;	/* backptr into proto->ep->mq */
 	mpool_t tid_rreq_pool;	/* backptr into proto->ep->mq */
-	uint32_t tidflow_seed;
+	struct drand48_data tidflow_drand48_data;
 	uint32_t tid_flags;
 	uint32_t tid_send_fragsize;
 	uint32_t tid_page_offset_mask;

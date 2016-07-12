@@ -64,7 +64,7 @@
 			     void *src, uint32_t len
 
 struct psmi_am_token {
-	psm2_epaddr_t epaddr_from;
+	psm2_epaddr_t epaddr_incoming;
 	uint32_t flags;
 	/* Can handler reply? i.e. Not OPCODE_AM_REQUEST_NOREPLY request */
 	uint32_t can_reply;

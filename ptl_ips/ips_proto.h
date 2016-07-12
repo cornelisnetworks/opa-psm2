@@ -331,8 +331,8 @@ struct ips_proto {
 	uint64_t t_fini;
 	uint32_t runid_key;
 
-	int num_connected_to;
-	int num_connected_from;
+	int num_connected_outgoing;
+	int num_connected_incoming;
 	int num_disconnect_requests;
 
 	/* misc state variables. */
@@ -463,8 +463,8 @@ struct ips_epaddr {
 	struct ips_flow flows[EP_FLOW_LAST - 1];	/* pio and dma */
 	ips_path_grp_t *pathgrp;	/* pointer to slid/dlid group in hash */
 
-	uint32_t connidx_to;	/* peer's connection idx */
-	uint32_t connidx_from;	/* my connection idx */
+	uint32_t connidx_outgoing;	/* peer's connection idx */
+	uint32_t connidx_incoming;	/* my connection idx */
 
 	uint16_t ctrl_msg_queued;	/* bitmap of queued control messages to be send */
 	uint16_t ep_mtu;		/* < Remote endpoint's MTU */
@@ -478,11 +478,11 @@ struct ips_epaddr {
 	uint64_t s_timeout;	/* used as a time in close */
 	uint32_t runid_key;	/* peer process pid */
 	uint32_t credit:2;	/* credit to connect/disconnect: 0 or 1 */
-	uint32_t cstate_to:3;	/* connection state to, max 7 */
-	uint32_t cstate_from:3;	/* connection state from, max 7 */
+	uint32_t cstate_outgoing:3;	/* connection state to, max 7 */
+	uint32_t cstate_incoming:3;	/* connection state from, max 7 */
 	uint32_t delay_in_ms:8;	/* disconnect delay in ms */
-	uint32_t cerror_to:8;	/* error code during connection */
-	uint32_t cerror_from:8;	/* error code during connection */
+	uint32_t cerror_outgoing:8;	/* error code during connection */
+	uint32_t cerror_incoming:8;	/* error code during connection */
 };
 
 /*

@@ -69,9 +69,9 @@
  */
 #define CSTATE_ESTABLISHED	1
 #define CSTATE_NONE		2
-#define CSTATE_TO_DISCONNECTED	3
-#define CSTATE_TO_WAITING	4
-#define CSTATE_TO_WAITING_DISC	5
+#define CSTATE_OUTGOING_DISCONNECTED	3
+#define CSTATE_OUTGOING_WAITING	4
+#define CSTATE_OUTGOING_WAITING_DISC	5
 
 /*
  * define connection version. this is the basic version, optimized
@@ -112,22 +112,22 @@ struct ips_connect_reqrep {
  *   Grab connect lock
  *   Look up epid in table
  *      MATCH.
- *         assert cstate_to != CONNECT_WAITING (no re-entrancy)
- *         If cstate_to == CONNECT_DONE
+ *         assert cstate_outgoing != CONNECT_WAITING (no re-entrancy)
+ *         If cstate_outgoing == CONNECT_DONE
  *            return the already connected address.
  *         else
- *            assert cstate_to == CONNECT_NONE
- *            assert cstate_from == CONNECT_DONE
- *            cstate_to := CONNECT_WAITING
- *            assert connidx_to != UNKNOWN && connidx_from != UNKNOWN
- *            req->connidx := epaddr->connidx_from
+ *            assert cstate_outgoing == CONNECT_NONE
+ *            assert cstate_incoming == CONNECT_DONE
+ *            cstate_outgoing := CONNECT_WAITING
+ *            assert connidx_outgoing != UNKNOWN && connidx_incoming != UNKNOWN
+ *            req->connidx := epaddr->connidx_incoming
  *            add to list of pending connect.
  *      NO MATCH
  *         allocate epaddr and put in table
- *         cstate_to := CONNECT_WAITING
- *         cstate_from := CONNECT_NONE
- *         connidx_to := UNKNOWN
- *         req->connidx := epaddr->connidx_from := NEW connidx integer
+ *         cstate_outgoing := CONNECT_WAITING
+ *         cstate_incoming := CONNECT_NONE
+ *         connidx_outgoing := UNKNOWN
+ *         req->connidx := epaddr->connidx_incoming := NEW connidx integer
  *         add to list of pending connect
  *   Release connect lock
  *
@@ -141,31 +141,31 @@ struct ips_connect_reqrep {
  *   Grab connect lock
  *   Lock up epid in table
  *      MATCH
- *	   if cstate_from == CONNECT_DONE
- *	      req->connidx := epaddr->connidx_from
+ *	   if cstate_incoming == CONNECT_DONE
+ *	      req->connidx := epaddr->connidx_incoming
  *            compose reply and send again (this is a dupe request).
  *         else
- *            assert cstate_from == CONNECT_NONE
- *            assert cstate_to == (CONNECT_WAITING | CONNECT_DONE)
- *            cstate_from := CONNECT_DONE
- *            epaddr->connidx_to := req->connidx
- *            req->connidx := epaddr->connidx_from
+ *            assert cstate_incoming == CONNECT_NONE
+ *            assert cstate_outgoing == (CONNECT_WAITING | CONNECT_DONE)
+ *            cstate_incoming := CONNECT_DONE
+ *            epaddr->connidx_outgoing := req->connidx
+ *            req->connidx := epaddr->connidx_incoming
  *      NO MATCH
  *         allocate epaddr and put in table
- *         cstate_from := CONNECT_DONE
- *         epaddr->connidx_to = req->connidx;
- *         rep->connidx := epaddr->connidx_from := NEW connidx integer
+ *         cstate_incoming := CONNECT_DONE
+ *         epaddr->connidx_outgoing = req->connidx;
+ *         rep->connidx := epaddr->connidx_incoming := NEW connidx integer
  *         compose connect reply and send
  *   Release connect lock
  *
  * For all connection replies received:
  *    If connect_result != 0, process error and skip.
- *    assert cstate_to == CONNECT_WAITING
- *    if cstate_from == CONNECT_DONE
- *       assert rep->connidx == epaddr->connidx_to
+ *    assert cstate_outgoing == CONNECT_WAITING
+ *    if cstate_incoming == CONNECT_DONE
+ *       assert rep->connidx == epaddr->connidx_outgoing
  *    else
- *	 epaddr->connidx_to := rep->connidx
- *    cstate_to := CONNECT_DONE
+ *	 epaddr->connidx_outgoing := rep->connidx
+ *    cstate_outgoing := CONNECT_DONE
  *    ep->total_connect_count ++
  *
  *   * Fill in a connection request:
@@ -276,7 +276,7 @@ ips_ipsaddr_set_req_params(struct ips_proto *proto,
 	/*
 	 * Save peer's info.
 	 */
-	ipsaddr->connidx_to = req->connidx;
+	ipsaddr->connidx_outgoing = req->connidx;
 	ipsaddr->runid_key = req->runid_key;
 	/* ipsaddr->initpsn = req->initpsn; */
 
@@ -310,6 +310,9 @@ ips_ipsaddr_set_req_params(struct ips_proto *proto,
 	data = (uint64_t *) (req + 1);
 	ep = proto->ep->mctxt_next;
 
+	struct drand48_data drand48_data;
+	srand48_r((long int)(ipsaddr->epaddr.epid + proto->ep->epid), &drand48_data);
+
 	/* Loop over all slave endpoints */
 	while (ep != ep->mctxt_master) {
 		for (i = start; i < count; i++) {
@@ -334,7 +337,9 @@ ips_ipsaddr_set_req_params(struct ips_proto *proto,
 				ipsaddr->msgctl->ipsaddr_count++;
 
 				/* randomize the rail to start traffic */
-				if ((random() % count) == i) {
+				long int rnum;
+				lrand48_r(&drand48_data, &rnum);
+				if ((rnum % count) == i) {
 					ipsaddr->msgctl->ipsaddr_next =
 					    (ips_epaddr_t *) epaddr;
 				}
@@ -431,7 +436,7 @@ ips_proto_build_connect_message(struct ips_proto *proto,
 
 	hdr->connect_verno = IPS_CONNECT_VERNO;
 	hdr->psm_verno = PSMI_VERNO;
-	hdr->connidx = (uint32_t) ipsaddr->connidx_from;
+	hdr->connidx = (uint32_t) ipsaddr->connidx_incoming;
 	hdr->epid = proto->ep->epid;
 
 	switch (opcode) {
@@ -441,7 +446,7 @@ ips_proto_build_connect_message(struct ips_proto *proto,
 			req->connect_result = PSM2_OK;
 			req->runid_key = proto->runid_key;
 		} else {
-			req->connect_result = ipsaddr->cerror_from;
+			req->connect_result = ipsaddr->cerror_incoming;
 			req->runid_key = ipsaddr->runid_key;
 		}
 
@@ -659,8 +664,8 @@ ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
 	ips_ipsaddr_configure_flows(ipsaddr, proto);
 
 	/* clear connection state. */
-	ipsaddr->cstate_to = CSTATE_NONE;
-	ipsaddr->cstate_from = CSTATE_NONE;
+	ipsaddr->cstate_outgoing = CSTATE_NONE;
+	ipsaddr->cstate_incoming = CSTATE_NONE;
 
 	/* Add epaddr to PSM's epid table */
 	psmi_epid_add(proto->ep, epaddr->epid, epaddr);
@@ -673,10 +678,10 @@ static
 void ips_free_epaddr(psm2_epaddr_t epaddr)
 {
 	ips_epaddr_t *ipsaddr = (ips_epaddr_t *) epaddr;
-	_HFI_VDBG("epaddr=%p,ipsaddr=%p,connidx_from=%d\n", epaddr, ipsaddr,
-		  ipsaddr->connidx_from);
+	_HFI_VDBG("epaddr=%p,ipsaddr=%p,connidx_incoming=%d\n", epaddr, ipsaddr,
+		  ipsaddr->connidx_incoming);
 	psmi_epid_remove(epaddr->proto->ep, epaddr->epid);
-	ips_epstate_del(epaddr->proto->epstate, ipsaddr->connidx_from);
+	ips_epstate_del(epaddr->proto->epstate, ipsaddr->connidx_incoming);
 	psmi_free(epaddr);
 	return;
 }
@@ -721,14 +726,14 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 				     (int)PSMI_EPID_GET_LID(hdr->epid),
 				     (int)PSMI_EPID_GET_CONTEXT(hdr->epid),
 				     (int)PSMI_EPID_GET_SUBCONTEXT(hdr->epid));
-			} else if (ipsaddr->cstate_to != CSTATE_TO_WAITING) {
+			} else if (ipsaddr->cstate_outgoing != CSTATE_OUTGOING_WAITING) {
 				/* possible dupe */
 				_HFI_VDBG("connect dupe, expected %d got %d\n",
-					  CSTATE_TO_WAITING,
-					  ipsaddr->cstate_to);
+					  CSTATE_OUTGOING_WAITING,
+					  ipsaddr->cstate_outgoing);
 			} else {
 				/* Reply to our request for connection (i.e. outgoing connection) */
-				if (ipsaddr->cstate_from != CSTATE_ESTABLISHED) {
+				if (ipsaddr->cstate_incoming != CSTATE_ESTABLISHED) {
 					err =
 					    ips_ipsaddr_set_req_params(proto,
 								       ipsaddr,
@@ -737,8 +742,8 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 					if (err)
 						goto fail;
 				}
-				ipsaddr->cstate_to = CSTATE_ESTABLISHED;
-				ipsaddr->cerror_to = req->connect_result;
+				ipsaddr->cstate_outgoing = CSTATE_ESTABLISHED;
+				ipsaddr->cerror_outgoing = req->connect_result;
 			}
 		}
 		break;
@@ -798,10 +803,10 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 					      EP_FLOW_GO_BACK_N_PIO);
 				_HFI_VDBG
 				    ("Disconnect on unknown epaddr, just echo request\n");
-			} else if (ipsaddr->cstate_from != CSTATE_NONE) {
-				ipsaddr->cstate_from = CSTATE_NONE;
-				proto->num_connected_from--;
-				if (ipsaddr->cstate_to == CSTATE_NONE) {
+			} else if (ipsaddr->cstate_incoming != CSTATE_NONE) {
+				ipsaddr->cstate_incoming = CSTATE_NONE;
+				proto->num_connected_incoming--;
+				if (ipsaddr->cstate_outgoing == CSTATE_NONE) {
 					epaddr_do_free = 1;
 				}
 			}
@@ -827,9 +832,9 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 			     (int)PSMI_EPID_GET_CONTEXT(hdr->epid),
 			     (int)PSMI_EPID_GET_SUBCONTEXT(hdr->epid));
 			break;
-		} else if (ipsaddr->cstate_to == CSTATE_TO_WAITING_DISC) {
-			ipsaddr->cstate_to = CSTATE_TO_DISCONNECTED;
-			/* Freed in disconnect() if cstate_from == NONE */
+		} else if (ipsaddr->cstate_outgoing == CSTATE_OUTGOING_WAITING_DISC) {
+			ipsaddr->cstate_outgoing = CSTATE_OUTGOING_DISCONNECTED;
+			/* Freed in disconnect() if cstate_incoming == NONE */
 		}		/* else dupe reply */
 		break;
 
@@ -870,7 +875,7 @@ ptl_handle_connect_req(struct ips_proto *proto, psm2_epaddr_t epaddr,
 			err = PSM2_NO_MEMORY;
 			goto fail;
 		}
-	} else if (((ips_epaddr_t *) epaddr)->cstate_from == CSTATE_ESTABLISHED) {
+	} else if (((ips_epaddr_t *) epaddr)->cstate_incoming == CSTATE_ESTABLISHED) {
 		ipsaddr = (ips_epaddr_t *) epaddr;
 		/* Duplicate lid detection.  */
 		if (ipsaddr->runid_key == req->runid_key)
@@ -887,7 +892,7 @@ ptl_handle_connect_req(struct ips_proto *proto, psm2_epaddr_t epaddr,
 			}
 			goto no_reply;
 		}
-	} else if (((ips_epaddr_t *) epaddr)->cstate_to == CSTATE_NONE) {
+	} else if (((ips_epaddr_t *) epaddr)->cstate_outgoing == CSTATE_NONE) {
 		/* pre-created epaddr in multi-rail */
 		psmi_assert_always(epaddr->proto->ep !=
 				   epaddr->proto->ep->mctxt_master);
@@ -895,7 +900,7 @@ ptl_handle_connect_req(struct ips_proto *proto, psm2_epaddr_t epaddr,
 	}
 
 	ipsaddr = (ips_epaddr_t *) epaddr;
-	psmi_assert_always(ipsaddr->cstate_from == CSTATE_NONE);
+	psmi_assert_always(ipsaddr->cstate_incoming == CSTATE_NONE);
 
 	/* Check connect version and psm version */
 	if (req->connect_verno < 0x0001) {
@@ -912,28 +917,28 @@ ptl_handle_connect_req(struct ips_proto *proto, psm2_epaddr_t epaddr,
 		connect_result = PSM2_EPID_INVALID_PKEY;
 	} else {
 		connect_result = PSM2_OK;
-		if (ipsaddr->cstate_to == CSTATE_NONE) {
+		if (ipsaddr->cstate_outgoing == CSTATE_NONE) {
 			ips_epstate_idx idx;
 			psmi_assert_always(newconnect == 1);
 			err = ips_epstate_add(proto->epstate, ipsaddr, &idx);
 			if (err)
 				goto fail;
-			ipsaddr->connidx_from = idx;
+			ipsaddr->connidx_incoming = idx;
 		}
 	}
 
 	/* Incoming connection request */
-	if (ipsaddr->cstate_to != CSTATE_ESTABLISHED) {
+	if (ipsaddr->cstate_outgoing != CSTATE_ESTABLISHED) {
 		err = ips_ipsaddr_set_req_params(proto, ipsaddr, req, paylen);
 		if (err)
 			goto fail;
 	}
-	ipsaddr->cstate_from = CSTATE_ESTABLISHED;
-	ipsaddr->cerror_from = connect_result;
+	ipsaddr->cstate_incoming = CSTATE_ESTABLISHED;
+	ipsaddr->cerror_incoming = connect_result;
 
 	ipsaddr->runid_key = req->runid_key;
 
-	proto->num_connected_from++;
+	proto->num_connected_incoming++;
 
 do_reply:
 	ips_proto_send_ctrl_message_reply(proto,
@@ -1031,14 +1036,14 @@ ips_proto_connect(struct ips_proto *proto, int numep,
 			err = ips_epstate_add(proto->epstate, ipsaddr, &idx);
 			if (err)
 				goto fail;
-			ipsaddr->connidx_from = idx;
-		} else if (((ips_epaddr_t *) epaddr)->cstate_to != CSTATE_NONE) {	/* already connected */
+			ipsaddr->connidx_incoming = idx;
+		} else if (((ips_epaddr_t *) epaddr)->cstate_outgoing != CSTATE_NONE) {	/* already connected */
 			psmi_assert_always(((ips_epaddr_t *) epaddr)->
-					   cstate_to == CSTATE_ESTABLISHED);
+					   cstate_outgoing == CSTATE_ESTABLISHED);
 			array_of_errors[i] = PSM2_EPID_ALREADY_CONNECTED;
 			array_of_epaddr[i] = epaddr;
 			continue;
-		} else if (((ips_epaddr_t *) epaddr)->cstate_from ==
+		} else if (((ips_epaddr_t *) epaddr)->cstate_incoming ==
 			   CSTATE_NONE) {
 			/* pre-created epaddr in multi-rail */
 			psmi_assert_always(epaddr->proto->ep !=
@@ -1047,19 +1052,19 @@ ips_proto_connect(struct ips_proto *proto, int numep,
 			err = ips_epstate_add(proto->epstate, ipsaddr, &idx);
 			if (err)
 				goto fail;
-			ipsaddr->connidx_from = idx;
+			ipsaddr->connidx_incoming = idx;
 		} else {
 			/* We've already received a connect request message from a remote
 			 * peer, it's time to send our own. */
 			ipsaddr = (ips_epaddr_t *) epaddr;
 			/* No re-entrancy sanity check and makes sure we are not connected
 			 * twice (caller's precondition) */
-			psmi_assert(ipsaddr->cstate_to == CSTATE_NONE);
-			psmi_assert(ipsaddr->cstate_from != CSTATE_NONE);
+			psmi_assert(ipsaddr->cstate_outgoing == CSTATE_NONE);
+			psmi_assert(ipsaddr->cstate_incoming != CSTATE_NONE);
 		}
 
-		ipsaddr->cstate_to = CSTATE_TO_WAITING;
-		ipsaddr->cerror_to = PSM2_OK;
+		ipsaddr->cstate_outgoing = CSTATE_OUTGOING_WAITING;
+		ipsaddr->cerror_outgoing = PSM2_OK;
 		array_of_epaddr[i] = epaddr;
 		ipsaddr->s_timeout = get_cycles();
 		ipsaddr->delay_in_ms = 1;
@@ -1091,10 +1096,10 @@ ips_proto_connect(struct ips_proto *proto, int numep,
 			}
 			psmi_assert_always(array_of_epaddr[i] != NULL);
 			ipsaddr = (ips_epaddr_t *) array_of_epaddr[i];
-			if (ipsaddr->cstate_to == CSTATE_ESTABLISHED) {
+			if (ipsaddr->cstate_outgoing == CSTATE_ESTABLISHED) {
 				/* This is not the real error code, we only set OK here
 				 * so we know to stop polling for the reply. The actual
-				 * error is in ipsaddr->cerror_to */
+				 * error is in ipsaddr->cerror_outgoing */
 				array_of_errors[i] = PSM2_OK;
 				numep_left--;
 				connect_credits++;
@@ -1187,10 +1192,10 @@ ips_proto_connect(struct ips_proto *proto, int numep,
 						   (proto->ep, 1))))
 					goto fail;
 
-				if (ipsaddr->cstate_to == CSTATE_ESTABLISHED) {
+				if (ipsaddr->cstate_outgoing == CSTATE_ESTABLISHED) {
 					/* This is not the real error code, we only set OK here
 					 * so we know to stop polling for the reply. The actual
-					 * error is in ipsaddr->cerror_to */
+					 * error is in ipsaddr->cerror_outgoing */
 					array_of_errors[i] = PSM2_OK;
 					numep_left--;
 					connect_credits++;
@@ -1218,15 +1223,15 @@ err_timeout:
 		case PSM2_OK:
 			/* Restore the real connect error */
 			ipsaddr = (ips_epaddr_t *) array_of_epaddr[i];
-			array_of_errors[i] = ipsaddr->cerror_to;
-			psmi_assert_always(ipsaddr->cstate_to ==
+			array_of_errors[i] = ipsaddr->cerror_outgoing;
+			psmi_assert_always(ipsaddr->cstate_outgoing ==
 					   CSTATE_ESTABLISHED);
-			if (ipsaddr->cerror_to != PSM2_OK) {
-				err = psmi_error_cmp(err, ipsaddr->cerror_to);
+			if (ipsaddr->cerror_outgoing != PSM2_OK) {
+				err = psmi_error_cmp(err, ipsaddr->cerror_outgoing);
 				ips_free_epaddr(array_of_epaddr[i]);
 				array_of_epaddr[i] = NULL;
 			} else {
-				proto->num_connected_to++;
+				proto->num_connected_outgoing++;
 				psmi_assert_always(ipsaddr->pathgrp->
 						   pg_path[0]
 						   [IPS_PATH_HIGH_PRIORITY]->
@@ -1296,11 +1301,11 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 				   proto->ptl);
 		ipsaddr = (ips_epaddr_t *) array_of_epaddr[i];
 		ipsaddr->credit = 0;
-		if (ipsaddr->cstate_to == CSTATE_NONE) {
+		if (ipsaddr->cstate_outgoing == CSTATE_NONE) {
 			array_of_errors[i] = PSM2_OK;
 			continue;
 		} else {
-			psmi_assert_always(ipsaddr->cstate_to ==
+			psmi_assert_always(ipsaddr->cstate_outgoing ==
 					   CSTATE_ESTABLISHED);
 		}
 		_HFI_VDBG("disconnecting %p\n", array_of_epaddr[i]);
@@ -1329,14 +1334,14 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 				    || array_of_errors[i] == PSM2_OK)
 					continue;
 				ipsaddr = (ips_epaddr_t *) array_of_epaddr[i];
-				switch (ipsaddr->cstate_to) {
-				case CSTATE_TO_DISCONNECTED:
+				switch (ipsaddr->cstate_outgoing) {
+				case CSTATE_OUTGOING_DISCONNECTED:
 					array_of_errors[i] = PSM2_OK;
 					numep_left--;
 					disconnect_credits++;
 					ipsaddr->credit = 0;
 					continue;
-				case CSTATE_TO_WAITING_DISC:
+				case CSTATE_OUTGOING_WAITING_DISC:
 					if (ipsaddr->s_timeout > get_cycles())
 						continue;
 					ipsaddr->delay_in_ms =
@@ -1373,8 +1378,8 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 					if (!ipsaddr->credit)
 						continue;
 					ipsaddr->delay_in_ms = 1;
-					ipsaddr->cstate_to =
-					    CSTATE_TO_WAITING_DISC;
+					ipsaddr->cstate_outgoing =
+					    CSTATE_OUTGOING_WAITING_DISC;
 					ipsaddr->s_timeout =
 					    get_cycles() +
 					    nanosecs_to_cycles(MSEC_ULL);
@@ -1390,7 +1395,7 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 					psmi_handle_error(PSMI_EP_NORETURN,
 							  PSM2_INTERNAL_ERR,
 							  "Unhandled/unknown close state %d",
-							  ipsaddr->cstate_to);
+							  ipsaddr->cstate_outgoing);
 					break;
 				}
 			}
@@ -1450,7 +1455,7 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 			if (!array_of_epaddr_mask[i])
 				continue;
 			ipsaddr = (ips_epaddr_t *) array_of_epaddr[i];
-			psmi_assert_always(ipsaddr->cstate_to ==
+			psmi_assert_always(ipsaddr->cstate_outgoing ==
 					   CSTATE_ESTABLISHED);
 			ips_proto_send_ctrl_message_request(proto, &ipsaddr->
 						    flows[proto->msgflowid],
@@ -1458,7 +1463,7 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 						    &ipsaddr->ctrl_msg_queued,
 						    0);
 			/* Force state to DISCONNECTED */
-			ipsaddr->cstate_to = CSTATE_TO_DISCONNECTED;
+			ipsaddr->cstate_outgoing = CSTATE_OUTGOING_DISCONNECTED;
 			array_of_errors[i] = PSM2_OK;
 		}
 		_HFI_VDBG("non-graceful close complete from %d peers\n", numep);
@@ -1468,19 +1473,19 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 		if (!array_of_epaddr_mask[i] || array_of_errors[i] != PSM2_OK)
 			continue;
 		ipsaddr = (ips_epaddr_t *) array_of_epaddr[i];
-		if (ipsaddr->cstate_to == CSTATE_NONE)
+		if (ipsaddr->cstate_outgoing == CSTATE_NONE)
 			continue;
-		psmi_assert_always(ipsaddr->cstate_to ==
-				   CSTATE_TO_DISCONNECTED);
-		proto->num_connected_to--;
+		psmi_assert_always(ipsaddr->cstate_outgoing ==
+				   CSTATE_OUTGOING_DISCONNECTED);
+		proto->num_connected_outgoing--;
 		/* Remote disconnect req arrived already, remove this epid.  If it
 		 * hasn't arrived yet, that's okay, we'll pick it up later and just
 		 * mark our connect-to status as being "none". */
-		if (ipsaddr->cstate_from == CSTATE_NONE) {
+		if (ipsaddr->cstate_incoming == CSTATE_NONE) {
 			ips_free_epaddr(array_of_epaddr[i]);
 			array_of_epaddr[i] = NULL;
 		} else
-			ipsaddr->cstate_to = CSTATE_NONE;
+			ipsaddr->cstate_outgoing = CSTATE_NONE;
 	}
 
 fail:
@@ -1490,8 +1495,8 @@ success:
 
 int ips_proto_isconnected(ips_epaddr_t *ipsaddr)
 {
-	if (ipsaddr->cstate_to == CSTATE_ESTABLISHED ||
-	    ipsaddr->cstate_from == CSTATE_ESTABLISHED)
+	if (ipsaddr->cstate_outgoing == CSTATE_ESTABLISHED ||
+	    ipsaddr->cstate_incoming == CSTATE_ESTABLISHED)
 		return 1;
 	else
 		return 0;

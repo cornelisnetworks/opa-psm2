@@ -714,8 +714,8 @@ amsh_epaddr_add(ptl_t *ptl, psm2_epid_t epid, uint16_t shmidx, psm2_epaddr_t *ep
 	amaddr->_shmidx = shmidx;
 	/* we haven't connected yet, so we can't give them the same hint */
 	amaddr->_return_shmidx = -1;
-	AMSH_CSTATE_TO_SET(amaddr, NONE);
-	AMSH_CSTATE_FROM_SET(amaddr, NONE);
+	AMSH_CSTATE_OUTGOING_SET(amaddr, NONE);
+	AMSH_CSTATE_INCOMING_SET(amaddr, NONE);
 
 	/* other setup */
 	ptl->am_ep[shmidx].epaddr = epaddr;
@@ -747,7 +747,7 @@ amsh_epaddr_update(ptl_t *ptl, psm2_epaddr_t epaddr)
 
 	/* restart the connection process */
 	amaddr->_return_shmidx = -1;
-	AMSH_CSTATE_TO_SET(amaddr, NONE);
+	AMSH_CSTATE_OUTGOING_SET(amaddr, NONE);
 
 	/* wait for the other process to init again */
 	{
@@ -857,13 +857,13 @@ amsh_ep_connreq_init(ptl_t *ptl, int op, /* connect, disconnect or abort */
 					continue;
 				}
 				cstate =
-				    AMSH_CSTATE_TO_GET((am_epaddr_t *) epaddr);
-				if (cstate == AMSH_CSTATE_TO_ESTABLISHED) {
+				    AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) epaddr);
+				if (cstate == AMSH_CSTATE_OUTGOING_ESTABLISHED) {
 					array_of_epaddr[i] = epaddr;
 					array_of_errors[i] = PSM2_OK;
 				} else {
 					psmi_assert(cstate ==
-						    AMSH_CSTATE_TO_NONE);
+						    AMSH_CSTATE_OUTGOING_NONE);
 					array_of_errors[i] = PSM2_TIMEOUT;
 					array_of_epaddr[i] = epaddr;
 					req->epid_mask[i] = AMSH_CMASK_PREREQ;
@@ -875,8 +875,8 @@ amsh_ep_connreq_init(ptl_t *ptl, int op, /* connect, disconnect or abort */
 		} else {	/* disc or abort */
 			epaddr = array_of_epaddr[i];
 			psmi_assert(epaddr != NULL);
-			cstate = AMSH_CSTATE_TO_GET((am_epaddr_t *) epaddr);
-			if (cstate == AMSH_CSTATE_TO_ESTABLISHED) {
+			cstate = AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) epaddr);
+			if (cstate == AMSH_CSTATE_OUTGOING_ESTABLISHED) {
 				req->epid_mask[i] = AMSH_CMASK_PREREQ;
 				_HFI_VDBG
 				    ("Just set index %d to AMSH_CMASK_PREREQ\n",
@@ -931,7 +931,7 @@ amsh_ep_connreq_poll(ptl_t *ptl, struct ptl_connection_req *req)
 				    epid != epaddr->epid) {
 					req->numep_left--;
 					req->epid_mask[i] = AMSH_CMASK_DONE;
-					AMSH_CSTATE_TO_SET((am_epaddr_t *)
+					AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *)
 							   epaddr, NONE);
 				}
 			}
@@ -949,7 +949,7 @@ amsh_ep_connreq_poll(ptl_t *ptl, struct ptl_connection_req *req)
 							amsh_conn_handler_hidx,
 							req->args, 4, NULL, 0,
 							0);
-				AMSH_CSTATE_TO_SET((am_epaddr_t *) epaddr,
+				AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *) epaddr,
 				           DISC_REQUESTED);
 				/**
 				* Only munmap if we have nothing more to
@@ -957,17 +957,17 @@ amsh_ep_connreq_poll(ptl_t *ptl, struct ptl_connection_req *req)
 				* already recieved a disconnect req from the
 				* other node.
 				*/
-				if (AMSH_CSTATE_FROM_GET((am_epaddr_t *) epaddr) ==
-					AMSH_CSTATE_FROM_DISC_REQUESTED)
+				if (AMSH_CSTATE_INCOMING_GET((am_epaddr_t *) epaddr) ==
+					AMSH_CSTATE_INCOMING_DISC_REQUESTED)
 					err = psmi_do_unmap(ptl->am_ep[shmidx].amsh_shmbase);
 				req->epid_mask[i] = AMSH_CMASK_POSTREQ;
 			} else if (req->epid_mask[i] == AMSH_CMASK_POSTREQ) {
 				cstate =
-				    AMSH_CSTATE_TO_GET((am_epaddr_t *) epaddr);
-				if (cstate == AMSH_CSTATE_TO_DISC_REPLIED) {
+				    AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) epaddr);
+				if (cstate == AMSH_CSTATE_OUTGOING_DISC_REPLIED) {
 					req->numep_left--;
 					req->epid_mask[i] = AMSH_CMASK_DONE;
-					AMSH_CSTATE_TO_SET((am_epaddr_t *)
+					AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *)
 							   epaddr, NONE);
 				}
 			}
@@ -991,17 +991,17 @@ amsh_ep_connreq_poll(ptl_t *ptl, struct ptl_connection_req *req)
 			if (ptl->am_ep[shmidx].pid !=
 			    ((struct am_ctl_nodeinfo *) ptl->am_ep[shmidx].amsh_shmbase)->pid) {
 				req->epid_mask[i] = AMSH_CMASK_PREREQ;
-				AMSH_CSTATE_TO_SET((am_epaddr_t *) epaddr,
+				AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *) epaddr,
 						   NONE);
 				n_prereq++;
 				amsh_epaddr_update(ptl, epaddr);
 				continue;
 			}
 
-			cstate = AMSH_CSTATE_TO_GET((am_epaddr_t *) epaddr);
-			if (cstate == AMSH_CSTATE_TO_REPLIED) {
+			cstate = AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) epaddr);
+			if (cstate == AMSH_CSTATE_OUTGOING_REPLIED) {
 				req->numep_left--;
-				AMSH_CSTATE_TO_SET((am_epaddr_t *) epaddr,
+				AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *) epaddr,
 						   ESTABLISHED);
 				req->epid_mask[i] = AMSH_CMASK_DONE;
 				continue;
@@ -1127,11 +1127,11 @@ amsh_ep_connreq_fini(ptl_t *ptl, struct ptl_connection_req *req)
 			int cstate;
 			req->epid_mask[i] = AMSH_CMASK_DONE;
 			cstate =
-			    AMSH_CSTATE_TO_GET((am_epaddr_t *) (req->
+			    AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) (req->
 								epaddr[i]));
-			if (cstate == AMSH_CSTATE_TO_REPLIED) {
+			if (cstate == AMSH_CSTATE_OUTGOING_REPLIED) {
 				req->numep_left--;
-				AMSH_CSTATE_TO_SET((am_epaddr_t *) (req->
+				AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *) (req->
 								    epaddr[i]),
 						   ESTABLISHED);
 			} else {	/* never actually got reply */
@@ -1156,10 +1156,14 @@ amsh_ep_connreq_fini(ptl_t *ptl, struct ptl_connection_req *req)
 
 		err = psmi_error_cmp(err, req->errors[i]);
 		/* XXX TODO: Report errors in connection. */
-		if (req->op == PTL_OP_DISCONNECT || req->op == PTL_OP_ABORT) {
-			psmi_assert(req->epaddr[i] != NULL);
-			amsh_free_epaddr(req->epaddr[i]);
-			req->epaddr[i] = NULL;
+		/* Only free epaddr if they have disconnected from us */
+		int cstate = AMSH_CSTATE_INCOMING_GET((am_epaddr_t *) req->epaddr[i]);
+		if (cstate == AMSH_CSTATE_INCOMING_DISC_REQUESTED) {
+			if (req->op == PTL_OP_DISCONNECT || req->op == PTL_OP_ABORT) {
+				psmi_assert(req->epaddr[i] != NULL);
+				amsh_free_epaddr(req->epaddr[i]);
+				req->epaddr[i] = NULL;
+			}
 		}
 	}
 
@@ -1643,7 +1647,7 @@ psmi_amsh_short_reply(amsh_am_token_t *tok,
 		      psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 		      const void *src, size_t len, int flags)
 {
-	psmi_amsh_generic_inner(AMREPLY_SHORT, tok->ptl, tok->tok.epaddr_from,
+	psmi_amsh_generic_inner(AMREPLY_SHORT, tok->ptl, tok->tok.epaddr_incoming,
 				handler, args, nargs, src, len, NULL, flags);
 	return;
 }
@@ -1653,7 +1657,7 @@ psmi_amsh_long_reply(amsh_am_token_t *tok,
 		     psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 		     const void *src, size_t len, void *dest, int flags)
 {
-	psmi_amsh_generic_inner(AMREPLY_LONG, tok->ptl, tok->tok.epaddr_from,
+	psmi_amsh_generic_inner(AMREPLY_LONG, tok->ptl, tok->tok.epaddr_incoming,
 				handler, args, nargs, src, len, dest, flags);
 	return;
 }
@@ -1747,7 +1751,7 @@ void process_packet(ptl_t *ptl, am_pkt_short_t *pkt, int isreq)
 	uint16_t shmidx = pkt->shmidx;
 	int nargs = pkt->nargs;
 
-	tok.tok.epaddr_from = ((shmidx != (uint16_t)-1) ? ptl->am_ep[shmidx].epaddr : 0);
+	tok.tok.epaddr_incoming = ((shmidx != (uint16_t)-1) ? ptl->am_ep[shmidx].epaddr : 0);
 	tok.ptl = ptl;
 	tok.mq = ptl->ep->mq;
 	tok.shmidx = shmidx;
@@ -2113,15 +2117,15 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 		}
 
 		/* Rewrite args */
-		ptl->connect_from++;
+		ptl->connect_incoming++;
 		args[0].u32w0 = PSMI_AM_CONN_REP;
 		args[1].u64w0 = (psm2_epid_t) ptl->epid;
 		/* and return our shmidx for the connecting process */
 		args[2].u16w0 = shmidx;
 		args[2].u32w1 = PSM2_OK;
-		AMSH_CSTATE_FROM_SET((am_epaddr_t *) epaddr, ESTABLISHED);
+		AMSH_CSTATE_INCOMING_SET((am_epaddr_t *) epaddr, ESTABLISHED);
 		((am_epaddr_t *)epaddr)->_return_shmidx = return_shmidx;
-		tok->tok.epaddr_from = epaddr;	/* adjust token */
+		tok->tok.epaddr_incoming = epaddr;	/* adjust token */
 		psmi_amsh_short_reply(tok, amsh_conn_handler_hidx,
 				      args, narg, NULL, 0, 0);
 		break;
@@ -2142,9 +2146,9 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			break;
 
 		*perr = err;
-		AMSH_CSTATE_TO_SET((am_epaddr_t *) epaddr, REPLIED);
+		AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *) epaddr, REPLIED);
 		((am_epaddr_t *)epaddr)->_return_shmidx = return_shmidx;
-		ptl->connect_to++;
+		ptl->connect_outgoing++;
 		_HFI_VDBG("CCC epaddr=%s connected to ptl=%p\n",
 			  psmi_epaddr_get_name(epaddr->epid), ptl);
 		break;
@@ -2157,8 +2161,8 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 		}
 		args[0].u32w0 = PSMI_AM_DISC_REP;
 		args[2].u32w1 = PSM2_OK;
-		AMSH_CSTATE_FROM_SET((am_epaddr_t *) epaddr, DISC_REQUESTED);
-		ptl->connect_from--;
+		AMSH_CSTATE_INCOMING_SET((am_epaddr_t *) epaddr, DISC_REQUESTED);
+		ptl->connect_incoming--;
 		/* Before sending the reply, make sure the process
 		 * is still connected */
 
@@ -2176,9 +2180,11 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			* already disconnected with the other node
 			* or have sent a disconnect request.
 			*/
-			cstate = AMSH_CSTATE_TO_GET((am_epaddr_t *) epaddr);
-			if (cstate == AMSH_CSTATE_TO_DISC_REQUESTED)
+			cstate = AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) epaddr);
+			if (cstate == AMSH_CSTATE_OUTGOING_DISC_REQUESTED) {
 				err = psmi_do_unmap(ptl->am_ep[shmidx].amsh_shmbase);
+				psmi_epid_remove(epaddr->ptlctl->ep, epaddr->epid);
+			}
 		}
 		break;
 
@@ -2188,9 +2194,9 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			return;
 		}
 		*perr = err;
-		epaddr = tok->tok.epaddr_from;
-		AMSH_CSTATE_TO_SET((am_epaddr_t *) epaddr, DISC_REPLIED);
-		ptl->connect_to--;
+		epaddr = tok->tok.epaddr_incoming;
+		AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *) epaddr, DISC_REPLIED);
+		ptl->connect_outgoing--;
 		break;
 
 	default:
@@ -2248,8 +2254,8 @@ amsh_init(psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 	ptl->zero_polls = 0;
 
 	ptl->connect_phase = 0;
-	ptl->connect_from = 0;
-	ptl->connect_to = 0;
+	ptl->connect_incoming = 0;
+	ptl->connect_outgoing = 0;
 
 	memset(&ptl->amsh_empty_shortpkt, 0, sizeof(ptl->amsh_empty_shortpkt));
 	memset(&ptl->psmi_am_reqq_fifo, 0, sizeof(ptl->psmi_am_reqq_fifo));
@@ -2329,7 +2335,7 @@ static psm2_error_t amsh_fini(ptl_t *ptl, int force, uint64_t timeout_ns)
 	int i = 0;
 
 	/* Close whatever has been left open -- this will be factored out for 2.1 */
-	if (ptl->connect_to > 0) {
+	if (ptl->connect_outgoing > 0) {
 		int num_disc = 0;
 		int *mask;
 		psm2_error_t *errs;
@@ -2339,8 +2345,8 @@ static psm2_error_t amsh_fini(ptl_t *ptl, int force, uint64_t timeout_ns)
 		while ((epaddr = psmi_epid_itor_next(&itor))) {
 			if (epaddr->ptlctl->ptl != ptl)
 				continue;
-			if (AMSH_CSTATE_TO_GET((am_epaddr_t *) epaddr) ==
-			    AMSH_CSTATE_TO_ESTABLISHED)
+			if (AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) epaddr) ==
+			    AMSH_CSTATE_OUTGOING_ESTABLISHED)
 				num_disc++;
 		}
 		psmi_epid_itor_fini(&itor);
@@ -2368,8 +2374,8 @@ static psm2_error_t amsh_fini(ptl_t *ptl, int force, uint64_t timeout_ns)
 		psmi_epid_itor_init(&itor, ptl->ep);
 		while ((epaddr = psmi_epid_itor_next(&itor))) {
 			if (epaddr->ptlctl->ptl == ptl) {
-				if (AMSH_CSTATE_TO_GET((am_epaddr_t *) epaddr)
-				    == AMSH_CSTATE_TO_ESTABLISHED) {
+				if (AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) epaddr)
+				    == AMSH_CSTATE_OUTGOING_ESTABLISHED) {
 					mask[i] = 1;
 					epaddr_array[i] = epaddr;
 					i++;
@@ -2385,19 +2391,19 @@ static psm2_error_t amsh_fini(ptl_t *ptl, int force, uint64_t timeout_ns)
 		psmi_free(epaddr_array);
 	}
 
-	if (ptl->connect_from > 0 || ptl->connect_to > 0) {
-		while (ptl->connect_from > 0 || ptl->connect_to > 0) {
+	if (ptl->connect_incoming > 0 || ptl->connect_outgoing > 0) {
+		while (ptl->connect_incoming > 0 || ptl->connect_outgoing > 0) {
 			if (!psmi_cycles_left(t_start, timeout_ns)) {
 				err = PSM2_TIMEOUT;
 				_HFI_VDBG("CCC timed out with from=%d,to=%d\n",
-					  ptl->connect_from, ptl->connect_to);
+					  ptl->connect_incoming, ptl->connect_outgoing);
 				break;
 			}
 			psmi_poll_internal(ptl->ep, 1);
 		}
 	} else
 		_HFI_VDBG("CCC complete disconnect from=%d,to=%d\n",
-			  ptl->connect_from, ptl->connect_to);
+			  ptl->connect_incoming, ptl->connect_outgoing);
 
 	if ((err_seg = psmi_shm_detach(ptl))) {
 		err = err_seg;

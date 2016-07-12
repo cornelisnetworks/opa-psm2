@@ -743,9 +743,6 @@ disablecca:
 	}
 
 finishcca:
-	/* Seed the random number generator with our pid */
-	srand(getpid());
-
 	/* Initialize path record/group hash table */
 	hcreate_r(DF_PATH_REC_HASH_SIZE, &proto->ips_path_rec_hash);
 	hcreate_r(DF_PATH_GRP_HASH_SIZE, &proto->ips_path_grp_hash);
