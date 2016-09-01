@@ -1547,7 +1547,7 @@ psmi_coreopt_ctl(const void *core_obj, int optname,
 
 fail:
 	/* Unrecognized/unknown option */
-	return psmi_handle_error(NULL, PSM2_PARAM_ERR, err_string);
+	return psmi_handle_error(NULL, PSM2_PARAM_ERR, "%s", err_string);
 }
 
 psm2_error_t psmi_core_setopt(const void *core_obj, int optname,
