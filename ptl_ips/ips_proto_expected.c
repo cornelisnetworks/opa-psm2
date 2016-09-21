@@ -244,6 +244,17 @@ ips_protoexp_init(const psmi_context_t *context,
 
 	}
 
+	{
+		union psmi_envvar_val env_rts_cts_interleave;
+
+		psmi_getenv("PSM2_RTS_CTS_INTERLEAVE",
+			    "Interleave the handling of RTS to provide a fair disturbution between multiple senders",
+			    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
+			    (union psmi_envvar_val)0, &env_rts_cts_interleave);
+		if (env_rts_cts_interleave.e_uint)
+			protoexp->tid_flags |= IPS_PROTOEXP_FLAG_RTS_CTS_INTERLEAVE;
+	}
+
 	/* Send descriptors.
 	 *
 	 * There can be up to 2^32 of these send descriptors.  We conservatively
@@ -1643,7 +1654,18 @@ ipsaddr_next:
 				STAILQ_REMOVE_HEAD(phead, tidgr_next);
 				continue;	/* try next grant request */
 			}
-				
+			else if (protoexp->tid_flags & IPS_PROTOEXP_FLAG_RTS_CTS_INTERLEAVE) {
+				/* In case of multi rail, PSM sends one CTS per request
+				 * per card after which the request is moved to the end
+				 * of the queue.
+				 */
+				count--;
+				if (count)
+					goto ipsaddr_next;
+				STAILQ_REMOVE_HEAD(phead, tidgr_next);
+				STAILQ_INSERT_TAIL(phead, getreq ,tidgr_next);
+				continue;
+			}
 			/* created a tidrecvc, reset count */
 			count = ipsaddr->msgctl->ipsaddr_count;
 			goto ipsaddr_next;	/* try next fragment on next ipsaddr */

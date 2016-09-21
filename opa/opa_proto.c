@@ -101,7 +101,7 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 	int __hfi_pg_sz;
 #ifdef PSM2_SUPPORT_IW_CMD_API
 	/* for major version 6 of driver, we will use uinfo_new.  See below for details. */
-	struct hfi1_user_info uinfo_new;
+	struct hfi1_user_info uinfo_new = {0};
 #endif
 
 	/* First get the page size */

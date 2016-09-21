@@ -197,20 +197,16 @@ ips_ipsaddr_configure_flows(struct ips_epaddr *ipsaddr, struct ips_proto *proto)
 	/* PIO flow uses the normal priority path, to separate low
 	 * priority path for bulk sdma data packets
 	 */
-	if (!(proto->flags & IPS_PROTO_FLAG_SDMA)) {
-		ips_flow_init(&ipsaddr->flows[EP_FLOW_GO_BACK_N_PIO], proto,
-			      ipsaddr, PSM_TRANSFER_PIO, PSM_PROTOCOL_GO_BACK_N,
-			      IPS_PATH_NORMAL_PRIORITY, EP_FLOW_GO_BACK_N_PIO);
-	}
+	ips_flow_init(&ipsaddr->flows[EP_FLOW_GO_BACK_N_PIO], proto,
+		      ipsaddr, PSM_TRANSFER_PIO, PSM_PROTOCOL_GO_BACK_N,
+		      IPS_PATH_NORMAL_PRIORITY, EP_FLOW_GO_BACK_N_PIO);
 
 	/* DMA flow uses the low priority path, multi MTU sized eager
 	 * message uses the same flow to transfer to avoid out of order.
 	 */
-	if (!(proto->flags & IPS_PROTO_FLAG_SPIO)) {
-		ips_flow_init(&ipsaddr->flows[EP_FLOW_GO_BACK_N_DMA], proto,
-			      ipsaddr, PSM_TRANSFER_DMA, PSM_PROTOCOL_GO_BACK_N,
-			      IPS_PATH_LOW_PRIORITY, EP_FLOW_GO_BACK_N_DMA);
-	}
+	ips_flow_init(&ipsaddr->flows[EP_FLOW_GO_BACK_N_DMA], proto,
+		      ipsaddr, PSM_TRANSFER_DMA, PSM_PROTOCOL_GO_BACK_N,
+		      IPS_PATH_LOW_PRIORITY, EP_FLOW_GO_BACK_N_DMA);
 }
 
 static
