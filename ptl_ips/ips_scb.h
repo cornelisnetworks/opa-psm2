@@ -56,6 +56,7 @@
 #ifndef _IPS_SCB_H
 #define _IPS_SCB_H
 
+#include "common_defines.h"
 #include "psm_user.h"
 #include "ips_proto_header.h"
 
@@ -185,9 +186,11 @@ struct ips_scb {
 void ips_scbctrl_free(ips_scb_t *scb);
 int ips_scbctrl_bufalloc(ips_scb_t *scb);
 int ips_scbctrl_avail(struct ips_scbctrl *scbc);
-ips_scb_t *ips_scbctrl_alloc(struct ips_scbctrl *scbc,
+ips_scb_t *MOCKABLE(ips_scbctrl_alloc)(struct ips_scbctrl *scbc,
 			     int scbnum, int len, uint32_t flags);
-ips_scb_t *ips_scbctrl_alloc_tiny(struct ips_scbctrl *scbc);
+MOCK_DCL_EPILOGUE(ips_scbctrl_alloc);
+ips_scb_t *MOCKABLE(ips_scbctrl_alloc_tiny)(struct ips_scbctrl *scbc);
+MOCK_DCL_EPILOGUE(ips_scbctrl_alloc_tiny);
 
 psm2_error_t ips_scbctrl_init(const psmi_context_t *context,
 			     uint32_t numscb, uint32_t numbufs,

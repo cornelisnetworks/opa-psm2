@@ -69,8 +69,10 @@
 #include <fcntl.h>
 #include <malloc.h>
 
+#ifdef PSM_VALGRIND
 #include "valgrind/valgrind.h"
 #include "valgrind/memcheck.h"
+#endif
 
 #include "ipserror.h"
 #include "opa_user.h"
@@ -87,7 +89,7 @@
    struct _hfi_ctrl *.  The struct _hfi_ctrl * used for everything
    else is returned as part of hfi1_base_info.
 */
-struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info *uinfo)
+struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 {
 	struct _hfi_ctrl *spctrl = NULL;
 	struct hfi1_ctxt_info *cinfo;
@@ -97,6 +99,10 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info *uinfo)
 	struct hfi1_cmd c;
 	uintptr_t pg_mask;
 	int __hfi_pg_sz;
+#ifdef PSM2_SUPPORT_IW_CMD_API
+	/* for major version 6 of driver, we will use uinfo_new.  See below for details. */
+	struct hfi1_user_info uinfo_new = {0};
+#endif
 
 	/* First get the page size */
 	__hfi_pg_sz = sysconf(_SC_PAGESIZE);
@@ -117,9 +123,37 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info *uinfo)
 	/* 1. ask driver to assign context to current process */
 	memset(&c, 0, sizeof(struct hfi1_cmd));
 	c.type = HFI1_CMD_ASSIGN_CTXT;
+
+#ifdef PSM2_SUPPORT_IW_CMD_API
+	/* If psm is comunicating with a MAJOR version 6 driver, we need
+	   to pass in an actual struct hfi1_user_info not a hfi1_user_info_dep.
+	   Else if psm is communicating with a MAJOR version 5 driver, we can
+	   just continue to pass a hfi1_user_info_dep as struct hfi1_user_info_dep
+	   is identical to the MAJOR version 5 struct hfi1_user_info. */
+	if (hfi_get_user_major_version() == IOCTL_CMD_API_MODULE_MAJOR)
+	{
+		/* If psm is communitcation with a MAJOR version 6 driver,
+		   we copy uinfo into uinfo_new and pass uinfo_new to the driver. */
+		c.len = sizeof(uinfo_new);
+		c.addr = (__u64) (&uinfo_new);
+
+		uinfo_new.userversion = uinfo->userversion;
+		uinfo_new.pad         = uinfo->pad;
+		uinfo_new.subctxt_cnt = uinfo->subctxt_cnt;
+		uinfo_new.subctxt_id  = uinfo->subctxt_id;
+		memcpy(uinfo_new.uuid,uinfo->uuid,sizeof(uinfo_new.uuid));
+	}
+	else
+	{
+		/* If psm is working with an old driver, we continue to use
+		   the struct hfi1_user_info_dep version of the struct: */
+		c.len = sizeof(*uinfo);
+		c.addr = (__u64) uinfo;
+	}
+#else
 	c.len = sizeof(*uinfo);
 	c.addr = (__u64) uinfo;
-
+#endif
 	if (hfi_cmd_write(fd, &c, sizeof(c)) == -1) {
 		if (errno == ENODEV) {
 			_HFI_INFO("PSM2 and driver version mismatch\n");
@@ -132,6 +166,19 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info *uinfo)
 		}
 		goto err;
 	}
+
+#ifdef PSM2_SUPPORT_IW_CMD_API
+	if (hfi_get_user_major_version() == IOCTL_CMD_API_MODULE_MAJOR)
+	{
+		/* for the new driver, we copy the results of the call back to uinfo from
+		   uinfo_new. */
+		uinfo->userversion = uinfo_new.userversion;
+		uinfo->pad         = uinfo_new.pad;
+		uinfo->subctxt_cnt = uinfo_new.subctxt_cnt;
+		uinfo->subctxt_id  = uinfo_new.subctxt_id;
+		memcpy(uinfo->uuid,uinfo_new.uuid,sizeof(uinfo_new.uuid));
+	}
+#endif
 
 	/* 2. get context info from driver */
 	c.type = HFI1_CMD_CTXT_INFO;

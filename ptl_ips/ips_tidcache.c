@@ -56,6 +56,20 @@
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
 
+#define RBTREE_GET_LEFTMOST(PAYLOAD_PTR)  ((PAYLOAD_PTR)->start)
+#define RBTREE_GET_RIGHTMOST(PAYLOAD_PTR) ((PAYLOAD_PTR)->start+((PAYLOAD_PTR)->length<<12))
+#define RBTREE_ASSERT                     psmi_assert
+#define RBTREE_MAP_COUNT(PAYLOAD_PTR)     ((PAYLOAD_PTR)->ntid)
+
+#include "rbtree.c"
+
+void ips_tidcache_map_init(cl_qmap_t		*p_map,
+			   cl_map_item_t* const	root,
+			   cl_map_item_t* const	nil_item)
+{
+	ips_cl_qmap_init(p_map,root,nil_item);
+}
+
 /*
  *
  * Force to remove a tid, check invalidation event afterwards.
@@ -145,7 +159,7 @@ ips_tidcache_register(struct ips_tid *tidc,
 		 * free the first tid in idle queue.
 		 */
 		idx = IPREV(IHEAD);
-		tidc->tid_array[0] = p_map->root[idx].tidinfo;
+		tidc->tid_array[0] = p_map->root[idx].payload.tidinfo;
 		err = ips_tidcache_remove(tidc, 1);
 		if (err)
 			return err;
@@ -179,7 +193,7 @@ retry:
 		/* Unable to pin pages? retry later */
 		return PSM2_EP_DEVICE_FAILURE;
 	}
-	psmi_assert(tidcnt > 0);
+	psmi_assert_always(tidcnt > 0);
 	psmi_assert((tidcnt+NTID) <= tidc->tid_cachesize);
 
 	/*
@@ -216,7 +230,7 @@ retry:
 		tidoff -= tidlen << 12;
 		START(idx) = start + tidoff;
 		LENGTH(idx) = tidlen;
-		p_map->root[idx].tidinfo = tidc->tid_array[tidcnt];
+		p_map->root[idx].payload.tidinfo = tidc->tid_array[tidcnt];
 
 		/*
 		 * put the node into RB tree and idle queue head.
@@ -269,7 +283,7 @@ ips_tidcache_invalidation(struct ips_tid *tidc)
 		/*
 		 * sanity check.
 		 */
-		psmi_assert(p_map->root[idx].tidinfo == tidc->tid_array[i]);
+		psmi_assert(p_map->root[idx].payload.tidinfo == tidc->tid_array[i]);
 		psmi_assert(LENGTH(idx) ==
 				IPS_TIDINFO_GET_LENGTH(tidc->tid_array[i]));
 
@@ -349,8 +363,8 @@ ips_tidcache_acquire(struct ips_tid *tidc,
 	 */
 retry:
 	p_item = ips_cl_qmap_search(p_map, start, end);
-	idx = 2*IPS_TIDINFO_GET_TID(p_item->tidinfo) +
-		IPS_TIDINFO_GET_TIDCTRL(p_item->tidinfo);
+	idx = 2*IPS_TIDINFO_GET_TID(p_item->payload.tidinfo) +
+		IPS_TIDINFO_GET_TIDCTRL(p_item->payload.tidinfo);
 
 	/*
 	 * There is tid matching.
@@ -382,7 +396,7 @@ retry:
 			/*
 			 * free this tid.
 			 */
-			tidc->tid_array[0] = p_map->root[idx].tidinfo;
+			tidc->tid_array[0] = p_map->root[idx].payload.tidinfo;
 			err = ips_tidcache_remove(tidc, 1);
 			if (err)
 				return err;
@@ -421,7 +435,7 @@ retry:
 	*tidoff += start - START(idx);
 	*tidcnt = 1;
 
-	tid_array[0] = p_map->root[idx].tidinfo;
+	tid_array[0] = p_map->root[idx].payload.tidinfo;
 	REFCNT(idx)++;
 	if (REFCNT(idx) == 1)
 		IDLE_REMOVE(idx);
@@ -429,8 +443,8 @@ retry:
 
 	while (start < end) {
 		p_item = ips_cl_qmap_successor(p_map, &p_map->root[idx]);
-		idx = 2*IPS_TIDINFO_GET_TID(p_item->tidinfo) +
-			IPS_TIDINFO_GET_TIDCTRL(p_item->tidinfo);
+		idx = 2*IPS_TIDINFO_GET_TID(p_item->payload.tidinfo) +
+			IPS_TIDINFO_GET_TIDCTRL(p_item->payload.tidinfo);
 		if (!idx || START(idx) != start) {
 			if (!idx)
 				nbytes = end - start;
@@ -464,7 +478,7 @@ retry:
 		psmi_assert(START(idx) == start);
 		psmi_assert(INVALIDATE(idx) == 0);
 
-		tid_array[(*tidcnt)++] = p_map->root[idx].tidinfo;
+		tid_array[(*tidcnt)++] = p_map->root[idx].payload.tidinfo;
 		REFCNT(idx)++;
 		if (REFCNT(idx) == 1)
 			IDLE_REMOVE(idx);
@@ -545,7 +559,7 @@ ips_tidcache_cleanup(struct ips_tid *tidc)
 	for (i = 1; i <= tidc->tid_ctrl->tid_num_max; i++) {
 		psmi_assert(REFCNT(i) == 0);
 		if (INVALIDATE(i) == 0) {
-			tidc->tid_array[j++] = p_map->root[i].tidinfo;
+			tidc->tid_array[j++] = p_map->root[i].payload.tidinfo;
 		}
 	}
 
@@ -588,11 +602,11 @@ ips_tidcache_evict(struct ips_tid *tidc,uint64_t length)
 		idx = IPREV(idx);
 		psmi_assert(idx != 0);
 		tidc->tid_array[tidcnt] =
-			p_map->root[idx].tidinfo;
+			p_map->root[idx].payload.tidinfo;
 		tidcnt++;
 
 		tidlen += IPS_TIDINFO_GET_LENGTH
-			(p_map->root[idx].tidinfo)<<12;
+			(p_map->root[idx].payload.tidinfo)<<12;
 	} while (tidcnt < NIDLE && tidlen < length);
 
 	/*

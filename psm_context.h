@@ -70,7 +70,7 @@ struct psmi_context {
 	int fd;			/* driver fd */
 	psm2_ep_t ep;		/* psm ep handle */
 	psm2_epid_t epid;	/* psm integral ep id */
-	struct hfi1_user_info user_info;
+	struct hfi1_user_info_dep user_info;
 	uint32_t runtime_flags;
 	uint32_t rcvthread_flags;
 	psm2_error_t status_lasterr;

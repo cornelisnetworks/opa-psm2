@@ -93,7 +93,7 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 
 	if (tok != NULL) {
 		psmi_am_reqq_add(AMREQUEST_SHORT, tok->ptl,
-				 tok->tok.epaddr_from, mq_handler_rtsmatch_hidx,
+				 tok->tok.epaddr_incoming, mq_handler_rtsmatch_hidx,
 				 args, 5, NULL, 0, NULL, 0);
 	} else
 		psmi_amsh_short_request(ptl, epaddr, mq_handler_rtsmatch_hidx,
@@ -138,12 +138,12 @@ psmi_am_mq_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 	case MQ_MSG_TINY:
 	case MQ_MSG_SHORT:
 	case MQ_MSG_EAGER:
-		rc = psmi_mq_handle_envelope(tok->mq, tok->tok.epaddr_from,
+		rc = psmi_mq_handle_envelope(tok->mq, tok->tok.epaddr_incoming,
 					     &tag, msglen, 0, buf,
 					     (uint32_t) len, 1, opcode, &req);
 
 		/* for eager matching */
-		req->ptl_req_ptr = (void *)tok->tok.epaddr_from;
+		req->ptl_req_ptr = (void *)tok->tok.epaddr_incoming;
 		req->msg_seqnum = 0;	/* using seqnum 0 */
 		break;
 	default:{
@@ -151,11 +151,11 @@ psmi_am_mq_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			uintptr_t sbuf = (uintptr_t) args[4].u64w0;
 			psmi_assert(narg == 5);
 			psmi_assert_always(opcode == MQ_MSG_LONGRTS);
-			rc = psmi_mq_handle_rts(tok->mq, tok->tok.epaddr_from,
+			rc = psmi_mq_handle_rts(tok->mq, tok->tok.epaddr_incoming,
 						&tag, msglen, NULL, 0, 1,
 						ptl_handle_rtsmatch, &req);
 
-			req->rts_peer = tok->tok.epaddr_from;
+			req->rts_peer = tok->tok.epaddr_incoming;
 			req->ptl_req_ptr = sreq;
 			req->rts_sbuf = sbuf;
 
@@ -176,7 +176,7 @@ psmi_am_mq_handler_data(void *toki, psm2_amarg_t *args, int narg, void *buf,
 
 	psmi_assert(toki != NULL);
 
-	psm2_epaddr_t epaddr = (psm2_epaddr_t) tok->tok.epaddr_from;
+	psm2_epaddr_t epaddr = (psm2_epaddr_t) tok->tok.epaddr_incoming;
 	psm2_mq_req_t req = mq_eager_match(tok->mq, epaddr, 0);	/* using seqnum 0 */
 	psmi_assert_always(req != NULL);
 	psmi_mq_handle_data(tok->mq, req, args[2].u32w0, buf, len);
@@ -207,7 +207,7 @@ psmi_am_mq_handler_rtsmatch(void *toki, psm2_amarg_t *args, int narg, void *buf,
 		int kassist_mode = ptl->psmi_kassist_mode;
 
 		if (kassist_mode & PSMI_KASSIST_PUT) {
-			int pid = psmi_epaddr_pid(tok->tok.epaddr_from);
+			int pid = psmi_epaddr_pid(tok->tok.epaddr_incoming);
 
 			size_t nbytes = cma_put(sreq->buf, pid, dest, msglen);
 			psmi_assert_always(nbytes == msglen);

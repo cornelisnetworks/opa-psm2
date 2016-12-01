@@ -67,8 +67,11 @@
 #include "opa_user.h"
 #include "opa_queue.h"
 
+#ifdef PSM_VALGRIND
 #include "valgrind/valgrind.h"
 #include "valgrind/memcheck.h"
+#endif
+
 #include "psm_log.h"
 
 #ifdef PSM_VALGRIND
@@ -84,6 +87,12 @@
 #else
 #define PSM_VALGRIND_REDZONE_SZ	     0
 #define PSM_VALGRIND_DEFINE_MQ_RECV(buf, posted_len, recv_len)
+#define VALGRIND_CREATE_MEMPOOL(ARG1,ARG2,ARG3)
+#define VALGRIND_MAKE_MEM_DEFINED(ARG1,ARG2)
+#define VALGRIND_DESTROY_MEMPOOL(ARG1)
+#define VALGRIND_MEMPOOL_ALLOC(ARG1,ARG2,ARG3)
+#define VALGRIND_MEMPOOL_FREE(ARG1,ARG2)
+#define VALGRIND_MAKE_MEM_NOACCESS(ARG1,ARG2)
 #endif
 
 /* Parameters for use in valgrind's "is_zeroed" */

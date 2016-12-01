@@ -83,18 +83,47 @@
 *
 *****************************************************************************/
 
+#include <string.h> /* for memset declaration */
 
-#include "psm_user.h"
-#include "ips_tidcache.h"
+#if !defined ( RBTREE_GET_LEFTMOST )       || \
+	! defined ( RBTREE_GET_RIGHTMOST ) || \
+	! defined ( RBTREE_MAP_COUNT )     || \
+	! defined ( RBTREE_ASSERT )
+#error "You must define RBTREE_GET_LEFTMOST and RBTREE_GET_RIGHTMOST and \
+        RBTREE_MAP_COUNT and RBTREE_ASSERT before including rbtree.c"
+#endif
 
+#define IN /* nothing */
 
 /******************************************************************************
 *******************************************************************************
-**************													   ************
-**************			 IMPLEMENTATION OF QUICK MAP			   ************
-**************													   ************
+**************                                                     ************
+**************			 IMPLEMENTATION OF QUICK MAP       ************
+**************                                                     ************
 *******************************************************************************
 ******************************************************************************/
+
+/* Forward declarations: */
+static void ips_cl_qmap_init(
+				IN	cl_qmap_t		*p_map,
+				IN	cl_map_item_t* const	root,
+				IN	cl_map_item_t* const	nil);
+static void ips_cl_qmap_insert_item(
+				IN	cl_qmap_t* const	p_map,
+				IN	cl_map_item_t* const	p_item);
+static void ips_cl_qmap_remove_item(
+				IN	cl_qmap_t* const	p_map,
+				IN	cl_map_item_t* const	p_item);
+static cl_map_item_t* ips_cl_qmap_successor(
+				IN	cl_qmap_t* const	p_map,
+				IN	const cl_map_item_t*	p_item);
+static cl_map_item_t* ips_cl_qmap_predecessor(
+				IN	cl_qmap_t* const	p_map,
+				IN	const cl_map_item_t*	p_item);
+static cl_map_item_t* ips_cl_qmap_search(
+				IN	cl_qmap_t* const	p_map,
+				IN	unsigned long		start,
+				IN	unsigned long		end);
 
 /*
  * Get the root.
@@ -103,7 +132,7 @@ static inline cl_map_item_t*
 __cl_map_root(
 	IN	const cl_qmap_t* const	p_map )
 {
-	ASSERT( p_map );
+	RBTREE_ASSERT( p_map );
 	return( p_map->root->p_left );
 }
 
@@ -115,9 +144,9 @@ static int
 __cl_map_is_left_child(
 	IN	const cl_map_item_t* const	p_item )
 {
-	ASSERT( p_item );
-	ASSERT( p_item->p_up );
-	ASSERT( p_item->p_up != p_item );
+	RBTREE_ASSERT( p_item );
+	RBTREE_ASSERT( p_item->p_up );
+	RBTREE_ASSERT( p_item->p_up != p_item );
 
 	return( p_item->p_up->p_left == p_item );
 }
@@ -130,14 +159,14 @@ static cl_map_item_t**
 __cl_map_get_parent_ptr_to_item(
 	IN	cl_map_item_t* const	p_item )
 {
-	ASSERT( p_item );
-	ASSERT( p_item->p_up );
-	ASSERT( p_item->p_up != p_item );
+	RBTREE_ASSERT( p_item );
+	RBTREE_ASSERT( p_item->p_up );
+	RBTREE_ASSERT( p_item->p_up != p_item );
 
 	if( __cl_map_is_left_child( p_item ) )
 		return( &p_item->p_up->p_left );
 
-	ASSERT( p_item->p_up->p_right == p_item );
+	RBTREE_ASSERT( p_item->p_up->p_right == p_item );
 	return( &p_item->p_up->p_right );
 }
 
@@ -164,9 +193,9 @@ __cl_map_rot_left(
 {
 	cl_map_item_t	**pp_root;
 
-	ASSERT( p_map );
-	ASSERT( p_item );
-	ASSERT( p_item->p_right != p_map->nil_item );
+	RBTREE_ASSERT( p_map );
+	RBTREE_ASSERT( p_item );
+	RBTREE_ASSERT( p_item->p_right != p_map->nil_item );
 
 	pp_root = __cl_map_get_parent_ptr_to_item( p_item );
 
@@ -213,9 +242,9 @@ __cl_map_rot_right(
 {
 	cl_map_item_t	**pp_root;
 
-	ASSERT( p_map );
-	ASSERT( p_item );
-	ASSERT( p_item->p_left != p_map->nil_item );
+	RBTREE_ASSERT( p_map );
+	RBTREE_ASSERT( p_item );
+	RBTREE_ASSERT( p_item->p_left != p_map->nil_item );
 
 	/* Point R to A instead of C. */
 	pp_root = __cl_map_get_parent_ptr_to_item( p_item );
@@ -248,16 +277,16 @@ __cl_map_ins_bal(
 {
 	cl_map_item_t*		p_grand_uncle;
 
-	ASSERT( p_map );
-	ASSERT( p_item );
-	ASSERT( p_item != p_map->root );
+	RBTREE_ASSERT( p_map );
+	RBTREE_ASSERT( p_item );
+	RBTREE_ASSERT( p_item != p_map->root );
 
 	while( p_item->p_up->color == CL_MAP_RED )
 	{
 		if( __cl_map_is_left_child( p_item->p_up ) )
 		{
 			p_grand_uncle = p_item->p_up->p_up->p_right;
-			ASSERT( p_grand_uncle );
+			RBTREE_ASSERT( p_grand_uncle );
 			if( p_grand_uncle->color == CL_MAP_RED )
 			{
 				p_grand_uncle->color = CL_MAP_BLACK;
@@ -279,7 +308,7 @@ __cl_map_ins_bal(
 		else
 		{
 			p_grand_uncle = p_item->p_up->p_up->p_left;
-			ASSERT( p_grand_uncle );
+			RBTREE_ASSERT( p_grand_uncle );
 			if( p_grand_uncle->color == CL_MAP_RED )
 			{
 				p_grand_uncle->color = CL_MAP_BLACK;
@@ -301,7 +330,34 @@ __cl_map_ins_bal(
 	}
 }
 
-void
+static void ips_cl_qmap_init(
+				IN	cl_qmap_t		*p_map,
+				IN	cl_map_item_t* const	root,
+				IN	cl_map_item_t* const	nil_item)
+{
+	RBTREE_ASSERT( p_map );
+	RBTREE_ASSERT( root );
+	RBTREE_ASSERT( nil_item );
+
+	memset(p_map,0,sizeof(cl_qmap_t));
+
+	p_map->root = root;
+
+	/* setup the RB tree map */
+	p_map->nil_item = nil_item;
+
+	p_map->root->p_up = p_map->root;
+	p_map->root->p_left = p_map->nil_item;
+	p_map->root->p_right = p_map->nil_item;
+	p_map->root->color = CL_MAP_BLACK;
+
+	p_map->nil_item->p_up = p_map->nil_item;
+	p_map->nil_item->p_left = p_map->nil_item;
+	p_map->nil_item->p_right = p_map->nil_item;
+	p_map->nil_item->color = CL_MAP_BLACK;
+}
+
+static void
 ips_cl_qmap_insert_item(
 	IN	cl_qmap_t* const		p_map,
 	IN	cl_map_item_t* const	p_item )
@@ -309,11 +365,11 @@ ips_cl_qmap_insert_item(
 	cl_map_item_t	*p_insert_at, *p_comp_item;
 	int compare_res = 0;
 
-	ASSERT( p_map );
-	ASSERT( p_item );
-	ASSERT( p_map->root->p_up == p_map->root );
-	ASSERT( p_map->root->color != CL_MAP_RED );
-	ASSERT( p_map->nil_item->color != CL_MAP_RED );
+	RBTREE_ASSERT( p_map );
+	RBTREE_ASSERT( p_item );
+	RBTREE_ASSERT( p_map->root->p_up == p_map->root );
+	RBTREE_ASSERT( p_map->root->color != CL_MAP_RED );
+	RBTREE_ASSERT( p_map->nil_item->color != CL_MAP_RED );
 
 	/* Find the insertion location. */
 	p_insert_at = p_map->root;
@@ -324,7 +380,7 @@ ips_cl_qmap_insert_item(
 		p_insert_at = p_comp_item;
 
 		/* Traverse the tree until the correct insertion point is found. */
-		if( p_item->start < p_insert_at->start )
+		if( RBTREE_GET_LEFTMOST(&p_item->payload) < RBTREE_GET_LEFTMOST(&p_insert_at->payload) )
 		{
 			p_comp_item = p_insert_at->p_left;
 			compare_res = 1;
@@ -334,8 +390,8 @@ ips_cl_qmap_insert_item(
 		}
 	}
 
-	ASSERT( p_insert_at != p_map->nil_item );
-	ASSERT( p_comp_item == p_map->nil_item );
+	RBTREE_ASSERT( p_insert_at != p_map->nil_item );
+	RBTREE_ASSERT( p_comp_item == p_map->nil_item );
 
 	/* Insert the item. */
 	p_item->p_left = p_map->nil_item;
@@ -354,7 +410,7 @@ ips_cl_qmap_insert_item(
 		p_insert_at->p_right = p_item;
 	}
 	/* Increase the count. */
-	NTID++;
+	RBTREE_MAP_COUNT(&p_map->payload)++;
 
 	p_item->p_up = p_insert_at;
 
@@ -451,15 +507,15 @@ __cl_map_del_bal(
 	p_item->color = CL_MAP_BLACK;
 }
 
-void
+static void
 ips_cl_qmap_remove_item(
 	IN	cl_qmap_t* const		p_map,
 	IN	cl_map_item_t* const	p_item )
 {
 	cl_map_item_t	*p_child, *p_del_item;
 
-	ASSERT( p_map );
-	ASSERT( p_item );
+	RBTREE_ASSERT( p_map );
+	RBTREE_ASSERT( p_item );
 
 	if( p_item == p_map->nil_item )
 		return;
@@ -479,10 +535,10 @@ ips_cl_qmap_remove_item(
 		 * will finalize the removal.
 		 */
 		p_del_item = ips_cl_qmap_successor(p_map, p_item);
-		ASSERT( p_del_item != p_map->nil_item );
+		RBTREE_ASSERT( p_del_item != p_map->nil_item );
 	}
 
-	NTID--;
+	RBTREE_MAP_COUNT(&p_map->payload)--;
 
 	/* Get the pointer to the new root's child, if any. */
 	if( p_del_item->p_left != p_map->nil_item )
@@ -521,10 +577,10 @@ ips_cl_qmap_remove_item(
 		p_del_item->color = p_item->color;
 	}
 
-	ASSERT( p_map->nil_item->color != CL_MAP_RED );
+	RBTREE_ASSERT( p_map->nil_item->color != CL_MAP_RED );
 }
 
-cl_map_item_t *
+static cl_map_item_t *
 ips_cl_qmap_successor(
 	IN	cl_qmap_t* const		p_map,
 	IN	const cl_map_item_t*		p_item )
@@ -548,7 +604,7 @@ ips_cl_qmap_successor(
 	}
 }
 
-cl_map_item_t *
+static cl_map_item_t *
 ips_cl_qmap_predecessor(
 	IN	cl_qmap_t* const		p_map,
 	IN	const cl_map_item_t*		p_item )
@@ -575,17 +631,17 @@ ips_cl_qmap_predecessor(
 /*
  * return the first node with buffer overlapping or zero.
  */
-cl_map_item_t *
+static cl_map_item_t *
 ips_cl_qmap_search(cl_qmap_t * const p_map,
 		unsigned long start, unsigned long end)
 {
 	cl_map_item_t *p_item, *p_tmp;
 
-	ASSERT( p_map );
+	RBTREE_ASSERT( p_map );
 	p_item = __cl_map_root(p_map);
 
 	while (p_item != p_map->nil_item) {
-		if (start > p_item->start) {
+		if (start > RBTREE_GET_LEFTMOST(&p_item->payload)) {
 			p_tmp = p_item->p_right;
 			if (p_tmp != p_map->nil_item) {
 				p_item = p_tmp;
@@ -595,17 +651,17 @@ ips_cl_qmap_search(cl_qmap_t * const p_map,
 			/*
 			 * p_item is on immediate left side of 'start'.
 			 */
-			if (start >= (p_item->start+(p_item->length<<12))) {
+			if (start >= RBTREE_GET_RIGHTMOST(&p_item->payload)) {
 				/*
 				 * p_item is on immediate right
 				 * side of 'start'.
 				 */
 				p_item = ips_cl_qmap_successor(p_map, p_item);
 				if (p_item != p_map->nil_item &&
-						end <= p_item->start)
+				    end <= RBTREE_GET_LEFTMOST(&p_item->payload))
 					p_item = p_map->nil_item;
 			}
-		} else if (start < p_item->start) {
+		} else if (start < RBTREE_GET_LEFTMOST(&p_item->payload)) {
 			p_tmp = p_item->p_left;
 			if (p_tmp != p_map->nil_item) {
 				p_item = p_tmp;
@@ -617,12 +673,12 @@ ips_cl_qmap_search(cl_qmap_t * const p_map,
 			 */
 			p_tmp = ips_cl_qmap_predecessor(p_map, p_item);
 			if (p_tmp == p_map->nil_item ||
-			(start >= (p_tmp->start+(p_tmp->length<<12)))) {
+			    (start >= RBTREE_GET_RIGHTMOST(&p_tmp->payload))) {
 				/*
 				 * p_item is on immediate right
 				 * side of 'start'.
 				 */
-				if (end <= p_item->start)
+				if (end <= RBTREE_GET_LEFTMOST(&p_item->payload))
 					p_item = p_map->nil_item;
 			} else
 				p_item = p_tmp;
@@ -630,6 +686,7 @@ ips_cl_qmap_search(cl_qmap_t * const p_map,
 
 		break;
 	}
+
 
 	return p_item;
 }

@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,43 +51,40 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+#ifndef __RBTREE_H__
 
-#ifndef _PSM2_AM_INTERNAL_H
-#define _PSM2_AM_INTERNAL_H
+#define __RBTREE_H__
 
-#define PSMI_AM_MAX_ARGS     10
-#define PSMI_AM_NUM_HANDLERS 256	/* must be power of 2 */
+#include <stdint.h>
 
-#define PSMI_AM_ARGS_DEFAULT psm2_am_token_t token,			\
-			     psm2_amarg_t *args, int nargs,		\
-			     void *src, uint32_t len
+#ifndef RBTREE_MAP_PL
+#error "You must define RBTREE_MAP_PL before including rbtree.h"
+#endif
 
-struct psmi_am_token {
-	psm2_epaddr_t epaddr_incoming;
-	uint32_t flags;
-	/* Can handler reply? i.e. Not OPCODE_AM_REQUEST_NOREPLY request */
-	uint32_t can_reply;
+#ifndef RBTREE_MI_PL
+#error "You must define RBTREE_MI_PL before including rbtree.h"
+#endif
 
-	/* PTLs may add other stuff here */
-};
+/*
+ * Red-Black tid cache definition.
+ */
+typedef struct _cl_map_item {
+	struct _cl_map_item	*p_left;	/* left pointer */
+	struct _cl_map_item	*p_right;	/* right pointer */
+	struct _cl_map_item	*p_up;		/* up pointer */
+	uint16_t		color;		/* red-black color */
 
-/* AM capabilities parameters are initialized once in psmi_am_init_internal
-   and copied out in __psm2_am_get_parameters.  When debugging is enabled,
-   various assertions reference these parameters for sanity checking. */
-extern struct psm2_am_parameters psmi_am_parameters;
+	RBTREE_MI_PL            payload;
+} cl_map_item_t;
 
-PSMI_ALWAYS_INLINE(psm2_am_handler_fn_t
-		   psm_am_get_handler_function(psm2_ep_t ep,
-					       psm2_handler_t handler_idx))
-{
-	int hidx = handler_idx & (PSMI_AM_NUM_HANDLERS - 1);
-	psm2_am_handler_fn_t fn = (psm2_am_handler_fn_t) ep->am_htable[hidx];
-	psmi_assert_always(fn != NULL);
-	return fn;
-}
+typedef struct _cl_qmap {
+	cl_map_item_t		*root;		/* root node pointer */
+	cl_map_item_t		*nil_item;	/* terminator node pointer */
 
-/* PSM internal initialization */
-psm2_error_t psmi_am_init_internal(psm2_ep_t ep);
+	RBTREE_MAP_PL            payload;
+} cl_qmap_t;
+
+#define CL_MAP_RED   0
+#define CL_MAP_BLACK 1
 
 #endif

@@ -4,7 +4,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -20,7 +20,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -48,56 +48,55 @@
   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-  Copyright (c) 2003-2014 Intel Corporation. All rights reserved.
+  Copyright (c) 2003-2016 Intel Corporation. All rights reserved.
 
 ================================================================================
 
 ABSTRACT
 --------
 
-Discusses how to build, install and test the PSM 2 library source code.
+Discusses how to build, install and test the PSM2 library source code.
 
 Contains the following sections:
 
 - INTRODUCTION
 - DEPENDENCIES
 - BUILDING
-- BUILDING USING MAKEFILE
-- BUILDING USING RPMBUILD (CREATING SOURCE AND BINARY RPM'S)
-- INSTALLING USING MAKEFILE
-- INSTALLING USING RPM
-- RELATED SOFTWARE TO PSM
+  * BUILDING USING MAKEFILE
+  * BUILDING USING RPMBUILD (CREATING SOURCE AND BINARY RPM'S)
+- INSTALLING
+  * INSTALLING USING MAKEFILE
+  * INSTALLING USING EITHER YUM OR DNF
+- RELATED SOFTWARE TO PSM2
 
 INTRODUCTION
-------------
+============
 
-This README file discusses how to build, install and test the PSM 2 library
+This README file discusses how to build, install and test the PSM2 library
 source code.
 
-The PSM 2 library supports a number of fabric media and stacks, and all of
+The PSM2 library supports a number of fabric media and stacks, and all of
 them run on version 7.X of Red Hat Enterprise Linux (abbreviated: RHEL), and
 SuSE SLES.
 
 Only the x86_64 architecture is supported.
 
-As of this writing, (July 21, 2015) OPA is not natively supported in any RHEL
-7.X kernel, and building PSM on a host w/o native OPA is not possible unless you
-have the correct kernel-devel package; but if you have a modern version of the
-IFS (Infiniband Fabric Suite), you should be able to build it.  It is easier
-if you wait until the hfi1 driver is upstreamed and becomes part of the RHEL 7.X.
+Building PSM2 is possible on RHEL 7.2 as it ships with hfi1 kernel driver.
+For older RHEL 7.x versions and SuSE SLES, OPA is not natively supported
+in the kernel (yet) and therefore, building PSM2 is not possible unless
+you have the correct kernel-devel package or use latest versions of IFS.
 
-There are two mechanisms for building and installing the PSM 2 library:
+There are two mechanisms for building and installing the PSM2 library:
 
   1. Use provided Makefiles to build and install or
-  2. Generate a tarball that can be used to build source and binary RPMs using
-     rpmbuild
-
+  2. Generate the *.rpm files which you can then install using either
+     yum or dnf command
 
 DEPENDENCIES
-------------
+============
 
-The following packages are required to build the PSM 2 library source code,
-all packages are for the x86_64 architecture:
+The following packages are required to build the PSM2 library source code:
+(all packages are for the x86_64 architecture)
 
 compat-rdma-devel
 gcc-4.8.2
@@ -111,47 +110,46 @@ install the runtime libraries and development header files into standard
 system location.
 
 BUILDING
---------
+========
 
-The instructions below use $PRODUCT and $RELEASE to refer to the product
-and release identifiers of the opa-psm RPM.
+The instructions below use $BASENAME, $PRODUCT and $RELEASE to refer to
+the base name of the tarball, RPM that will be generated and the product
+and release identifiers of the RPM.
+
+The base name of the RPM changes depending on which version/branch
+of code you derive the tar file from.
+
+Up until v10.2 of PSM2, the base name for the RPM is hfi1-psm.
+From v10.2 onwards, the base name will be libpsm2.
 
 BUILDING USING MAKEFILES
 ------------------------
 
 1. Untar the tarball:
-	$ tar zxvf opa-psm-$PRODUCT-$RELEASE.tar.gz
+	$ tar zxvf $BASENAME-$PRODUCT-$RELEASE.tar.gz
 2. Change directory into the untarred location:
-	$ cd opa-psm-$PRODUCT-$RELEASE
-3. Run make on the command line. This will build the PSM 2 library.
+	$ cd $BASENAME-$PRODUCT-$RELEASE
+3. Run make on the command line. This will build the PSM2 library.
 	$ make
-
 
 BUILDING USING RPMBUILD
 -----------------------
 
-This is a two step process: Generate a PSM distribution tarball which can then
-be used to generate source and binary RPMs using the rpmbuild command with the
--ta option.
-1. Untar the tarball:
-	$ tar zxvf opa-psm-$PRODUCT-$RELEASE.tar.gz
-2. Change directory into the untarred location:
-	$ cd opa-psm-$PRODUCT-$RELEASE
-3. Generate distribution tarball
-   	$ make dist
-4. Generate source and binary packages
-   	$ rpmbuild -ta hfi1-psm-$PRODUCT-$RELEASE.tar.gz
+1. Run this command from your $PWD to generate rpm, srpm files
+	$ ./makesrpm.sh a
 
-As of this writing (July 21, 2015), this command results in the following
-collection of rpm's and source code rpm's to populate your rpmbuild directory
-tree in your home directory:
+As of this writing (June 30, 2016), this command results in the following
+collection of rpm's and source code rpm's under your $PWD/temp.X/ directory.
+("X" is the pid of the bash script that created the srpm and rpm files)
 
-RPMS/x86_64/hfi1-psm-0.7-95.x86_64.rpm
-RPMS/x86_64/hfi1-psm-devel-0.7-95.x86_64.rpm
-RPMS/x86_64/hfi1-psm-compat-0.7-95.x86_64.rpm
-RPMS/x86_64/hfi1-psm-compat-devel-0.7-95.x86_64.rpm
-RPMS/x86_64/hfi1-psm-debuginfo-0.7-95.x86_64.rpm
-SRPMS/hfi1-psm-0.7-95.src.rpm
+RPMS/x86_64/libpsm2-compat-10.2.25-1x86_64.rpm
+RPMS/x86_64/libpsm2-devel-10.2.25-1x86_64.rpm
+RPMS/x86_64/libpsm2-10.2.25-1x86_64.rpm
+RPMS/x86_64/libpsm2-debuginfo-10.2.25-1x86_64.rpm
+SRPMS/libpsm2-10.2.25-1.src.rpm
+
+INSTALLING
+==========
 
 INSTALLING USING MAKEFILE
 -------------------------
@@ -173,19 +171,23 @@ libraries in "/tmp/psm-install/libraries" and the headers in
 install the libraries in "/tmp/libs" and the headers in "/usr/include".
 
 
-INSTALLING USING RPM
---------------------
+INSTALLING USING EITHER YUM OR DNF
+----------------------------------
 
 You can install the rpm's and source rpm's previously built using rpmbuild using
-the rpm command, as the root user.  See the rpm man page for details of
-installing rpm's.
+either the yum or dnf command as the root user.  See the appropriate man page for
+details of installing rpm's.
 
-RELATED SOFTWARE TO PSM
-=======================
+Note: It is also possible to use rpm command to install rpm's, but it is recommended
+that one use yum/dnf as rpm tool has issues with name changes and obsoletes tags.
+yum or dnf should be better able to resolve dependency issues.
+
+RELATED SOFTWARE TO PSM2
+========================
 
 MPI Libraries supported
 -----------------------
-A large number of open source (OpenMPI, MVAPICH, MVAPICH2) and Vendor MPI
+A large number of open source (OpenMPI, MVAPICH2) and Vendor MPI
 implementations support PSM for optimized communication on HCAs. Vendor MPI
 implementations (HP-MPI, Intel MPI 4.0 with PMI, Platform/Scali MPI)
 require that the PSM runtime libraries be installed and available on
@@ -194,13 +196,13 @@ needs to be specified to utilize the PSM transport.
 
 OpenMPI support
 ---------------
-It is recommended to use the OpenMPI v1.5 development branch. Prior versions
-of OpenMPI have an issue with support PSM network transports mixed with standard
-Verbs transport (BTL openib). This prevents an OpenMPI installation with
-network modules available for PSM and Verbs to work correctly on nodes with
-no HFI hardware. This has been fixed in the latest development branch
-allowing a single OpenMPI installation to target HFI hardware via PSM or Verbs
-as well as alternate transports seamlessly.
+It is recommended to use the v1.10.2 or newer version of OpenMPI.
+Prior versions of OpenMPI have an issue with support PSM2 network transports
+mixed with standard Verbs transport (BTL openib). This prevents an OpenMPI
+installation with network modules available for PSM and Verbs to work
+correctly on nodes with no HFI hardware. This has been fixed in the
+latest development branch allowing a single OpenMPI installation to target
+HFI hardware via PSM or Verbs as well as alternate transports seamlessly.
 
 PSM header and runtime files need to be installed on a node where the OpenMPI
 build is performed. All compute nodes additionally should have the PSM runtime
@@ -208,26 +210,22 @@ libraries available on them. OpenMPI provides a standard configure, make and
 make install mechanism which will detect and build the relevant PSM network
 modules for OpenMPI once the header and runtime files are detected.
 
-MVAPICH and MVAPICH2 support
-----------------------------
-Both MVAPICH and MVAPICH2 support PSM transport for optimized communication on
-HFI hardware. MVAPICH2 1.4 and MVAPICH 1.2 versions are
-recommended. PSM header and runtime files need to be installed on a node where
-MVAPICH builds are performed. All compute nodes additionally should have the
-PSM runtime libraries available on them.
+MVAPICH2 support
+----------------
+MVAPICH2 supports PSM transport for optimized communication on HFI hardware.
+OPA IFS supports MVAPICH2 v2.1 (or later). PSM2 header and runtime files
+need to be installed on a node where MVAPICH2 builds are performed. All
+compute nodes should also have the PSM2 runtime libraries available on them.
 
-MVAPICH provides a shell script in its top level directory called
-make.mvapich.psm to configure, make and install MVAPICH with PSM support.
+For building and installing MVAPICH2 with OPA support, refer to MVAPICH2
+user guides here:
+http://mvapich.cse.ohio-state.edu/static/media/mvapich/mvapich2-2.2rc1-userguide.html
 
-MVAPICH2 provides a standard configure and make infrastructure. In order to
-MVAPICH2 for PSM the following should be performed from the top level directory:
-
-    - ./configure --prefix=<path_to_install_mvapich2> --with-device=ch3:psm
-    - make
-    - make install
+(Note: Support for PSM2 is currently on v2.2rc1 of OSU MVAPICH2 code base.
+The above link might change when a stable v2.2 is released.)
 
 OFED Support
 ------------
-OFED 1.5.1rc2 or above should be installed on the node. Prior versions of OFED
-have an older HFI driver (ib_qib) and do not fully support all the PSM
-features with this release.
+Intel OPA is not yet included within OFED. But the hfi1 driver is available
+publicly at kernel.org. Please do pull the driver from either kernel.org or
+the github page for opa-hfi1 driver (https://github.com/01org/opa-hfi1)

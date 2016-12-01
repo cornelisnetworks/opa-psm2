@@ -105,7 +105,7 @@ struct ips_protoexp {
 	mpool_t tid_getreq_pool;
 	mpool_t tid_sreq_pool;	/* backptr into proto->ep->mq */
 	mpool_t tid_rreq_pool;	/* backptr into proto->ep->mq */
-	uint32_t tidflow_seed;
+	struct drand48_data tidflow_drand48_data;
 	uint32_t tid_flags;
 	uint32_t tid_send_fragsize;
 	uint32_t tid_page_offset_mask;
@@ -301,7 +301,7 @@ struct ips_tid_get_request {
  * normal, min and large configurations.
  */
 #define TID_SENDSESSIONS_LIMITS {				\
-	    .env = "PSM_TID_SENDSESSIONS_MAX",			\
+	    .env = "PSM2_TID_SENDSESSIONS_MAX",			\
 	    .descr = "Tid max send session descriptors",	\
 	    .env_level = PSMI_ENVVAR_LEVEL_HIDDEN,		\
 	    .minval = 1,					\

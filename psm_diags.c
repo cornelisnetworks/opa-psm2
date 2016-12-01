@@ -102,6 +102,7 @@ static int psmi_test_epid_table(int numelems)
 	psm2_ep_t ep = (psm2_ep_t) (uintptr_t) 0xabcdef00;
 	struct psmi_epid_table *tab;
 	int i, j;
+	struct drand48_data drand48_data;
 
 	ep_alloc =
 	    (psm2_epaddr_t) psmi_calloc(PSMI_EP_NONE, UNDEFINED, numelems,
@@ -116,7 +117,7 @@ static int psmi_test_epid_table(int numelems)
 	diags_assert(ep_array != NULL);
 	diags_assert(epid_array != NULL);
 
-	srand(12345678);
+	srand48_r(12345678, &drand48_data);
 
 	psmi_epid_init();
 	tab = &psmi_epid_table;
@@ -134,7 +135,9 @@ static int psmi_test_epid_table(int numelems)
 
 	/* Randomize epid_array */
 	for (i = 0; i < numelems; i++) {
-		j = rand() % numelems;
+		long int rand_result;
+		lrand48_r(&drand48_data, &rand_result);
+		j = (int)(rand_result % numelems);
 		epid_tmp = epid_array[i];
 		epid_array[i] = epid_array[j];
 		epid_array[j] = epid_tmp;
@@ -149,7 +152,9 @@ static int psmi_test_epid_table(int numelems)
 
 	/* Randomize epid_array again */
 	for (i = 0; i < numelems; i++) {
-		j = rand() % numelems;
+		long int rand_result;
+		lrand48_r(&drand48_data, &rand_result);
+		j = (int)(rand_result % numelems);
 		epid_tmp = epid_array[i];
 		epid_array[i] = epid_array[j];
 		epid_array[j] = epid_tmp;
@@ -273,26 +278,28 @@ void *memcpy_check_one(memcpy_fn_t fn, void *dst, void *src, size_t n)
 	int ok = 1;
 	unsigned int seed = (unsigned int)
 	    ((uintptr_t) dst ^ (uintptr_t) src ^ (uintptr_t) n);
-	unsigned int state;
 	size_t i;
+	struct drand48_data drand48_data;
 
 	if (!n)
 		return dst;
 
 	memset(src, 0x55, n);
 	memset(dst, 0xaa, n);
-	srand(seed);
-	state = seed;
+	srand48_r(seed, &drand48_data);
 	for (i = 0; i < n; i++) {
-		((uint8_t *) src)[i] = (rand_r(&state) >> 16) & 0xff;
+		long int rand_result;
+		lrand48_r(&drand48_data, &rand_result);
+		((uint8_t *) src)[i] = (((int)(rand_result & INT_MAX)) >> 16) & 0xff;
 	}
 
 	fn(dst, src, n);
 	memset(src, 0, n);
-	srand(seed);
-	state = seed;
+	srand48_r(seed, &drand48_data);
 	for (i = 0; i < n; i++) {
-		int value = (int)(uint8_t) (rand_r(&state) >> 16);
+		long int rand_result;
+		lrand48_r(&drand48_data, &rand_result);
+		int value = (int)(uint8_t) (((int)(rand_result % INT_MAX)) >> 16);
 		int v = (int)((uint8_t *) dst)[i];
 		if (v != value) {
 			_HFI_ERROR

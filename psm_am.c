@@ -211,7 +211,7 @@ __psm2_am_reply_short(psm2_am_token_t token, psm2_handler_t handler,
 	psmi_assert(len > 0 ? src != NULL : 1);
 
 	tok = (struct psmi_am_token *)token;
-	epaddr = tok->epaddr_from;
+	epaddr = tok->epaddr_incoming;
 	ptlc = epaddr->ptlctl;
 
 	/* No locking here since we are already within handler context and already
@@ -238,7 +238,7 @@ psm2_error_t __psm2_am_get_source(psm2_am_token_t token, psm2_epaddr_t *epaddr_o
 	}
 
 	tok = (struct psmi_am_token *)token;
-	*epaddr_out = tok->epaddr_from;
+	*epaddr_out = tok->epaddr_incoming;
 	PSM2_LOG_MSG("leaving");
 	return PSM2_OK;
 }

@@ -286,25 +286,25 @@ void psmi_am_reqq_add(int amtype, ptl_t *ptl, psm2_epaddr_t epaddr,
 #define AMSH_CMASK_POSTREQ 2
 #define AMSH_CMASK_DONE    3
 
-#define AMSH_CSTATE_TO_MASK                0x0f
-#define AMSH_CSTATE_TO_NONE                0x01
-#define AMSH_CSTATE_TO_REPLIED             0x02
-#define AMSH_CSTATE_TO_ESTABLISHED         0x03
-#define AMSH_CSTATE_TO_DISC_REPLIED        0x04
-#define AMSH_CSTATE_TO_DISC_REQUESTED      0x05
-#define AMSH_CSTATE_TO_GET(amaddr)  ((amaddr)->_cstate & AMSH_CSTATE_TO_MASK)
-#define AMSH_CSTATE_TO_SET(amaddr, state)                                      \
-	(amaddr)->_cstate = (((amaddr)->_cstate & ~AMSH_CSTATE_TO_MASK) | \
-			    ((AMSH_CSTATE_TO_ ## state) & AMSH_CSTATE_TO_MASK))
+#define AMSH_CSTATE_OUTGOING_MASK                0x0f
+#define AMSH_CSTATE_OUTGOING_NONE                0x01
+#define AMSH_CSTATE_OUTGOING_REPLIED             0x02
+#define AMSH_CSTATE_OUTGOING_ESTABLISHED         0x03
+#define AMSH_CSTATE_OUTGOING_DISC_REPLIED        0x04
+#define AMSH_CSTATE_OUTGOING_DISC_REQUESTED      0x05
+#define AMSH_CSTATE_OUTGOING_GET(amaddr)  ((amaddr)->_cstate & AMSH_CSTATE_OUTGOING_MASK)
+#define AMSH_CSTATE_OUTGOING_SET(amaddr, state)                                      \
+	(amaddr)->_cstate = (((amaddr)->_cstate & ~AMSH_CSTATE_OUTGOING_MASK) | \
+			    ((AMSH_CSTATE_OUTGOING_ ## state) & AMSH_CSTATE_OUTGOING_MASK))
 
-#define AMSH_CSTATE_FROM_MASK              0xf0
-#define AMSH_CSTATE_FROM_NONE              0x10
-#define AMSH_CSTATE_FROM_DISC_REQUESTED    0x40
-#define AMSH_CSTATE_FROM_ESTABLISHED       0x50
-#define AMSH_CSTATE_FROM_GET(amaddr)  ((amaddr)->_cstate & AMSH_CSTATE_FROM_MASK)
-#define AMSH_CSTATE_FROM_SET(amaddr, state)                             \
-	(amaddr)->_cstate = (((amaddr)->_cstate & ~AMSH_CSTATE_FROM_MASK) | \
-			    ((AMSH_CSTATE_FROM_ ## state) & AMSH_CSTATE_FROM_MASK))
+#define AMSH_CSTATE_INCOMING_MASK              0xf0
+#define AMSH_CSTATE_INCOMING_NONE              0x10
+#define AMSH_CSTATE_INCOMING_DISC_REQUESTED    0x40
+#define AMSH_CSTATE_INCOMING_ESTABLISHED       0x50
+#define AMSH_CSTATE_INCOMING_GET(amaddr)  ((amaddr)->_cstate & AMSH_CSTATE_INCOMING_MASK)
+#define AMSH_CSTATE_INCOMING_SET(amaddr, state)                             \
+	(amaddr)->_cstate = (((amaddr)->_cstate & ~AMSH_CSTATE_INCOMING_MASK) | \
+			    ((AMSH_CSTATE_INCOMING_ ## state) & AMSH_CSTATE_INCOMING_MASK))
 
 /**********************************
  * Shared memory packet formats
@@ -443,8 +443,8 @@ struct ptl {
 	ptl_ctl_t *ctl;
 
 	int connect_phase;
-	int connect_to;
-	int connect_from;
+	int connect_outgoing;
+	int connect_incoming;
 
 	int zero_polls;
 	int amsh_only_polls;

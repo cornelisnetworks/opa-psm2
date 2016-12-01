@@ -150,13 +150,14 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 				ctrl->spio_total_blocks;
 		ctrl->spio_ctrl->spio_block_index = 0;
 		ctrl->spio_ctrl->spio_fill_counter = 0;
-		ctrl->spio_ctrl->spio_credits.credit_return =
-				*ctrl->spio_credits_addr;
 
 		psmi_assert(SPIO_CREDITS_Counter
 			    (ctrl->spio_ctrl->spio_credits.value) == 0);
 		psmi_assert(SPIO_CREDITS_Status
 			    (ctrl->spio_ctrl->spio_credits.value) == 0);
+
+		ctrl->spio_ctrl->spio_credits.credit_return =
+				*ctrl->spio_credits_addr;
 	}
 
 	/*

@@ -1,3 +1,4 @@
+#!/bin/bash
 #
 #  This file is provided under a dual BSD/GPLv2 license.  When using or
 #  redistributing this file, you may do so under either license.
@@ -48,5 +49,37 @@
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-install ib_qib /usr/sbin/hfi1-psm-compat.cmds start; modprobe -i ib_qib $CMDLINE_OPTS
-remove ib_qib modprobe -r -i ib_qib && /usr/sbin/hfi1-psm-compat.cmds stop
+
+BUILDARG=s
+
+err=0
+if [ $# -gt 1 ]; then
+    err=1
+elif [ $# -eq 1 ]; then
+    case $1 in
+	a|b|p|c|i|l)
+	    BUILDARG=$1
+	    ;;
+	*)
+	    err=1
+    esac
+fi
+
+if [ $err -ne 0 ]; then
+    echo "usage: $0 [rpmbuild arg (a|b|p|c|i|l)]"
+    exit 1
+fi
+
+RPM_NAME=libpsm2
+make distclean
+rm -rf temp.$$
+
+make dist
+
+mkdir -p temp.$$/{BUILD,RPMS,SOURCES,SPECS,SRPMS,BUILDROOT}
+cp ./$RPM_NAME-*.tar.gz temp.$$/SOURCES
+make specfile
+cp $RPM_NAME.spec temp.$$/SPECS
+rpmbuild -b$BUILDARG --define "_topdir $PWD/temp.$$" --nodeps temp.$$/SPECS/$RPM_NAME.spec
+
+echo The source rpm is in temp.$$/SRPMS/`ls temp.$$/SRPMS`

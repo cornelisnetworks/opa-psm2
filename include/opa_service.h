@@ -125,13 +125,21 @@ int hfi_get_port_index2pkey(int unit, int port, int index);
 /* Returns -1 with errno set, or number of units >=0 (0 means none found). */
 int hfi_get_num_units(void);
 
+/* Given a unit number, returns 1 if any port on the unit is active.
+   returns 0 if no port on the unit is active.
+   returns -1 when an error occurred. */
+int hfi_get_unit_active(int unit);
+
 /* get the number of contexts from the unit id. */
 /* Returns 0 if no unit or no match. */
 int hfi_get_num_contexts(int unit);
 
 /* Open hfi device file, return -1 on error. */
 int hfi_context_open(int unit, int port, uint64_t open_timeout);
+int hfi_context_open_ex(int unit, int port, uint64_t open_timeout,
+		     char *dev_name,size_t dev_name_len);
 void hfi_context_close(int fd);
+
 /* hfi_get_user_major_version() returns the major version of the driver
    that should be used for this session of psm. Valid only after
    hfi_context_open has been called. */

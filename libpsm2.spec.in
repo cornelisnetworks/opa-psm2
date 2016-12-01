@@ -51,45 +51,42 @@
 # Copyright (c) 2014-2015 Intel Corporation. All rights reserved.
 #
 Summary: Intel PSM Libraries
-Name: hfi1-psm
+Name: @RPM_NAME@
 Version: @VERSION@
-Release: @RELEASE@
-License: GPLv2
-Group: System Environment/Libraries
-URL: http://www.intel.com/
-Source0: %{name}-%{version}-%{release}.tar.gz
-Prefix: /usr
-BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
-Requires(post): /sbin/ldconfig
-Requires(postun): /sbin/ldconfig
+Release: 1@SPEC_FILE_RELEASE_DIST@
+License: BSD or GPLv2
+URL: https://github.com/01org/opa-psm2/
+
+# The tarball can be created by:
+# git clone https://github.com/01org/opa-psm2
+# cd opa-psm2
+# git checkout @DIST_SHA@
+# make dist
+Source0: %{name}-%{version}.tar.gz
+
+# The OPA product is supported on x86 64 only:
 ExclusiveArch: x86_64
-%if 0%{?rhel}%{?rhl}%{?fedora}
-Requires: libuuid
-%else
-Requires: libuuid1
-%endif
 BuildRequires: libuuid-devel
-Conflicts: opa-libs
-Obsoletes: hfi-psm
-Obsoletes: hfi-psm-debuginfo
+BuildRequires: systemd
+BuildRequires: gcc
+Provides: hfi1-psm
+Obsoletes: hfi1-psm < 1.0.0
 
 %package devel
 Summary: Development files for Intel PSM
-Group: System Environment/Development
-Requires: %{name} = %{version}-%{release}
-Requires(post): /sbin/ldconfig
-Requires(postun): /sbin/ldconfig
+Requires: %{name}%{?_isa} = %{version}-%{release}
 Requires: libuuid-devel
-Conflicts: opa-devel
-Obsoletes: hfi-psm-devel
+Provides: hfi1-psm-devel
+Obsoletes: hfi1-psm-devel < 1.0.0
 
 %package compat
-Summary: Development files for Intel PSM
-Group: System Environment/Development
-Requires: %{name} = %{version}-%{release}
-Requires(post): /sbin/ldconfig
-Requires(postun): /sbin/ldconfig
-Obsoletes: hfi-psm-compat
+Summary: Compat library for Intel PSM
+Requires: %{name}%{?_isa} = %{version}-%{release}
+%if 0%{?fedora}
+Requires: systemd-udev
+%endif
+Provides: hfi1-psm-compat
+Obsoletes: hfi1-psm-compat < 1.0.0
 
 %description
 The PSM Messaging API, or PSM API, is the low-level
@@ -99,64 +96,43 @@ necessary to implement higher level communications
 interfaces in parallel environments.
 
 %description devel
-Development files for the @TARGLIB@ library
+Development files for the Intel PSM library
 
 %description compat
 Support for MPIs linked with PSM versions < 2
 
 %prep
-%setup -q -n hfi1-psm-%{version}-%{release}
+%setup -q -n @RPM_NAME@-%{version}
 
 %build
-%{__make}
+export CFLAGS="%{optflags}"
+make %{?_smp_mflags}
 
 %install
-rm -rf $RPM_BUILD_ROOT
-mkdir -p $RPM_BUILD_ROOT
-export DESTDIR=$RPM_BUILD_ROOT
-%{__make} DESTDIR=$RPM_BUILD_ROOT install
-
-%clean
-rm -rf $RPM_BUILD_ROOT
+%make_install
 
 %post -p /sbin/ldconfig
 %postun -p /sbin/ldconfig
-%post devel -p /sbin/ldconfig
-%postun devel -p /sbin/ldconfig
 
 %files
-%defattr(-,root,root,-)
-/usr/lib64/@TARGLIB@.so.@MAJOR@.@MINOR@
-/usr/lib64/@TARGLIB@.so.@MAJOR@
-@UDEVDIR@/rules.d/40-psm.rules
+%license COPYING
+%{_libdir}/@TARGLIB@.so.@MAJOR@.@MINOR@
+%{_libdir}/@TARGLIB@.so.@MAJOR@
+@40_PSM_RULES@
 
 %files devel
-%defattr(-,root,root,-)
-/usr/lib64/@TARGLIB@.so
-/usr/include/psm2.h
-/usr/include/psm2_mq.h
-/usr/include/psm2_am.h
-# The following files were part of the devel-noship and moved to devel:
-/usr/include/hfi1diag/ptl_ips/ipserror.h
-/usr/include/hfi1diag/linux-x86_64/bit_ops.h
-/usr/include/hfi1diag/linux-x86_64/sysdep.h
-/usr/include/hfi1diag/opa_udebug.h
-/usr/include/hfi1diag/opa_debug.h
-/usr/include/hfi1diag/opa_intf.h
-/usr/include/hfi1diag/opa_user.h
-/usr/include/hfi1diag/opa_service.h
-/usr/include/hfi1diag/opa_common.h
-/usr/include/hfi1diag/opa_byteorder.h
-/usr/include/hfi1diag/hfi1_deprecated.h
+%{_libdir}/@TARGLIB@.so
+%{_includedir}/psm2.h
+%{_includedir}/psm2_mq.h
+%{_includedir}/psm2_am.h
+%{_includedir}/hfi1diag
 
 %files compat
-%defattr(-,root,root,-)
-/usr/lib64/psm2-compat/@COMPATLIB@.so.@COMPATMAJOR@
-@UDEVDIR@/rules.d/40-psm-compat.rules
-/etc/modprobe.d/hfi1-psm-compat.conf
-/usr/sbin/hfi1-psm-compat.cmds
+%{_libdir}/psm2-compat
+%{_udevrulesdir}/40-psm-compat.rules
+@LIBPSM2_COMPAT_SYM_CONF_DIR@/modprobe.d/@RPM_NAME@-compat.conf
+%{_prefix}/lib/libpsm2
 
 %changelog
-* Tue Apr 05 2016 -0700-
+* Tue Apr 05 2016 Paul Reger <paul.j.reger@intel.com> - @VERSION@
 - Upstream PSM2 source code for Fedora.
-

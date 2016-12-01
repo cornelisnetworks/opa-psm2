@@ -116,7 +116,7 @@ ips_protoexp_init(const psmi_context_t *context,
 	protoexp->ptl = (const struct ptl *)proto->ptl;
 	protoexp->proto = (struct ips_proto *)proto;
 	protoexp->timerq = proto->timerq;
-	protoexp->tidflow_seed = (unsigned int)getpid();
+	srand48_r((long int) getpid(), &protoexp->tidflow_drand48_data);
 	protoexp->tid_flags = protoexp_flags;
 	if (context->runtime_flags & HFI1_CAP_HDRSUPP) {
 		union psmi_envvar_val env_hdrsupp;
@@ -242,6 +242,17 @@ ips_protoexp_init(const psmi_context_t *context,
 			     env_exp_hdr.e_uint, protoexp->hdr_pkt_interval);
 		}
 
+	}
+
+	{
+		union psmi_envvar_val env_rts_cts_interleave;
+
+		psmi_getenv("PSM2_RTS_CTS_INTERLEAVE",
+			    "Interleave the handling of RTS to provide a fair disturbution between multiple senders",
+			    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
+			    (union psmi_envvar_val)0, &env_rts_cts_interleave);
+		if (env_rts_cts_interleave.e_uint)
+			protoexp->tid_flags |= IPS_PROTOEXP_FLAG_RTS_CTS_INTERLEAVE;
 	}
 
 	/* Send descriptors.
@@ -990,14 +1001,9 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 				tid_list->tsess_unaligned_start);
 	tidsendc->length = tid_list->tsess_length;
 	tidsendc->ctrl_msg_queued = 0;
+	tidsendc->frag_size = min(protoexp->tid_send_fragsize,
+		tidsendc->tidflow.frag_size);
 
-	if (protoexp->tid_xfer_type == PSM_TRANSFER_PIO)
-		tidsendc->frag_size =
-		    min(protoexp->tid_send_fragsize, ipsaddr->pio_size);
-	else
-		tidsendc->frag_size =
-		    min(protoexp->tid_send_fragsize,
-			tidsendc->tidflow.path->pr_mtu);
 	/* frag size must be 64B multiples */
 	tidsendc->frag_size &= (~63);
 
@@ -1098,7 +1104,7 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 	 * the packet header.
 	 */
 	scb->payload_size = frame_len;
-	scb->payload = (void *)bufptr;
+	ips_scb_buffer(scb) = (void *)bufptr;
 	scb->frag_size = tidsendc->frag_size;
 
 	/*
@@ -1515,8 +1521,9 @@ ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 
 	tidrecvc->tidflow_nswap_gen = 0;
 	tidrecvc->tidflow_genseq.psn_gen = tidrecvc->tidflow_active_gen;
-	tidrecvc->tidflow_genseq.psn_seq =
-	    rand_r(&protoexp->tidflow_seed) & 0x3ff;
+	long int rnum;
+	lrand48_r(&protoexp->tidflow_drand48_data, &rnum);
+	tidrecvc->tidflow_genseq.psn_seq = ((int)(rnum % INT_MAX)) & 0x3ff;
 	hfi_tidflow_set_entry(tidrecvc->context->ctrl,
 			      tidrecvc->rdescid._desc_idx,
 			      tidrecvc->tidflow_genseq.psn_gen,
@@ -1647,7 +1654,18 @@ ipsaddr_next:
 				STAILQ_REMOVE_HEAD(phead, tidgr_next);
 				continue;	/* try next grant request */
 			}
-				
+			else if (protoexp->tid_flags & IPS_PROTOEXP_FLAG_RTS_CTS_INTERLEAVE) {
+				/* In case of multi rail, PSM sends one CTS per request
+				 * per card after which the request is moved to the end
+				 * of the queue.
+				 */
+				count--;
+				if (count)
+					goto ipsaddr_next;
+				STAILQ_REMOVE_HEAD(phead, tidgr_next);
+				STAILQ_INSERT_TAIL(phead, getreq ,tidgr_next);
+				continue;
+			}
 			/* created a tidrecvc, reset count */
 			count = ipsaddr->msgctl->ipsaddr_count;
 			goto ipsaddr_next;	/* try next fragment on next ipsaddr */

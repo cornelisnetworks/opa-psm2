@@ -51,8 +51,7 @@
 #  Copyright (c) 2003-2014 Intel Corporation. All rights reserved.
 #
 
-RPM_NAME := hfi1-psm
-BASEVERSION := 0.1
+RPM_NAME := libpsm2
 
 SUBDIRS:= ptl_self ptl_ips ptl_am libuuid opa
 export build_dir := .
@@ -105,19 +104,73 @@ MINOR := $(PSM2_LIB_MINOR)
 
 nthreads := $(shell echo $$(( `nproc` * 2 )) )
 
+# The following line sets the DISTRO variable to:
+#  'rhel' if the host is running RHEL.
+#  'suse' if the host is running SUSE.
+#  'fedora' if the host is running Fedora.
+#
+# The DISTRO variable is used subsequently for variable
+# behaviors of the 3 distros.
+
+DISTRO := $(shell . /etc/os-release; echo $$ID)
+
+# By defailt the following two variables have the following values:
+LIBPSM2_COMPAT_CONF_DIR := /etc
+LIBPSM2_COMPAT_SYM_CONF_DIR := /etc
+SPEC_FILE_RELEASE_DIST :=#nothing
+UDEV_40_PSM_RULES := %{_udevrulesdir}/40-psm.rules
+
+ifeq (fedora,$(DISTRO))
+	# On Fedora, we change these two variables to these values:
+	LIBPSM2_COMPAT_CONF_DIR := /usr/lib
+	LIBPSM2_COMPAT_SYM_CONF_DIR := %{_prefix}/lib
+	SPEC_FILE_RELEASE_DIST := %{?dist}
+	UDEV_40_PSM_RULES :=#
+else ifeq (rhel,${DISTRO})
+	# Insert code specific to RHEL here.
+else ifeq (sles,${DISTRO})
+	# Insert code specific to SLES here.
+endif
+
+export 	LIBPSM2_COMPAT_CONF_DIR
+
 # The desired version number comes from the most recent tag starting with "v"
 VERSION := $(shell if [ -e .git ] ; then  git  describe --tags --abbrev=0 --match='v*' | sed -e 's/^v//' -e 's/-/_/'; else echo "version" ; fi)
-#
+
+# If we have a file called 'rpm_release_extension' (as on github),
+# we take the release extension number from this file
+RELEASE_EXT := $(shell if [ -e rpm_release_extension ] ; then cat rpm_release_extension; fi)
+CURRENTSHA := $(shell if [ -e .git -a -f rpm_release_extension ] ; then git log --pretty=format:'%h' -n 1; fi)
+RPMEXTHASH := $(shell if [ -e .git -a -f rpm_release_extension ] ; then git log --pretty=format:'%h' -n 1 rpm_release_extension; fi)
+
+# On github, the last commit for each release should be the one to bump up
+# the release extension number in 'rpm_release_extension'. Further commits
+# are counted here and appended to the final rpm name to distinguish commits
+# present only on github
+NCOMMITS := $(shell if [ -e .git -a -f rpm_release_extension ] ; then git log $(RPMEXTHASH)..$(CURRENTSHA) --pretty=oneline | wc -l; fi)
+
+# This logic should kick-in only on github
+ifdef RELEASE_EXT
+ifneq ($(CURRENTSHA), $(RPMEXTHASH))
+RELEASE := $(RELEASE_EXT)_$(NCOMMITS)
+endif
+endif
+
 # The desired release number comes the git describe following the version which
 # is the number of commits since the version tag was planted suffixed by the g<commitid>
-RELEASE := $(shell if [ -f RELEASE_VER ]; then cat RELEASE_VER;\
-                  elif [ -e .git ] ; then git describe --tags --long --match='v*' | \
-                               sed -e 's/v[0-9.]*-\(.*\)/\1/' -e 's/-/_/' | \
-                               sed -e 's/_g.*$$//'; \
-                  else echo "release" ; fi)
+ifndef RELEASE
+RELEASE := $(shell if [ -f rpm_release_extension ]; then cat rpm_release_extension;\
+		   elif [ -e .git ] ; then git describe --tags --long --match='v*' | \
+				sed -e 's/v[0-9.]*-\(.*\)/\1/' -e 's/-/_/' | \
+				sed -e 's/_g.*$$//'; \
+		   else echo "release" ; fi)
+endif
+
+DIST_SHA := ${shell if [ -e .git ] ; then git log -n1 --pretty=format:%H ; \
+		else echo DIST_SHA ; fi}
 
 # Concatenated version and release
-VERSION_RELEASE := $(VERSION)-$(RELEASE)
+VERSION_RELEASE := $(VERSION).$(RELEASE)
 
 LDLIBS := -lrt -lpthread -ldl ${EXTRA_LIBS}
 
@@ -129,6 +182,13 @@ ifndef UDEVDIR
 endif
 
 export UDEVDIR
+
+# The DIST variable is a name kernel corresponding to:
+# 1. The name of the directory containing the source code distribution
+#    (see dist: target below).
+# 2. The basename of the filename of the tar file created in the dist:
+#    target.
+DIST := ${RPM_NAME}-${VERSION_RELEASE}
 
 all: symlinks
 	for subdir in $(SUBDIRS); do \
@@ -143,11 +203,12 @@ clean:
 		$(MAKE) -j $(nthreads) -C $$subdir $@ ;\
 	done
 	$(MAKE) -j $(nthreads) -C compat clean
-	rm -f *.o *.d *.gcda *.gcno ${TARGLIB}*
+	rm -f *.o *.d *.gcda *.gcno ${TARGLIB}.so*
 
 distclean: cleanlinks clean
 	rm -f ${RPM_NAME}.spec
-	rm -f ${RPM_NAME}-${VERSION_RELEASE}.tar.gz
+	rm -f ${DIST}.tar.gz
+	rm -fr temp.[0-9]*
 
 .PHONY: symlinks
 symlinks:
@@ -170,7 +231,9 @@ install: all
 	install -m 0644 -D psm2.h ${DESTDIR}/usr/include/psm2.h
 	install -m 0644 -D psm2_mq.h ${DESTDIR}/usr/include/psm2_mq.h
 	install -m 0644 -D psm2_am.h ${DESTDIR}/usr/include/psm2_am.h
+ifneq (fedora,${DISTRO})
 	install -m 0644 -D 40-psm.rules ${DESTDIR}$(UDEVDIR)/rules.d/40-psm.rules
+endif
 	# The following files and dirs were part of the noship rpm:
 	mkdir -p ${DESTDIR}/usr/include/hfi1diag
 	mkdir -p ${DESTDIR}/usr/include/hfi1diag/linux-x86_64
@@ -188,25 +251,27 @@ install: all
 	install -m 0644 -D include/hfi1_deprecated.h ${DESTDIR}/usr/include/hfi1diag/hfi1_deprecated.h
 
 specfile:
-	sed -e 's/@VERSION@/'${VERSION}'/g' ${RPM_NAME}.spec.in | \
+	sed -e 's/@VERSION@/'${VERSION_RELEASE}'/g' ${RPM_NAME}.spec.in | \
 		sed -e 's/@TARGLIB@/'${TARGLIB}'/g' \
+			-e 's/@RPM_NAME@/'${RPM_NAME}'/g' \
 			-e 's/@COMPATLIB@/'${COMPATLIB}'/g' \
 			-e 's/@COMPATMAJOR@/'${COMPATMAJOR}'/g' \
-			-e 's\@UDEVDIR@\'${UDEVDIR}'\g' \
+			-e 's;@UDEVDIR@;'${UDEVDIR}';g' \
 			-e 's/@MAJOR@/'${MAJOR}'/g' \
 			-e 's/@MINOR@/'${MINOR}'/g' \
-			-e 's/@RELEASE@/'${RELEASE}'/g' > \
+			-e 's:@LIBPSM2_COMPAT_CONF_DIR@:'${LIBPSM2_COMPAT_CONF_DIR}':g' \
+			-e 's:@LIBPSM2_COMPAT_SYM_CONF_DIR@:'${LIBPSM2_COMPAT_SYM_CONF_DIR}':g' \
+			-e 's/@SPEC_FILE_RELEASE_DIST@/'${SPEC_FILE_RELEASE_DIST}'/g'  \
+			-e 's;@40_PSM_RULES@;'${UDEV_40_PSM_RULES}';g' \
+			-e 's/@DIST_SHA@/'${DIST_SHA}'/g' > \
 		${RPM_NAME}.spec
 
-# The tar is done twice with the first one discarded. This is because of
-# file system stat issues causing the first tar to fail with errors due
-# to files updating while tar is running. I don't understand this.
-dist: distclean specfile
-	mkdir -p ${RPM_NAME}-${VERSION_RELEASE}
+dist: distclean
+	mkdir -p ${DIST}
 	for x in $$(/usr/bin/find .						\
 			-name ".git"                           -prune -o	\
 			-name "cscope*"                        -prune -o	\
-			-name "${RPM_NAME}-${VERSION_RELEASE}" -prune -o	\
+			-name "${DIST}"                        -prune -o	\
 			-name "*.orig"                         -prune -o	\
 			-name "*~"                             -prune -o	\
 			-name "#*"                             -prune -o	\
@@ -219,13 +284,13 @@ dist: distclean specfile
 			-name "tools"                          -prune -o	\
 			-print); do \
 		dir=$$(dirname $$x); \
-		mkdir -p ${RPM_NAME}-${VERSION_RELEASE}/$$dir; \
-		[ ! -d $$x ] && cp $$x ${RPM_NAME}-${VERSION_RELEASE}/$$dir; \
+		mkdir -p ${DIST}/$$dir; \
+		[ ! -d $$x ] && cp $$x ${DIST}/$$dir; \
 	done
-	if [ -e .git ] ; then git log -n1 --pretty=format:%H > ${RPM_NAME}-${VERSION_RELEASE}/COMMIT ; fi
-	-tar czvf ${RPM_NAME}-${VERSION_RELEASE}.tar.gz ${RPM_NAME}-${VERSION_RELEASE} > /dev/null 2>&1
-	tar czvf ${RPM_NAME}-${VERSION_RELEASE}.tar.gz ${RPM_NAME}-${VERSION_RELEASE}
-	rm -rf ${RPM_NAME}-${VERSION_RELEASE}
+	if [ -e .git ] ; then git log -n1 --pretty=format:%H > ${DIST}/COMMIT ; fi
+	echo ${RELEASE} > ${DIST}/rpm_release_extension
+	tar czvf ${DIST}.tar.gz ${DIST}
+	rm -rf ${DIST}
 
 ofeddist:
 	$(MAKE) -j $(nthreads) dist
@@ -270,7 +335,6 @@ ${TARGLIB}-objs := ptl_am/am_reqrep_shmem.o	\
 		   ptl_ips/ips_proto_expected.o \
 		   ptl_ips/ips_tid.o		\
 		   ptl_ips/ips_tidcache.o       \
-		   ptl_ips/ips_rbtree.o         \
 		   ptl_ips/ips_tidflow.o        \
 		   ptl_ips/ips_crc32.o 		\
 		   ptl_ips/ips_proto_dump.o	\

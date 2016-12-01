@@ -197,8 +197,8 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	proto->flags = env_cksum.e_uint ? IPS_PROTO_FLAG_CKSUM : 0;
 	proto->runid_key = getpid();
 
-	proto->num_connected_to = 0;
-	proto->num_connected_from = 0;
+	proto->num_connected_outgoing = 0;
+	proto->num_connected_incoming = 0;
 	proto->num_disconnect_requests = 0;
 	proto->stray_warn_interval = (uint64_t) -1;
 	proto->done_warning = 0;
@@ -595,7 +595,7 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 	t_start = proto->t_fini = get_cycles();
 
 	/* Close whatever has been left open */
-	if (proto->num_connected_to > 0) {
+	if (proto->num_connected_outgoing > 0) {
 		int num_disc = 0;
 		int *mask;
 		psm2_error_t *errs;
@@ -650,13 +650,13 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 	while (psmi_cycles_left(t_grace_start, t_grace_time)) {
 		uint64_t t_grace_interval_start = get_cycles();
 		int num_disconnect_requests = proto->num_disconnect_requests;
-		PSMI_BLOCKUNTIL(proto->ep, err,
-				(proto->num_connected_from == 0 ||
-				 !psmi_cycles_left(t_start, timeout_in)) &&
-				(!psmi_cycles_left
-				 (t_grace_interval_start, t_grace_interval)
-				 || !psmi_cycles_left(t_grace_start,
-						      t_grace_time)));
+		PSMI_BLOCKUNTIL(
+		    proto->ep, err,
+		    proto->num_connected_incoming == 0 ||
+			(!psmi_cycles_left(t_start, timeout_in) &&
+			    (!psmi_cycles_left(t_grace_interval_start,
+					       t_grace_interval) ||
+			     !psmi_cycles_left(t_grace_start, t_grace_time))));
 		if (num_disconnect_requests == proto->num_disconnect_requests) {
 			/* nothing happened in this grace interval so break out early */
 			break;
@@ -667,7 +667,7 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 
 	_HFI_PRDBG
 	    ("Closing endpoint disconnect left to=%d,from=%d after %d millisec of grace (out of %d)\n",
-	     proto->num_connected_to, proto->num_connected_from,
+	     proto->num_connected_outgoing, proto->num_connected_incoming,
 	     (int)(cycles_to_nanosecs(t_grace_finish - t_grace_start) /
 		   MSEC_ULL), (int)(t_grace_time / MSEC_ULL));
 
@@ -848,7 +848,7 @@ static __inline__ void _build_ctrl_message(struct ips_proto *proto,
 	/* p_hdr->bth[2] already set by caller, or don't care */
 	/* p_hdr->ack_seq_num already set by caller, or don't care */
 
-	p_hdr->connidx = ipsaddr->connidx_to;
+	p_hdr->connidx = ipsaddr->connidx_outgoing;
 	p_hdr->flags = 0;
 
 	p_hdr->khdr.kdeth0 = __cpu_to_le32(
@@ -1021,7 +1021,7 @@ ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 	return err;
 }
 
-void ips_proto_flow_enqueue(struct ips_flow *flow, ips_scb_t *scb)
+void MOCKABLE(ips_proto_flow_enqueue)(struct ips_flow *flow, ips_scb_t *scb)
 {
 	ips_epaddr_t *ipsaddr = flow->ipsaddr;
 	struct ips_proto *proto = ((psm2_epaddr_t) ipsaddr)->proto;
@@ -1031,7 +1031,7 @@ void ips_proto_flow_enqueue(struct ips_flow *flow, ips_scb_t *scb)
 	    (scb->tidctrl == 0) && (scb->nfrag == 1)) {
 		scb->ips_lrh.flags |= IPS_SEND_FLAG_PKTCKSUM;
 		ips_do_cksum(proto, &scb->ips_lrh,
-			     scb->payload, scb->payload_size, &scb->cksum[0]);
+			     ips_scb_buffer(scb), scb->payload_size, &scb->cksum[0]);
 	}
 
 	/* If this is the first scb on flow, pull in both timers. */
@@ -1057,6 +1057,7 @@ void ips_proto_flow_enqueue(struct ips_flow *flow, ips_scb_t *scb)
 	flow->scb_num_unacked++;
 #endif
 }
+MOCK_DEF_EPILOGUE(ips_proto_flow_enqueue);
 
 /*
  * This function attempts to flush the current list of pending
@@ -1094,7 +1095,7 @@ ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed)
 		psmi_assert(scb->nfrag == 1);
 
 		if ((err = ips_spio_transfer_frame(proto, flow, &scb->pbc,
-						   scb->payload,
+						   ips_scb_buffer(scb),
 						   scb->payload_size,
 						   PSMI_FALSE,
 						   scb->ips_lrh.
@@ -1374,7 +1375,7 @@ handle_ENOMEM_on_DMA_completion(struct ips_proto *proto)
 	psm2_error_t err;
 	time_t now = time(NULL);
 
-	if (proto->protoexp && proto->protoexp->tidc.tid_cachemap.nidle) {
+	if (proto->protoexp && proto->protoexp->tidc.tid_cachemap.payload.nidle) {
 		uint64_t lengthEvicted =
 			ips_tidcache_evict(&proto->protoexp->tidc, -1);
 
@@ -1690,7 +1691,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 			 * payload_size is the remaining chunk first packet
 			 * length.
 			 */
-			iovec[vec_idx].iov_base = scb->payload;
+			iovec[vec_idx].iov_base = ips_scb_buffer(scb);
 			iovec[vec_idx].iov_len = scb->nfrag > 1
 						     ? scb->chunk_size_remaining
 						     : scb->payload_size;

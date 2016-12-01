@@ -248,7 +248,7 @@ psm2_error_t rcvthread_initsched(struct ptl_rcvthread *rcvc)
 
 	if (no_timeout) {
 		rcvc->last_timeout = -1;
-		_HFI_PRDBG("PSM_RCVTHREAD_FREQ set to only interrupt "
+		_HFI_PRDBG("PSM2_RCVTHREAD_FREQ set to only interrupt "
 			   "(no timeouts)\n");
 	} else {
 		/* Convert freq to period in microseconds (for poll()) */
@@ -258,7 +258,7 @@ psm2_error_t rcvthread_initsched(struct ptl_rcvthread *rcvc)
 		/* Start in the middle of min and max */
 		rcvc->last_timeout = (rcvc->timeout_period_min +
 				      rcvc->timeout_period_max) / 2;
-		_HFI_PRDBG("PSM_RCVTHREAD_FREQ converted to period "
+		_HFI_PRDBG("PSM2_RCVTHREAD_FREQ converted to period "
 			   "min=%dms,max=%dms,shift=%d\n",
 			   rcvc->timeout_period_min, rcvc->timeout_period_max,
 			   rcvc->timeout_shift);

@@ -218,7 +218,7 @@ am_short_reqrep(ips_scb_t *scb, struct ips_epaddr *ipsaddr,
 			 * space in the message header, so we have to copy the
 			 * user's arguments even if the payload is marked ASYNC
 			 */
-			uintptr_t bufp = (uintptr_t) scb->payload;
+			uintptr_t bufp = (uintptr_t) ips_scb_buffer(scb);
 			size_t arg_payload_len =
 			    sizeof(psm2_amarg_t) * (nargs - IPS_AM_HDR_NARGS);
 
@@ -258,10 +258,10 @@ am_short_reqrep(ips_scb_t *scb, struct ips_epaddr *ipsaddr,
 		scb->ips_lrh.amhdr_len = len & ((1 << IPS_AM_HDR_LEN_BITS) - 1);
 		scb->flags |= IPS_SEND_FLAG_AMISTINY;
 	} else { /* Whatever's left requires a separate payload */
-		if (scb->payload == NULL) /* Just attach the buffer */
-			scb->payload = src;
+		if (ips_scb_buffer(scb) == NULL) /* Just attach the buffer */
+			ips_scb_buffer(scb) = src;
 		else /* May need to re-xmit user data, keep it around */
-			psmi_mq_mtucpy(scb->payload, src, len);
+			psmi_mq_mtucpy(ips_scb_buffer(scb), src, len);
 
 		psmi_assert(pad_bytes < (1 << IPS_AM_HDR_LEN_BITS));
 		scb->payload_size = len + pad_bytes;
@@ -412,7 +412,7 @@ ips_am_run_handler(const struct ips_message_header *p_hdr,
 	psm2_amarg_t *args = (psm2_amarg_t *)p_hdr->data;
 
 	token.tok.flags = p_hdr->flags;
-	token.tok.epaddr_from = (psm2_epaddr_t)&ipsaddr->msgctl->master_epaddr;
+	token.tok.epaddr_incoming = (psm2_epaddr_t)&ipsaddr->msgctl->master_epaddr;
 	token.tok.can_reply =
 		(_get_proto_hfi_opcode(p_hdr) == OPCODE_AM_REQUEST);
 	token.epaddr_rail = ipsaddr;

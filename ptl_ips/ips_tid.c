@@ -62,9 +62,9 @@ psm2_error_t
 ips_tid_init(const psmi_context_t *context, struct ips_protoexp *protoexp,
 	     ips_tid_avail_cb_fn_t cb, void *cb_context)
 {
-	const struct hfi1_user_info *user_info = &context->user_info;
-	const struct hfi1_base_info *base_info = &context->ctrl->base_info;
-	const struct hfi1_ctxt_info *ctxt_info = &context->ctrl->ctxt_info;
+	const struct hfi1_user_info_dep *user_info = &context->user_info;
+	const struct hfi1_base_info *base_info     = &context->ctrl->base_info;
+	const struct hfi1_ctxt_info *ctxt_info     = &context->ctrl->ctxt_info;
 	struct ips_tid *tidc = &protoexp->tidc;
 
 	struct psmi_stats_entry entries[] = {
@@ -88,6 +88,7 @@ ips_tid_init(const psmi_context_t *context, struct ips_protoexp *protoexp,
 	if (!(tidc->context->runtime_flags & HFI1_CAP_TID_UNMAP)) {
 		int i;
 		cl_qmap_t *p_map;
+		cl_map_item_t *root,*nil_item;
 
 		tidc->tid_array = (uint32_t *)
 			psmi_calloc(context->ep, UNDEFINED,
@@ -100,26 +101,18 @@ ips_tid_init(const psmi_context_t *context, struct ips_protoexp *protoexp,
 		 * first is root node, last is terminator node.
 		 */
 		p_map = &tidc->tid_cachemap;
-		p_map->root = (cl_map_item_t *)
+		root = (cl_map_item_t *)
 			psmi_calloc(context->ep, UNDEFINED,
-				context->ctrl->__hfi_tidexpcnt + 2,
-				sizeof(cl_map_item_t));
-		if (p_map->root == NULL)
+				    context->ctrl->__hfi_tidexpcnt + 2,
+				    sizeof(cl_map_item_t));
+
+		if (root == NULL)
 			return PSM2_NO_MEMORY;
 
-		/* setup the RB tree map */
-		p_map->nil_item = &p_map->root
+		nil_item = &root
 			[context->ctrl->__hfi_tidexpcnt + 1];
 
-		p_map->root->p_up = p_map->root;
-		p_map->root->p_left = p_map->nil_item;
-		p_map->root->p_right = p_map->nil_item;
-		p_map->root->color = CL_MAP_BLACK;
-
-		p_map->nil_item->p_up = p_map->nil_item;
-		p_map->nil_item->p_left = p_map->nil_item;
-		p_map->nil_item->p_right = p_map->nil_item;
-		p_map->nil_item->color = CL_MAP_BLACK;
+		ips_tidcache_map_init(p_map,root,nil_item);
 
 		NTID = 0;
 		NIDLE = 0;
@@ -223,7 +216,7 @@ ips_tid_acquire(struct ips_tid *tidc,
 		goto fail;
 	}
 
-	psmi_assert((*tidcnt) > 0);
+	psmi_assert_always((*tidcnt) > 0);
 	psmi_assert(ctrl->tid_num_avail >= (*tidcnt));
 	ctrl->tid_num_avail -= (*tidcnt);
 	tidc->tid_num_total += (*tidcnt);

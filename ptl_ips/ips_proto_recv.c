@@ -388,7 +388,7 @@ void ips_tidflow_nak_post_process(struct ips_proto *proto,
 		scb->nfrag_remaining -= npkt;
 		psmi_assert(scb->chunk_size_remaining > nbytes);
 		scb->chunk_size_remaining -= nbytes;
-		scb->payload = (void *)((char *)scb->payload + nbytes);
+		ips_scb_buffer(scb) = (void *)((char *)ips_scb_buffer(scb) + nbytes);
 
 		/* 1. if last packet in sequence, set ACK, clear SH */
 		if (scb->nfrag_remaining == 1) {
@@ -492,7 +492,7 @@ void ips_dmaflow_nak_post_process(struct ips_proto *proto,
 		scb->nfrag_remaining -= npkt;
 		psmi_assert(scb->chunk_size_remaining > nbytes);
 		scb->chunk_size_remaining -= nbytes;
-		scb->payload = (void *)((char *)scb->payload + nbytes);
+		ips_scb_buffer(scb) = (void *)((char *)ips_scb_buffer(scb) + nbytes);
 
 		/* 1. if last packet in sequence, set ACK */
 		if (scb->chunk_size_remaining <= scb->frag_size) {
@@ -867,10 +867,14 @@ int ips_proto_process_nak(struct ips_recvhdrq_event *rcv_ev)
 			offset = (SLIST_FIRST(scb_pend)->ack_timeout >> 1);
 		else
 			offset = 0;
+		struct drand48_data drand48_data;
+		srand48_r((long int)(ipsaddr->epaddr.epid + proto->ep->epid), &drand48_data);
+		double rnum;
+		drand48_r(&drand48_data, &rnum);
 		psmi_timer_request(proto->timerq, flow->timer_send,
 				   (get_cycles() +
 				    (uint64_t) (offset *
-						(rand() / RAND_MAX + 1.0))));
+						(rnum + 1.0))));
 	}
 	else {
 		int num_resent = 0;

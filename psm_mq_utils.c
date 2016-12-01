@@ -62,7 +62,7 @@
  *
  */
 
-psm2_mq_req_t psmi_mq_req_alloc(psm2_mq_t mq, uint32_t type)
+psm2_mq_req_t MOCKABLE(psmi_mq_req_alloc)(psm2_mq_t mq, uint32_t type)
 {
 	psm2_mq_req_t req;
 
@@ -106,6 +106,7 @@ psm2_mq_req_t psmi_mq_req_alloc(psm2_mq_t mq, uint32_t type)
 		return NULL;
 	}
 }
+MOCK_DEF_EPILOGUE(psmi_mq_req_alloc);
 
 psm2_error_t psmi_mq_req_init(psm2_mq_t mq)
 {

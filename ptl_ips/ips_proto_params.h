@@ -202,10 +202,11 @@
 #define IPS_PROTO_FLAG_CCA 0x2000
 #define IPS_PROTO_FLAG_CCA_PRESCAN 0x4000	/* Enable RAPID CCA prescanning */
 
-#define IPS_PROTOEXP_FLAG_ENABLED	0x01	/* default */
-#define IPS_PROTOEXP_FLAG_HDR_SUPP      0x02	/* Header suppression enabled */
-#define IPS_PROTOEXP_FLAG_TID_DEBUG	0x04	/* *not* default */
-#define IPS_PROTOEXP_FLAGS_DEFAULT	IPS_PROTOEXP_FLAG_ENABLED
+#define IPS_PROTOEXP_FLAG_ENABLED	     0x01	/* default */
+#define IPS_PROTOEXP_FLAG_HDR_SUPP           0x02	/* Header suppression enabled */
+#define IPS_PROTOEXP_FLAG_TID_DEBUG	     0x04	/* *not* default */
+#define IPS_PROTOEXP_FLAG_RTS_CTS_INTERLEAVE 0x08	/* Interleave RTS handling. */
+#define IPS_PROTOEXP_FLAGS_DEFAULT	     IPS_PROTOEXP_FLAG_ENABLED
 
 /* We have to get an MTU of at least 2K, or else this breaks some assumptions
  * in the packets that handle tid descriptors

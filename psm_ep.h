@@ -101,11 +101,11 @@
 #define PSMI_EPID_GET_RANK(epid)	(((epid)>>32)&0x3ffffff)
 
 #define PSMI_MIN_EP_CONNECT_TIMEOUT (2 * SEC_ULL)
-#define PSMI_MIN_EP_CLOSE_TIMEOUT   (2 * SEC_ULL)
-#define PSMI_MAX_EP_CLOSE_TIMEOUT   (60 * SEC_ULL)
+#define PSMI_MIN_EP_CLOSE_TIMEOUT   (1 * SEC_ULL)
+#define PSMI_MAX_EP_CLOSE_TIMEOUT   (2 * SEC_ULL)
 
 #define PSMI_MIN_EP_CLOSE_GRACE_INTERVAL (1 * SEC_ULL)
-#define PSMI_MAX_EP_CLOSE_GRACE_INTERVAL (10 * SEC_ULL)
+#define PSMI_MAX_EP_CLOSE_GRACE_INTERVAL (2 * SEC_ULL)
 
 #define PSM_MCTXT_APPEND(head, node)	\
 	node->mctxt_prev = head->mctxt_prev; \

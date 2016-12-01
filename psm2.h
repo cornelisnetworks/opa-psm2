@@ -63,10 +63,8 @@ extern "C" {
 #endif
 
 /*!
- * @file psm.h
- */
-/*!
- * @mainpage PSM2 API
+ * @file psm2.h
+ * @page psm2_main PSM2 API
  *
  * @brief PSM2 OPA Messaging Library
  *
@@ -212,7 +210,7 @@ extern "C" {
  *
  * PSM2 predefines two different mechanisms for handling errors:
  *
- * @li PSM-internal error handler (@ref PSM2_ERRHANDLER_PSM2_HANDLER)
+ * @li PSM-internal error handler (@ref PSM2_ERRHANDLER_PSM_HANDLER)
  * @li No-op PSM2 error handler where errors are returned
  *     (@ref PSM2_ERRHANDLER_NO_HANDLER)
  *
@@ -273,7 +271,7 @@ typedef struct psm2_ep *psm2_ep_t;
  * @ingroup mq
  *
  * Handle returned to the user when a new Matched queue is created (@ref
- * ps2m_mq_init).  */
+ * psm2_mq_init).  */
 typedef struct psm2_mq *psm2_mq_t;
 
 /*! @defgroup init PSM2 Initialization and Maintenance
@@ -282,7 +280,7 @@ typedef struct psm2_mq *psm2_mq_t;
 #define PSM2_VERNO       0x0201	/*!< Header-defined Version number */
 #define PSM2_VERNO_MAJOR 0x02	/*!< Header-defined Major Version Number */
 #define PSM2_VERNO_MINOR 0x01	/*!< Header-defined Minor Version Number */
-#define PSM2_VERNO_COMPAT_MAJOR 0x01	/*!<PSM1 Major Version Number> */
+#define PSM2_VERNO_COMPAT_MAJOR 0x01    /*!<Minimum PSM1 Major Version Number for Compatibility */
 
 /*! @brief PSM2 Error type
  */
@@ -367,10 +365,11 @@ enum psm2_error {
 	/*! AM reply error */
 	PSM2_AM_INVALID_REPLY = 70,
 
-	PSM2_ERROR_LAST = 80
+    /*! Reserved Value to indicate highest ENUM value */
+    PSM2_ERROR_LAST = 80
 };
 
-/* Backwards header compatibility for a confusing error return name */
+/*! Backwards header compatibility for a confusing error return name */
 #define PSM2_MQ_INCOMPLETE PSM2_MQ_NO_COMPLETIONS
 
 /*! @see psm2_error */
@@ -430,47 +429,47 @@ typedef enum psm2_path_res psm2_path_res_t;
  * @returns PSM2_INIT_BAD_API_VERSION The PSM2 library cannot compatibility for
  *                                   the desired API version.
  *
- * @verbatim
- * // In this example, we want to handle our own errors before doing init,
- * // since we don't want a fatal error if OPA is not found.
- * // Note that @ref psm2_error_register_handler (and @ref psm2_uuid_generate)
- * // are the only function that can be called before @ref psm2_init
- *
- * int try_to_initialize_psm() {
- *     int verno_major = PSM2_VERNO_MAJOR;
- *     int verno_minor = PSM2_VERNO_MINOR;
- *
- *     int err = psm2_error_register_handler(NULL,  // Global handler
- *                                  PSM2_ERRHANDLER_NO_HANDLER); // return errors
- *     if (err) {
- *        fprintf(stderr, "Couldn't register global handler: %s\n",
- *		          psm2_error_get_string(err));
- *        return -1;
- *     }
- *
- *     err = psm2_init(&verno_major, &verno_minor);
- *     if (err || verno_major > PSM2_VERNO_MAJOR) {
- *        if (err)
- *	      fprintf(stderr, "PSM2 initialization failure: %s\n",
- *	              psm2_error_get_string(err));
- *	  else
- *	      fprintf(stderr, "PSM2 loaded an unexpected/unsupported "
- *	                      "version (%d.%d)\n", verno_major, verno_minor);
- *	  return -1;
- *     }
- *
- *     // We were able to initialize PSM2 but will defer all further error
- *     // handling since most of the errors beyond this point will be fatal.
- *     int err = psm2_error_register_handler(NULL,  // Global handler
- *                                           PSM2_ERRHANDLER_PSM2_HANDLER);
- *     if (err) {
- *        fprintf(stderr, "Couldn't register global errhandler: %s\n",
- *		          psm2_error_get_string(err));
- *        return -1;
- *     }
- *     return 1;
- * }
- * @endverbatim
+ * @code{.c}
+   	// In this example, we want to handle our own errors before doing init,
+   	// since we don't want a fatal error if OPA is not found.
+   	// Note that @ref psm2_error_register_handler (and @ref psm2_uuid_generate)
+   	// are the only function that can be called before @ref psm2_init
+   	
+   	int try_to_initialize_psm() {
+   	    int verno_major = PSM2_VERNO_MAJOR;
+   	    int verno_minor = PSM2_VERNO_MINOR;
+   	
+   	    int err = psm2_error_register_handler(NULL,  // Global handler
+   	                                 PSM2_ERRHANDLER_NO_HANDLER); // return errors
+   	    if (err) {
+   	       fprintf(stderr, "Couldn't register global handler: %s\n",
+   	   	          psm2_error_get_string(err));
+   	       return -1;
+   	    }
+   	
+   	    err = psm2_init(&verno_major, &verno_minor);
+   	    if (err || verno_major > PSM2_VERNO_MAJOR) {
+   	       if (err)
+   	         fprintf(stderr, "PSM2 initialization failure: %s\n",
+   	                 psm2_error_get_string(err));
+   	     else
+   	         fprintf(stderr, "PSM2 loaded an unexpected/unsupported "
+   	                         "version (%d.%d)\n", verno_major, verno_minor);
+   	     return -1;
+   	    }
+   	
+   	    // We were able to initialize PSM2 but will defer all further error
+   	    // handling since most of the errors beyond this point will be fatal.
+   	    int err = psm2_error_register_handler(NULL,  // Global handler
+   	                                          PSM2_ERRHANDLER_PSM2_HANDLER);
+   	    if (err) {
+   	       fprintf(stderr, "Couldn't register global errhandler: %s\n",
+   	   	          psm2_error_get_string(err));
+   	       return -1;
+   	    }
+   	    return 1;
+   	}
+   @endcode
  */
 psm2_error_t psm2_init(int *api_verno_major, int *api_verno_minor);
 
@@ -515,9 +514,10 @@ typedef psm2_error_t(*psm2_ep_errhandler_t) (psm2_ep_t ep,
 					   const char *error_string,
 					   psm2_error_token_t token);
 
-/* Obsolete names, only here for backwards compatibility */
 #define PSM2_ERRHANDLER_DEFAULT	((psm2_ep_errhandler_t)-1)
+/**< Obsolete names, only here for backwards compatibility */
 #define PSM2_ERRHANDLER_NOP	((psm2_ep_errhandler_t)-2)
+/**< Obsolete names, only here for backwards compatibility */
 
 #define PSM2_ERRHANDLER_PSM_HANDLER  ((psm2_ep_errhandler_t)-1)
 /**< PSM2 error handler as explained in @ref error_handling */
@@ -531,7 +531,7 @@ typedef psm2_error_t(*psm2_ep_errhandler_t) (psm2_ep_t ep,
 /** @brief PSM2 error handler registration
  *
  * Function to register error handlers on a global basis and on a per-endpoint
- * basis.  PSM2_ERRHANDLER_PSM2_HANDLER and PSM2_ERRHANDLER_NO_HANDLER are special
+ * basis.  PSM2_ERRHANDLER_PSM_HANDLER and PSM2_ERRHANDLER_NO_HANDLER are special
  * pre-defined handlers to respectively enable use of the default PSM-internal
  * handler or the no-handler that disables registered error handling and
  * returns all errors to the caller (both are documented in @ref
@@ -541,7 +541,7 @@ typedef psm2_error_t(*psm2_ep_errhandler_t) (psm2_ep_t ep,
  *               registered.  With ep set to @c NULL, the behavior of the
  *               global error handler can be controlled.
  * @param[in] errhandler Handler to register.  Can be a user-specific error
- *                       handling function or PSM2_ERRHANDLER_PSM2_HANDLER or
+ *                       handling function or PSM2_ERRHANDLER_PSM_HANDLER or
  *                       PSM2_ERRHANDLER_NO_HANDLER.
  *
  * @remark When ep is set to @c NULL, this is the only function that can be
@@ -758,51 +758,51 @@ struct psm2_ep_open_opts {
  * once per process and subsequent calls will fail.  Multiple endpoints per
  * process will be enabled in a future release.
  *
- * @verbatim
- * // In order to open an endpoint and participate in a job, each endpoint has
- * // to be distributed a unique 16-byte UUID key from an out-of-band source.
- * // Presumably this can come from the parallel spawning utility either
- * // indirectly through an implementors own spawning interface or as in this
- * // example, the UUID is set as a string in an environment variable
- * // propagated to all endpoints in the job.
- *
- * int try_to_open_psm2_endpoint(psm2_ep_t *ep, // output endpoint handle
- *                              psm2_epid_t *epid, // output endpoint identifier
- *                              int unit)  // unit of our choice
- * {
- *    psm2_ep_open_opts epopts;
- *    psm2_uuid_t job_uuid;
- *    char *c;
- *
- *    // Let PSM2 assign its default values to the endpoint options.
- *    psm2_ep_open_opts_get_defaults(&epopts);
- *
- *    // We want a stricter timeout and a specific unit
- *    epopts.timeout = 15*1e9;  // 15 second timeout
- *    epopts.unit = unit;	// We want a specific unit, -1 would let PSM
- *                              // choose the unit for us.
- *    epopts.port = port;	// We want a specific unit, <= 0 would let PSM
- *                              // choose the port for us.
- *    // We've already set affinity, don't let PSM2 do so if it wants to.
- *    if (epopts.affinity == PSM2_EP_OPEN_AFFINITY_SET)
- *       epopts.affinity = PSM2_EP_OPEN_AFFINITY_SKIP;
- *
- *    // ENDPOINT_UUID is set to the same value in the environment of all the
- *    // processes that wish to communicate over PSM2 and was generated by
- *    // the process spawning utility
- *    c = getenv("ENDPOINT_UUID");
- *    if (c && *c)
- *       implementor_string_to_16byte_packing(c, job_uuid);
- *    else {
- *       fprintf(stderr, "Can't find UUID for endpoint\n);
- *       return -1;
- *    }
- *
- *    // Assume we don't want to handle errors here.
- *    psm2_ep_open(job_uuid, &epopts, ep, epid);
- *    return 1;
- * }
- * @endverbatim
+ * @code{.c}
+    	// In order to open an endpoint and participate in a job, each endpoint has
+    	// to be distributed a unique 16-byte UUID key from an out-of-band source.
+    	// Presumably this can come from the parallel spawning utility either
+    	// indirectly through an implementors own spawning interface or as in this
+    	// example, the UUID is set as a string in an environment variable
+    	// propagated to all endpoints in the job.
+    	
+    	int try_to_open_psm2_endpoint(psm2_ep_t *ep, // output endpoint handle
+    	                             psm2_epid_t *epid, // output endpoint identifier
+    	                             int unit)  // unit of our choice
+    	{
+    	   psm2_ep_open_opts epopts;
+    	   psm2_uuid_t job_uuid;
+    	   char *c;
+    	
+    	   // Let PSM2 assign its default values to the endpoint options.
+    	   psm2_ep_open_opts_get_defaults(&epopts);
+    	
+    	   // We want a stricter timeout and a specific unit
+    	   epopts.timeout = 15*1e9;  // 15 second timeout
+    	   epopts.unit = unit;	// We want a specific unit, -1 would let PSM
+    	                             // choose the unit for us.
+    	   epopts.port = port;	// We want a specific unit, <= 0 would let PSM
+    	                             // choose the port for us.
+    	   // We've already set affinity, don't let PSM2 do so if it wants to.
+    	   if (epopts.affinity == PSM2_EP_OPEN_AFFINITY_SET)
+    	      epopts.affinity = PSM2_EP_OPEN_AFFINITY_SKIP;
+    	
+    	   // ENDPOINT_UUID is set to the same value in the environment of all the
+    	   // processes that wish to communicate over PSM2 and was generated by
+    	   // the process spawning utility
+    	   c = getenv("ENDPOINT_UUID");
+    	   if (c && *c)
+    	      implementor_string_to_16byte_packing(c, job_uuid);
+    	   else {
+    	      fprintf(stderr, "Can't find UUID for endpoint\n);
+    	      return -1;
+    	   }
+    	
+    	   // Assume we don't want to handle errors here.
+    	   psm2_ep_open(job_uuid, &epopts, ep, epid);
+    	   return 1;
+    	}
+   @endcode
  */
 psm2_error_t
 psm2_ep_open(const psm2_uuid_t unique_job_key,
@@ -972,31 +972,32 @@ psm2_map_nid_hostname(int num, const uint64_t *nids, const char **hostnames);
  * @returns PSM2_OK  The entire set of endpoint IDs were successfully connected
  *                  and endpoint addresses are available for all endpoint IDs.
  *
- * @verbatim
- * int connect_endpoints(psm2_ep_t ep, int numep,
- *                       const psm2_epid_t *array_of_epid,
- *                       psm2_epaddr_t **array_of_epaddr_out)
- * {
- *     psm2_error_t *errors = (psm2_error_t *) calloc(numep, sizeof(psm2_error_t));
- *     if (errors == NULL)
- *         return -1;
- *
- *     psm2_epaddr_t *all_epaddrs =
- *              (psm2_epaddr_t *) calloc(numep, sizeof(psm2_epaddr_t));
- *
- *     if (all_epaddrs == NULL)
- *         return -1;
- *
- *     psm2_ep_connect(ep, numep, array_of_epid,
- *                    NULL, // We want to connect all epids, no mask needed
- *                    errors,
- *                    all_epaddrs,
- *                    30*e9); // 30 second timeout, <1 ns is forever
- *     *array_of_epaddr_out = all_epaddrs;
- *     free(errors);
- *     return 1;
- * }
- * @endverbatim */
+ * @code{.c}
+   	int connect_endpoints(psm2_ep_t ep, int numep,
+   	                      const psm2_epid_t *array_of_epid,
+   	                      psm2_epaddr_t **array_of_epaddr_out)
+   	{
+   	    psm2_error_t *errors = (psm2_error_t *) calloc(numep, sizeof(psm2_error_t));
+   	    if (errors == NULL)
+   	        return -1;
+   	
+   	    psm2_epaddr_t *all_epaddrs =
+   	             (psm2_epaddr_t *) calloc(numep, sizeof(psm2_epaddr_t));
+   	
+   	    if (all_epaddrs == NULL)
+   	        return -1;
+   	
+   	    psm2_ep_connect(ep, numep, array_of_epid,
+   	                   NULL, // We want to connect all epids, no mask needed
+   	                   errors,
+   	                   all_epaddrs,
+   	                   30*e9); // 30 second timeout, <1 ns is forever
+   	    *array_of_epaddr_out = all_epaddrs;
+   	    free(errors);
+   	    return 1;
+   	}
+   @endcode
+ */
 psm2_error_t
 psm2_ep_connect(psm2_ep_t ep, int num_of_epid, const psm2_epid_t *array_of_epid,
 		   const int *array_of_epid_mask, psm2_error_t *array_of_errors,
@@ -1102,8 +1103,6 @@ void *psm2_epaddr_getctxt(psm2_epaddr_t epaddr);
 /* PSM2_COMPONENT_MQ options (deprecates psm2_mq_set|getopt) */
 /* MQ options that can be set in psm2_mq_init and psm2_{set,get}_opt */
 #define PSM2_MQ_OPT_RNDV_IB_SZ       0x301
-#define PSM2_MQ_RNDV_HFI_SZ          PSM2_MQ_OPT_RNDV_IB_SZ
-#define PSM2_MQ_RNDV_IPATH_SZ        PSM2_MQ_OPT_RNDV_IB_SZ
   /**< [@b uint32_t ] Size at which to start enabling rendezvous
    * messaging for OPA messages (if unset, defaults to values
    * between 56000 and 72000 depending on the system configuration)
@@ -1111,6 +1110,8 @@ void *psm2_epaddr_getctxt(psm2_epaddr_t epaddr);
    * component object: PSM2 Matched Queue (@ref psm2_mq_t).
    * option value: Size at which to switch to rendezvous protocol.
    */
+#define PSM2_MQ_RNDV_HFI_SZ          PSM2_MQ_OPT_RNDV_IB_SZ
+#define PSM2_MQ_RNDV_IPATH_SZ        PSM2_MQ_OPT_RNDV_IB_SZ
 
 #define PSM2_MQ_OPT_RNDV_SHM_SZ      0x302
 #define PSM2_MQ_RNDV_SHM_SZ          PSM2_MQ_OPT_RNDV_SHM_SZ

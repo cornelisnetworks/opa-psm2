@@ -373,6 +373,19 @@ ips_opp_path_rec(struct ips_proto *proto,
 		goto fail;
 	}
 
+	/* Once we have the high-priority path, set the partition key */
+	if (hfi_set_pkey(proto->ep->context.ctrl,
+			 (uint16_t) pathgrp->pg_path[0][IPS_PATH_HIGH_PRIORITY]->pr_pkey) != 0) {
+		err = psmi_handle_error(proto->ep, PSM2_EP_DEVICE_FAILURE,
+					"Couldn't set device pkey 0x%x: %s",
+					(int)pathgrp->pg_path[0][IPS_PATH_HIGH_PRIORITY]->pr_pkey,
+					strerror(errno));
+		psmi_free(elid.key);
+		psmi_free(pathgrp);
+		goto fail;
+	}
+
+
 	/* Next setup the bulk paths. If the subnet administrator has misconfigured
 	 * or rather not configured two separate service IDs we place the bulk
 	 * paths in the same vFabric as the control paths.

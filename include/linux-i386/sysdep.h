@@ -136,7 +136,7 @@ static __inline__ void ips_sync_reads()
 }
 
 static __inline__ uint32_t ips_cmpxchg(volatile uint32_t *ptr,
-				       uint32_t old, uint32_t new)
+				       uint32_t old_val, uint32_t new_val)
 {
 	uint32_t prev;
 	struct xchg_dummy {
@@ -144,7 +144,7 @@ static __inline__ uint32_t ips_cmpxchg(volatile uint32_t *ptr,
 	};
 
 	asm volatile (LOCK_PREFIX "cmpxchgl %1,%2" : "=a"(prev)
-		      : "q"(new), "m"(*(struct xchg_dummy *)ptr), "0"(old)
+		      : "q"(new_val), "m"(*(struct xchg_dummy *)ptr), "0"(old_val)
 		      : "memory");
 
 	return prev;

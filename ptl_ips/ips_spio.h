@@ -58,7 +58,7 @@
 
 #include "psm_user.h"
 
-#define IPS_CTXT_RESET_MAX	5	/* max send context reset */
+#define IPS_CTXT_RESET_MAX	1000	/* max send context reset */
 struct ips_spio;
 struct ptl;
 

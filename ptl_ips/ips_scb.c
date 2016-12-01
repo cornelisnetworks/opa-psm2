@@ -53,6 +53,7 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
+#include "common_defines.h"
 #include "psm_user.h"
 #include "ips_proto.h"
 #include "ips_scb.h"
@@ -225,13 +226,13 @@ int ips_scbctrl_bufalloc(ips_scb_t *scb)
 	struct ips_scbctrl *scbc = scb->scbc;
 
 	psmi_assert(scbc->sbuf_num > 0);
-	psmi_assert(!((scb->payload >= scbc->sbuf_buf_base) &&
-			     (scb->payload <= scbc->sbuf_buf_last)));
+	psmi_assert(!((ips_scb_buffer(scb) >= scbc->sbuf_buf_base) &&
+			     (ips_scb_buffer(scb) <= scbc->sbuf_buf_last)));
 	psmi_assert(scb->payload_size <= scbc->sbuf_buf_size);
 
 	if (scb->payload_size <= scbc->scb_imm_size) {
 		/* Attach immediate buffer */
-		scb->payload = scb->imm_payload;
+		ips_scb_buffer(scb) = scb->imm_payload;
 		return 1;
 	}
 
@@ -239,7 +240,7 @@ int ips_scbctrl_bufalloc(ips_scb_t *scb)
 		return 0;
 	else {
 		psmi_assert(scbc->sbuf_num_cur);
-		scb->payload = SLIST_FIRST(&scbc->sbuf_free);
+		ips_scb_buffer(scb) = SLIST_FIRST(&scbc->sbuf_free);
 		scbc->sbuf_num_cur--;
 
 		/* If under memory pressure request ACK for packet to reclaim
@@ -248,7 +249,7 @@ int ips_scbctrl_bufalloc(ips_scb_t *scb)
 		if (scbc->sbuf_num_cur < (scbc->sbuf_num >> 1))
 			scb->flags |= IPS_SEND_FLAG_ACKREQ;
 
-		VALGRIND_MEMPOOL_ALLOC(scbc->sbuf_buf_alloc, scb->payload,
+		VALGRIND_MEMPOOL_ALLOC(scbc->sbuf_buf_alloc, ips_scb_buffer(scb),
 				       scb->payload_size);
 		SLIST_REMOVE_HEAD(&scbc->sbuf_free, next);
 		return 1;
@@ -260,7 +261,7 @@ int ips_scbctrl_avail(struct ips_scbctrl *scbc)
 	return (!SLIST_EMPTY(&scbc->scb_free) && scbc->sbuf_num_cur > 0);
 }
 
-ips_scb_t *ips_scbctrl_alloc(struct ips_scbctrl *scbc, int scbnum, int len,
+ips_scb_t *MOCKABLE(ips_scbctrl_alloc)(struct ips_scbctrl *scbc, int scbnum, int len,
 			     uint32_t flags)
 {
 	ips_scb_t *scb, *scb_head = NULL;
@@ -282,7 +283,7 @@ ips_scb_t *ips_scbctrl_alloc(struct ips_scbctrl *scbc, int scbnum, int len,
 			if (!ips_scbctrl_bufalloc(scb))
 				break;
 		} else {
-			scb->payload = NULL;
+			ips_scb_buffer(scb) = NULL;
 			scb->payload_size = 0;
 		}
 
@@ -302,18 +303,19 @@ ips_scb_t *ips_scbctrl_alloc(struct ips_scbctrl *scbc, int scbnum, int len,
 	}
 	return scb_head;
 }
+MOCK_DEF_EPILOGUE(ips_scbctrl_alloc);
 
 void ips_scbctrl_free(ips_scb_t *scb)
 {
 	struct ips_scbctrl *scbc = scb->scbc;
-	if (scbc->sbuf_num && (scb->payload >= scbc->sbuf_buf_base) &&
-	    (scb->payload <= scbc->sbuf_buf_last)) {
+	if (scbc->sbuf_num && (ips_scb_buffer(scb) >= scbc->sbuf_buf_base) &&
+	    (ips_scb_buffer(scb) <= scbc->sbuf_buf_last)) {
 		scbc->sbuf_num_cur++;
 		SLIST_INSERT_HEAD(&scbc->sbuf_free, scb->sbuf, next);
-		VALGRIND_MEMPOOL_FREE(scbc->sbuf_buf_alloc, scb->payload);
+		VALGRIND_MEMPOOL_FREE(scbc->sbuf_buf_alloc, ips_scb_buffer(scb));
 	}
 
-	scb->payload = NULL;
+	ips_scb_buffer(scb) = NULL;
 	scb->tidsendc = NULL;
 	scb->payload_size = 0;
 	scbc->scb_num_cur++;
@@ -328,7 +330,7 @@ void ips_scbctrl_free(ips_scb_t *scb)
 	return;
 }
 
-ips_scb_t *ips_scbctrl_alloc_tiny(struct ips_scbctrl *scbc)
+ips_scb_t *MOCKABLE(ips_scbctrl_alloc_tiny)(struct ips_scbctrl *scbc)
 {
 	ips_scb_t *scb;
 	if (SLIST_EMPTY(&scbc->scb_free))
@@ -339,7 +341,7 @@ ips_scb_t *ips_scbctrl_alloc_tiny(struct ips_scbctrl *scbc)
 	SLIST_REMOVE_HEAD(&scbc->scb_free, next);
 	SLIST_NEXT(scb, next) = NULL;
 
-	scb->payload = NULL;
+	ips_scb_buffer(scb) = NULL;
 	scb->payload_size = 0;
 	scb->flags = 0;
 	scb->tidsendc = NULL;
@@ -353,3 +355,4 @@ ips_scb_t *ips_scbctrl_alloc_tiny(struct ips_scbctrl *scbc)
 		scb->flags |= IPS_SEND_FLAG_ACKREQ;
 	return scb;
 }
+MOCK_DEF_EPILOGUE(ips_scbctrl_alloc_tiny);

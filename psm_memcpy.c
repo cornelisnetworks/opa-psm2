@@ -58,7 +58,7 @@
 #include <stdint.h>
 #include <string.h>
 
-extern void psmi_mq_mtucpy(void *vdest, const void *vsrc, uint32_t nchars);
+#include "psm_mq_internal.h"
 
 void *psmi_memcpyo(void *dst, const void *src, size_t n)
 {

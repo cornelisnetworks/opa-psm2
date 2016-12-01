@@ -378,7 +378,7 @@ uintptr_t psmi_getpagesize(void)
 	return pagesz;
 }
 
-/* If PSM_VERBOSE_ENV is set in the environment, we determine
+/* If PSM2_VERBOSE_ENV is set in the environment, we determine
  * what its verbose level is and print the environment at "INFO"
  * level if the environment's level matches the desired printlevel.
  */
@@ -625,7 +625,7 @@ int psmi_parse_memmode(void)
 		 !strcasecmp(env_mmode.e_str, "big"))
 		return PSMI_MEMMODE_LARGE;
 	else {
-		_HFI_PRDBG("PSM_MEMORY env value %s unrecognized, "
+		_HFI_PRDBG("PSM2_MEMORY env value %s unrecognized, "
 			   "using 'normal' memory mode instead\n",
 			   env_mmode.e_str);
 		return PSMI_MEMMODE_NORMAL;
@@ -669,7 +669,7 @@ psmi_parse_mpool_env(const psm2_mq_t mq, int level,
 	val = env_val.e_uint;
 	if (val < rlim->minval || val > rlim->maxval) {
 		err = psmi_handle_error(NULL, PSM2_PARAM_ERR,
-					"Env. var %s=%u is invalid (valid settings in mode PSM_MEMORY=%s"
+					"Env. var %s=%u is invalid (valid settings in mode PSM2_MEMORY=%s"
 					" are inclusively between %u and %u)",
 					env, val, psmi_memmode_string(mode),
 					rlim->minval, rlim->maxval);
@@ -810,7 +810,7 @@ struct psmi_faultinj_spec {
 	unsigned long long num_faults;
 	unsigned long long num_calls;
 
-	unsigned int seedp;
+	struct drand48_data drand48_data;
 	int num;
 	int denom;
 
@@ -837,7 +837,7 @@ void psmi_faultinj_init()
 	if (psmi_faultinj_enabled) {
 		char *def = NULL;
 		if (!psmi_getenv
-		    ("PSM_FI_TRACEFILE", "PSM Fault Injection output file",
+		    ("PSM2_FI_TRACEFILE", "PSM Fault Injection output file",
 		     PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_STR,
 		     (union psmi_envvar_val)def, &env_fi)) {
 			psmi_faultinj_outfile = psmi_strdup(NULL, env_fi.e_str);
@@ -876,7 +876,7 @@ void psmi_faultinj_fini()
 
 	if (fp != NULL) {
 		STAILQ_FOREACH(fi, &psmi_faultinj_head, next) {
-			fprintf(fp, "%s:%s PSM_FI_%-12s %2.3f%% => "
+			fprintf(fp, "%s:%s PSM2_FI_%-12s %2.3f%% => "
 				"%2.3f%% %10lld faults/%10lld events\n",
 				__progname, __hfi_mylabel, fi->spec_name,
 				(double)fi->num * 100.0 / fi->denom,
@@ -941,7 +941,7 @@ struct psmi_faultinj_spec *psmi_faultinj_getspec(char *spec_name, int num,
 		snprintf(fvals_str, sizeof(fvals_str) - 1, "%d:%d:1", num,
 			 denom);
 		fvals_str[sizeof(fvals_str) - 1] = '\0';
-		snprintf(fname, sizeof(fname) - 1, "PSM_FI_%s", spec_name);
+		snprintf(fname, sizeof(fname) - 1, "PSM2_FI_%s", spec_name);
 		fname[sizeof(fname) - 1] = '\0';
 		snprintf(fdesc, sizeof(fdesc) - 1, "Fault Injection %s <%s>",
 			 fname, fvals_str);
@@ -957,7 +957,7 @@ struct psmi_faultinj_spec *psmi_faultinj_getspec(char *spec_name, int num,
 			if (n_parsed >= 2)
 				fi->denom = fvals[1];
 			if (n_parsed >= 3)
-				fi->seedp = fvals[2];
+				srand48_r((long int) fvals[2], &fi->drand48_data);
 		}
 	}
 
@@ -967,15 +967,15 @@ struct psmi_faultinj_spec *psmi_faultinj_getspec(char *spec_name, int num,
 
 int psmi_faultinj_is_fault(struct psmi_faultinj_spec *fi)
 {
-	int r;
 	if (!psmi_faultinj_enabled)	/* never fault if disabled */
 		return 0;
 	if (fi->num == 0)
 		return 0;
 
 	fi->num_calls++;
-	r = rand_r(&fi->seedp);
-	if (r % fi->denom <= fi->num) {
+	long int rnum;
+	lrand48_r(&fi->drand48_data, &rnum);
+	if (((int) (rnum % INT_MAX)) % fi->denom <= fi->num) {
 		fi->num_faults++;
 		return 1;
 	} else
@@ -1538,7 +1538,7 @@ psmi_coreopt_ctl(const void *core_obj, int optname,
 		break;
 	default:
 		/* Unknown/unrecognized option */
-		snprintf(err_string, 256, "Unknown PSM_CORE option %u.",
+		snprintf(err_string, 256, "Unknown PSM2_CORE option %u.",
 			 optname);
 		goto fail;
 	}
@@ -1600,7 +1600,7 @@ psmi_amopt_ctl(const void *am_obj, int optname,
 	default:
 		err =
 		    psmi_handle_error(NULL, PSM2_PARAM_ERR,
-				      "Unknown PSM_AM option %u.", optname);
+				      "Unknown PSM2_AM option %u.", optname);
 	}
 
 	return err;
@@ -1629,7 +1629,7 @@ psm2_error_t psmi_am_getopt(const void *am_obj, int optname,
 
 /* A treeNode is used to store the list of Function Name Lists that
    are passed to the PSM_LOG facility via environment variables.
-   See psm_log.h for more information. 
+   See psm_log.h for more information.
 
    Note that treeNode is a node in a binary tree data structre. */
 typedef struct _treeNode

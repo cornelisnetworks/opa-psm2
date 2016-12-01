@@ -96,52 +96,46 @@
  *    to register, PSM picks a victim to remove.
  */
 
-/*
- * Red-Black tid cache definition.
- */
-typedef struct _cl_map_item {
-	struct _cl_map_item	*p_left;	/* left pointer */
-	struct _cl_map_item	*p_right;	/* right pointer */
-	struct _cl_map_item	*p_up;		/* up pointer */
+typedef struct
+{
 	unsigned long		start;		/* start virtual address */
 	uint32_t		tidinfo;	/* tid encoding */
 	uint16_t		length;		/* length in pages */
-	uint16_t		color;		/* red-black color */
 	uint16_t		invalidate;	/* invalidate flag */
 	uint16_t		refcount;	/* usage reference count */
 	uint16_t		i_prev;		/* idle queue previous */
 	uint16_t		i_next;		/* idle queue next */
-} cl_map_item_t;
+} rbtree_tidcache_mapitem_pl_t;
 
-typedef struct _cl_qmap {
-	cl_map_item_t		*root;		/* root node pointer */
-	cl_map_item_t		*nil_item;	/* terminator node pointer */
+typedef struct {
 	uint32_t		ntid;		/* tids are cached */
 	uint32_t		nidle;		/* tids are idle */
-} cl_qmap_t;
+} rbtree_tidcache_map_pl_t;
 
+#define RBTREE_MI_PL  rbtree_tidcache_mapitem_pl_t
+#define RBTREE_MAP_PL rbtree_tidcache_map_pl_t
+
+#include "rbtree.h"
 
 /*
  * Macro definition for easy programming.
  */
-#define CL_MAP_RED		0
-#define CL_MAP_BLACK		1
 
-#define NTID			p_map->ntid
-#define REFCNT(x)		p_map->root[x].refcount
-#define INVALIDATE(x)		p_map->root[x].invalidate
+#define NTID			p_map->payload.ntid
+#define REFCNT(x)		p_map->root[x].payload.refcount
+#define INVALIDATE(x)		p_map->root[x].payload.invalidate
 
-#define LENGTH(x)		p_map->root[x].length
-#define START(x)		p_map->root[x].start
+#define LENGTH(x)		p_map->root[x].payload.length
+#define START(x)		p_map->root[x].payload.start
 #define END(x)			(START(x) + (LENGTH(x)<<12))
 
 /*
  * Macro for idle tid queue management.
  */
-#define NIDLE			p_map->nidle
+#define NIDLE			p_map->payload.nidle
 #define IHEAD			0
-#define INEXT(x)		p_map->root[x].i_next
-#define IPREV(x)		p_map->root[x].i_prev
+#define INEXT(x)		p_map->root[x].payload.i_next
+#define IPREV(x)		p_map->root[x].payload.i_prev
 
 #define IDLE_REMOVE(x)		do {					\
 					INEXT(IPREV(x)) = INEXT(x);	\
@@ -157,25 +151,8 @@ typedef struct _cl_qmap {
 					NIDLE++;			\
 				} while (0)
 
-
-#define IN
-#define OUT
-#define ASSERT			psmi_assert
-void ips_cl_qmap_insert_item(
-				IN	cl_qmap_t* const	p_map,
-				IN	cl_map_item_t* const	p_item);
-void ips_cl_qmap_remove_item(
-				IN	cl_qmap_t* const	p_map,
-				IN	cl_map_item_t* const	p_item);
-cl_map_item_t* ips_cl_qmap_successor(
-				IN	cl_qmap_t* const	p_map,
-				IN	const cl_map_item_t*	p_item);
-cl_map_item_t* ips_cl_qmap_predecessor(
-				IN	cl_qmap_t* const	p_map,
-				IN	const cl_map_item_t*	p_item);
-cl_map_item_t* ips_cl_qmap_search(
-				IN	cl_qmap_t* const	p_map,
-				IN	unsigned long		start,
-				IN	unsigned long		end);
+extern void ips_tidcache_map_init(cl_qmap_t		*p_map,
+				  cl_map_item_t* const	root,
+				  cl_map_item_t* const	nil_item);
 
 #endif
