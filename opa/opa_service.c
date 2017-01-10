@@ -88,8 +88,10 @@ typedef union
 
 static sw_version_t sw_version =
 {
+	{
 	.major = HFI1_USER_SWMAJOR,
-	.minor = HFI1_USER_SWMINOR,
+	.minor = HFI1_USER_SWMINOR
+	}
 };
 
 /*

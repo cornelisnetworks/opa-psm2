@@ -58,6 +58,18 @@
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
 
+static uint32_t hfi1_supports_dma_no_hdrsupp_for_msgs_leq_8dw = 0;
+
+void
+ips_protoexp_hfi1_check_dma_no_hdrsupp_for_msgs_leq_8dw(void)
+{
+	if ((hfi_get_user_major_version() >  6) ||
+	    (hfi_get_user_major_version() == 6  &&
+	     hfi_get_user_minor_version() >= 3)) {
+		hfi1_supports_dma_no_hdrsupp_for_msgs_leq_8dw = 1;
+	}
+}
+
 /*
  * Easy switch to (say) _HFI_INFO if debugging in the expected protocol is
  * needed
@@ -101,6 +113,8 @@ ips_protoexp_init(const psmi_context_t *context,
 		  int num_of_send_bufs,
 		  int num_of_send_desc, struct ips_protoexp **protoexp_o)
 {
+	ips_protoexp_hfi1_check_dma_no_hdrsupp_for_msgs_leq_8dw();
+
 	struct ips_protoexp *protoexp = NULL;
 	uint32_t tidmtu_max;
 	psm2_error_t err = PSM2_OK;
@@ -959,6 +973,15 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 	 * 3. first tid (i) has tidctrl=1;
 	 * 4. second tid (i+1) has tidctrl=2;
 	 * 5. total length does not exceed 512 pages (2M);
+	 *
+	 * The restriction of 512 pages comes from the limited number
+	 * of bits we have for KDETH.OFFSET:
+	 *   - The entire mapping space provided through TIDs is to be
+	 *     viewed as a zero-based address mapping.
+	 *   - We have 15 bits in KDETH offset field through which we
+	 *     can address upto a maximum of 2MB.
+	 *     (with 64-byte offset mode or KDETH.OM = 1)
+	 *   - Assuming a 4KB page size, 2MB/4KB = 512 pages.
 	 */
 	psmi_mq_mtucpy(&tidsendc->tid_list, tid_list,
 			sizeof(ips_tid_session_list));
@@ -973,8 +996,14 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 		if ((((dst[j]>>IPS_TIDINFO_TIDCTRL_SHIFT)+1) ==
 		      (src[i]>>IPS_TIDINFO_TIDCTRL_SHIFT)) &&
 		    (((dst[j]&IPS_TIDINFO_LENGTH_MASK)+
-		      (src[i]&IPS_TIDINFO_LENGTH_MASK)) <= 512)) {
-			/* merge 'i' to 'j' */
+		      (src[i]&IPS_TIDINFO_LENGTH_MASK)) <=
+				PSM_MAX_NUM_PAGES_IN_TIDPAIR)) {
+			/*
+			 * merge 'i' to 'j'
+			 * (We need to specify "tidctrl" value as 3
+			 *  if we merge the individual tid-pairs.
+			 *  Doing that here)
+			 */
 			dst[j] += (2 << IPS_TIDINFO_TIDCTRL_SHIFT) +
 				(src[i] & IPS_TIDINFO_LENGTH_MASK);
 			i++;
@@ -1180,6 +1209,11 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 	 * right location, if we don't complete the transfer */
 	tidsendc->buffer = bufptr + chunk_size;
 	tidsendc->tidbytes += chunk_size;
+
+	if (flow->transfer == PSM_TRANSFER_DMA &&
+		hfi1_supports_dma_no_hdrsupp_for_msgs_leq_8dw) {
+		is_payload_per_frag_leq_8dw = 0;
+	}
 
 	/* If last packet, we want a completion notification */
 	if (!tidsendc->remaining_tidbytes) {
@@ -1398,9 +1432,20 @@ ips_tid_recv_alloc_frag(struct ips_protoexp *protoexp,
 			goto fail;
 	}
 
-	/* PSM only provides max 512 tid-pair storage. */
+	/*
+	 * PSM2 currently provides storage space enough to hold upto
+	 * 1024 tids. (PSM_TIDLIST_BUFSIZE). So, make sure we
+	 * don't get more than what we can hold from the tidcache here.
+	 *
+	 * The reason for 1024 tids comes from the PSM_TID_WINSIZE value
+	 * (currently 4MB. So, if in future, there is a change to this macro,
+	 * then you would need a change to PSM_TIDLIST_BUFSIZE as well).
+	 *
+	 * Assuming a 4KB page size, to be able to receive
+	 * a message of 4MB size, we'd need an maximum of 4MB/4KB = 1024 tids.
+	 */
 	psmi_assert(num_tids > 0);
-	psmi_assert(num_tids <= 512);
+	psmi_assert(num_tids <= (PSM_TID_WINSIZE/PSM_TIDLIST_BUFSIZE));
 	if (reglen > pagelen) {
 		err = psmi_handle_error(protoexp->tidc.context->ep,
 			    PSM2_EP_DEVICE_FAILURE,

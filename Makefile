@@ -267,9 +267,13 @@ specfile:
 			-e 's:@LIBPSM2_COMPAT_CONF_DIR@:'${LIBPSM2_COMPAT_CONF_DIR}':g' \
 			-e 's:@LIBPSM2_COMPAT_SYM_CONF_DIR@:'${LIBPSM2_COMPAT_SYM_CONF_DIR}':g' \
 			-e 's/@SPEC_FILE_RELEASE_DIST@/'${SPEC_FILE_RELEASE_DIST}'/g'  \
-			-e 's;@40_PSM_RULES@;'${UDEV_40_PSM_RULES}';g' \
 			-e 's/@DIST_SHA@/'${DIST_SHA}'/g' > \
 		${RPM_NAME}.spec
+	if [ -f /etc/redhat-release ] && [ `grep -o "[0-9.]*" /etc/redhat-release | cut -d"." -f1` -lt 7 ]; then \
+		sed -i 's;@40_PSM_RULES@;'${UDEVDIR}'/rules.d/40-psm.rules;g' ${RPM_NAME}.spec; \
+	else \
+		sed -i 's;@40_PSM_RULES@;'${UDEV_40_PSM_RULES}';g' ${RPM_NAME}.spec; \
+	fi
 
 dist: distclean
 	mkdir -p ${DIST}

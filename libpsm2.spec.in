@@ -67,7 +67,10 @@ Source0: %{name}-%{version}.tar.gz
 # The OPA product is supported on x86 64 only:
 ExclusiveArch: x86_64
 BuildRequires: libuuid-devel
+
+%if 0%{?rhel}==0 || 0%{?rhel} > 6
 BuildRequires: systemd
+%endif
 BuildRequires: gcc
 Provides: hfi1-psm
 Obsoletes: hfi1-psm < 1.0.0
@@ -115,6 +118,9 @@ make %{?_smp_mflags}
 %postun -p /sbin/ldconfig
 
 %files
+%if 0%{?rhel} && 0%{?rhel} < 7
+%{!?_licensedir:%global license %doc}
+%endif
 %license COPYING
 %{_libdir}/@TARGLIB@.so.@MAJOR@.@MINOR@
 %{_libdir}/@TARGLIB@.so.@MAJOR@
@@ -129,7 +135,11 @@ make %{?_smp_mflags}
 
 %files compat
 %{_libdir}/psm2-compat
+%if 0%{?rhel} && 0%{?rhel} < 7
+@UDEVDIR@/rules.d/40-psm-compat.rules
+%else
 %{_udevrulesdir}/40-psm-compat.rules
+%endif
 @LIBPSM2_COMPAT_SYM_CONF_DIR@/modprobe.d/@RPM_NAME@-compat.conf
 %{_prefix}/lib/libpsm2
 

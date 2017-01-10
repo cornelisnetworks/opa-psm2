@@ -68,9 +68,11 @@ typedef void (*ips_tid_avail_cb_fn_t) (struct ips_tid *, void *context);
 /* Max tids a context can support */
 #define IPS_TID_MAX_TIDS	2048
 /* Max tid-session buffer size */
-#define PSM_TIDLIST_BUFSIZE	2048
+#define PSM_TIDLIST_BUFSIZE	4096
 /* Max tid-session window size */
 #define PSM_TID_WINSIZE		(4*1024*1024)
+/* Total number of combined pages from the Tid-pair to be merged */
+#define PSM_MAX_NUM_PAGES_IN_TIDPAIR	512
 
 struct ips_tid_ctrl {
 	pthread_spinlock_t tid_ctrl_lock;
