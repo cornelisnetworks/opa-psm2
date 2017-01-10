@@ -55,6 +55,8 @@
 
 #include <dlfcn.h>
 #include "psm_user.h"
+#include "opa_revision.h"
+#include "opa_udebug.h"
 
 static int psmi_verno_major = PSM2_VERNO_MAJOR;
 static int psmi_verno_minor = PSM2_VERNO_MINOR;
@@ -101,7 +103,6 @@ int psmi_isinitialized()
 	return (psmi_isinit == PSMI_INITIALIZED);
 }
 
-extern char psmi_hfi_revision[];
 
 psm2_error_t __psm2_init(int *major, int *minor)
 {
@@ -212,13 +213,21 @@ psm2_error_t __psm2_init(int *major, int *minor)
 	}
 
 	if (getenv("PSM2_IDENTIFY")) {
-		Dl_info info_psm, info_hfi;
-		_HFI_INFO("PSM2: %s version: %d.%d, from %s:%s\n", psmi_hfi_revision,
-			  PSM2_VERNO_MAJOR,PSM2_VERNO_MINOR,
-			  dladdr(psm2_init, &info_psm) ? info_psm.dli_fname :
-			  "libpsm2 not available",
-			  dladdr(hfi_userinit, &info_hfi) ? info_hfi.dli_fname :
-			  "libhfi not available");
+                Dl_info info_psm;
+		char ofed_delta[100] = "";
+		strcat(strcat(ofed_delta," built for OFED DELTA "),psmi_hfi_IFS_version);
+                printf("%s %s PSM2 v%d.%d%s\n"
+		       "%s %s location %s\n"
+		       "%s %s build date %s\n"
+		       "%s %s src checksum %s\n"
+                       "%s %s git checksum %s\n"
+                       "%s %s built against driver interface v%d.%d\n",
+                          hfi_get_mylabel(), hfi_ident_tag, PSM2_VERNO_MAJOR,PSM2_VERNO_MINOR, (strcmp(psmi_hfi_IFS_version,"") != 0) ? ofed_delta : "",
+                          hfi_get_mylabel(), hfi_ident_tag, dladdr(psm2_init, &info_psm) ? info_psm.dli_fname : "libpsm2 not available",
+                          hfi_get_mylabel(), hfi_ident_tag, psmi_hfi_build_timestamp,
+                          hfi_get_mylabel(), hfi_ident_tag, psmi_hfi_sources_checksum,
+			  hfi_get_mylabel(), hfi_ident_tag, (strcmp(psmi_hfi_git_checksum,"") != 0) ? psmi_hfi_git_checksum : "<not available>",
+			  hfi_get_mylabel(), hfi_ident_tag, HFI1_USER_SWMAJOR, HFI1_USER_SWMINOR);
 	}
 #ifdef PSMI_PLOCK_IS_SPINLOCK
 	psmi_spin_init(&psmi_progress_lock);
@@ -345,7 +354,7 @@ void *__psm2_epaddr_getctxt(psm2_epaddr_t epaddr)
 	void *result = NULL;
 
 	PSM2_LOG_MSG("entering");
-	/* Evetually deprecate this API to use set/get opt as this is unsafe. */
+	/* Eventually deprecate this API to use set/get opt as this is unsafe. */
 	err = psm2_getopt(PSM2_COMPONENT_CORE, (const void *)epaddr,
 			 PSM2_CORE_OPT_EP_CTXT, (void *)&result, &optlen);
 

@@ -143,7 +143,14 @@ void hfi_context_close(int fd);
 /* hfi_get_user_major_version() returns the major version of the driver
    that should be used for this session of psm. Valid only after
    hfi_context_open has been called. */
-int hfi_get_user_major_version(void);
+uint16_t hfi_get_user_major_version(void);
+
+/* hfi_get_user_minor_version() return the minor version of the driver */
+uint16_t hfi_get_user_minor_version(void);
+
+void hfi_set_user_version(uint32_t version);
+void hfi_set_user_major_version(uint16_t major_version);
+
 int hfi_cmd_write(int fd, struct hfi1_cmd *, size_t count);
 int hfi_cmd_writev(int fd, const struct iovec *iov, int iovcnt);
 

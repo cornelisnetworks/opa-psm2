@@ -284,7 +284,7 @@ ips_opp_path_rec(struct ips_proto *proto,
 	 * Mesh/Torus and DOR routed networks
 	 * ----------------------------------
 	 *
-	 * In a mesh/torus fabric we always have a non zero LMC (atleast 1 can be
+	 * In a mesh/torus fabric we always have a non zero LMC (at least 1 can be
 	 * more). We would like to take advantage of dispersive routing on these
 	 * fabrics as well to obtain better "worst case/congested" bandwidth. For
 	 * these networks currently the base LIDs are used for UPDN routing which
@@ -366,7 +366,7 @@ ips_opp_path_rec(struct ips_proto *proto,
 		psmi_free(elid.key);
 		psmi_free(pathgrp);
 		err = psmi_handle_error(NULL, PSM2_EPID_PATH_RESOLUTION,
-					"OFEF Plus path lookup failed. Unable to resolve high priority network path for LID 0x%x <---> 0x%x. Is the SM running or service ID %"
+					"OFED Plus path lookup failed. Unable to resolve high priority network path for LID 0x%x <---> 0x%x. Is the SM running or service ID %"
 					PRIx64 " defined?", ntohs(slid),
 					ntohs(dlid),
 					(uint64_t) proto->ep->service_id);
@@ -422,7 +422,7 @@ retry_normal_path_res:
 		cpath++;
 	}
 
-	/* Make sure we have atleast have a single bulk data transfer path */
+	/* Make sure we have at least have a single bulk data transfer path */
 	if (pathgrp->pg_num_paths[IPS_PATH_NORMAL_PRIORITY] == 0) {
 		psmi_free(elid.key);
 		psmi_free(pathgrp);
@@ -465,7 +465,7 @@ retry_low_path_res:
 		cpath++;
 	}
 
-	/* Make sure we have atleast have a single bulk data transfer path */
+	/* Make sure we have at least have a single bulk data transfer path */
 	if (pathgrp->pg_num_paths[IPS_PATH_LOW_PRIORITY] == 0) {
 		psmi_free(elid.key);
 		psmi_free(pathgrp);
@@ -568,7 +568,7 @@ psm2_error_t ips_opp_init(struct ips_proto *proto)
 	proto->opp_ctxt = proto->opp_fn.op_path_open(proto->device, 1);
 	if (!proto->opp_ctxt) {
 		_HFI_ERROR
-		    ("OPP: Unable to optain OPP context. Disabling OPP interface for path record queries.\n");
+		    ("OPP: Unable to obtain OPP context. Disabling OPP interface for path record queries.\n");
 		goto fail;
 	}
 
@@ -588,9 +588,9 @@ psm2_error_t ips_opp_init(struct ips_proto *proto)
 
 fail:
 	_HFI_ERROR("Make sure SM is running...\n");
-	_HFI_ERROR("Make sure service dist_sa is running...\n");
-	_HFI_ERROR("to start dist_sa: service dist_sa start\n");
-	_HFI_ERROR("or enable it at boot time: iba_config -E dist_sa\n\n");
+	_HFI_ERROR("Make sure service ibacm is running...\n");
+	_HFI_ERROR("to start ibacm: service ibacm start\n");
+	_HFI_ERROR("or enable it at boot time: opaconfig -E ibacm\n\n");
 
 	err = psmi_handle_error(NULL, PSM2_EPID_PATH_RESOLUTION,
 				"Unable to initialize OFED Plus library successfully.\n");

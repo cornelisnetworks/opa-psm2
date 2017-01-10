@@ -62,6 +62,9 @@ int ips_ptl_recvq_isempty(const struct ptl *ptl);
 
 #define PSMI_CONTEXT_STATUS_CHECK_INTERVAL_MSECS	250
 
+#define HFI1_USER_SWMAJOR_NON_DW_MUL_MSG_SIZE_ALLOWED 6
+#define HFI1_USER_SWMINOR_NON_DW_MUL_MSG_SIZE_ALLOWED 2
+
 static
 int
 ips_subcontext_ignore(const struct ips_recvhdrq_event *rcv_ev,
@@ -234,6 +237,29 @@ psmi_context_check_status_callback(struct psmi_timer *t, uint64_t current)
 	return err;
 }
 
+/*
+ * Check if non-double word multiple message size for SDMA is allowed to be
+ * pass to the driver. Starting from 6.2 driver version, PSM is able to pass
+ * to the driver message which size is not a multiple of double word for SDMA.
+ */
+ustatic
+void ips_ptl_non_dw_mul_sdma_init(void)
+{
+	uint16_t major_version = hfi_get_user_major_version();
+	uint16_t minor_version = hfi_get_user_minor_version();
+
+	if ((major_version > HFI1_USER_SWMAJOR_NON_DW_MUL_MSG_SIZE_ALLOWED) ||
+		((major_version == HFI1_USER_SWMAJOR_NON_DW_MUL_MSG_SIZE_ALLOWED) &&
+		 (minor_version >= HFI1_USER_SWMINOR_NON_DW_MUL_MSG_SIZE_ALLOWED)))
+	{
+		ips_proto_mq_set_non_dw_mul_sdma(IPS_NON_DW_MUL_ALLOWED);
+	}
+	else
+	{
+		ips_proto_mq_set_non_dw_mul_sdma(IPS_NON_DW_MUL_NOT_ALLOWED);
+	}
+}
+
 static
 psm2_error_t ips_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 {
@@ -323,6 +349,7 @@ psm2_error_t ips_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 	if ((err = ips_epstate_init(&ptl->epstate, context)))
 		goto fail;
 
+	ips_ptl_non_dw_mul_sdma_init();
 	/*
 	 * Context sharing, setup subcontext ureg page.
 	 */

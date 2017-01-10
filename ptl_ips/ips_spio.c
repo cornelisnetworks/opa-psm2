@@ -373,7 +373,7 @@ static void spio_reset_context(struct ips_spio *ctrl)
 /*
  * hfi frozen is detected when checking events from driver,
  * psm calls to check events in the main receive loop
- * when there is no normall traffic.
+ * when there is no normal traffic.
  */
 static void spio_reset_hfi_internal(struct ips_spio *ctrl)
 {
@@ -642,7 +642,7 @@ ips_spio_process_events(const struct ptl *ptl)
 	}
 
 	if (event_mask & HFI1_EVENT_LID_CHANGE) {
-		/* Display a warning that LID change has occured during
+		/* Display a warning that LID change has occurred during
 		 * the run. This is not supported in the current
 		 * implementation and in general is bad for the SM to
 		 * re-assign LIDs during a run.

@@ -70,7 +70,7 @@ typedef void (*ips_tid_avail_cb_fn_t) (struct ips_tid *, void *context);
 /* Max tid-session buffer size */
 #define PSM_TIDLIST_BUFSIZE	2048
 /* Max tid-session window size */
-#define PSM_TID_WINSIZE		(2*1024*1024)
+#define PSM_TID_WINSIZE		(4*1024*1024)
 
 struct ips_tid_ctrl {
 	pthread_spinlock_t tid_ctrl_lock;

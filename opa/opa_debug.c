@@ -89,7 +89,7 @@ static void init_hfi_mylabel(void)
 	char hostname[80];
 	char *e;
 	/* By default, try to come up with a decent default label, it will be
-	 * overriden later.  Try getting rank, if that's not available revert to
+	 * overridden later.  Try getting rank, if that's not available revert to
 	 * pid. */
 	gethostname(hostname, 80);
 	lbl[0] = '\0';

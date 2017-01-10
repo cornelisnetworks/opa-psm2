@@ -57,7 +57,7 @@
 #include "ips_proto_internal.h"
 #include "ips_epstate.h"
 
-/* The indexes are used to map a particular endpoint to a strcture at the
+/* The indexes are used to map a particular endpoint to a structure at the
  * receiver.  Although we take extra care to validate the identity of endpoints
  * when packets are received, the communication index is at an offset selected
  * by the endpoint that allocates the index.  This narrows the window of two

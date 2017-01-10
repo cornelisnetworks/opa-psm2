@@ -60,6 +60,9 @@ PSM2_VERNO_MAJOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_MAJOR.*0x0\?\([1-9a-
 PSM2_VERNO_MINOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_MINOR.*0x\([0-9]\?[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h)
 PSM2_LIB_MAJOR   := $(shell printf "%d" ${PSM2_VERNO_MAJOR})
 PSM2_LIB_MINOR   := $(shell printf "%d" `sed -n 's/^\#define.*PSM2_VERNO_MINOR.*\(0x[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h`)
+SOURCES_CHKSUM_FILES = Makefile buildflags.mak psm2_linker_script.map \
+		`find . -regex '\(.*\.h\|.*\.c\)' -not -path "./test/*" -not -path "./tools/*" -not -path "_revision.c" | sort`
+SOURCES_CHKSUM_VALUE = $(shell cat ${SOURCES_CHKSUM_FILES} | sha1sum | cut -d' ' -f 1)
 
 OPA_LIB_MAJOR := 4
 OPA_LIB_MINOR := 0
@@ -114,7 +117,7 @@ nthreads := $(shell echo $$(( `nproc` * 2 )) )
 
 DISTRO := $(shell . /etc/os-release; echo $$ID)
 
-# By defailt the following two variables have the following values:
+# By default the following two variables have the following values:
 LIBPSM2_COMPAT_CONF_DIR := /etc
 LIBPSM2_COMPAT_SYM_CONF_DIR := /etc
 SPEC_FILE_RELEASE_DIST :=#nothing
@@ -248,7 +251,9 @@ endif
 	install -m 0644 -D include/opa_service.h ${DESTDIR}/usr/include/hfi1diag/opa_service.h
 	install -m 0644 -D include/opa_common.h ${DESTDIR}/usr/include/hfi1diag/opa_common.h
 	install -m 0644 -D include/opa_byteorder.h ${DESTDIR}/usr/include/hfi1diag/opa_byteorder.h
+	install -m 0644 -D include/psm2_mock_testing.h ${DESTDIR}/usr/include/hfi1diag/psm2_mock_testing.h
 	install -m 0644 -D include/hfi1_deprecated.h ${DESTDIR}/usr/include/hfi1diag/hfi1_deprecated.h
+	install -m 0644 -D include/opa_revision.h ${DESTDIR}/usr/include/hfi1diag/opa_revision.h
 
 specfile:
 	sed -e 's/@VERSION@/'${VERSION_RELEASE}'/g' ${RPM_NAME}.spec.in | \
@@ -278,7 +283,6 @@ dist: distclean
 			-name ".gitignore"                     -prune -o	\
 			-name "doc"                            -prune -o	\
 			-name "libcm"                          -prune -o	\
-			-name "makesrpm.sh"                    -prune -o	\
 			-name "psm.supp"                       -prune -o	\
 			-name "test"                           -prune -o	\
 			-name "tools"                          -prune -o	\
@@ -300,6 +304,9 @@ ofeddist:
 cscope:
 	find * -type f ! -name '[ps].*' \( -iname '*.[cfhs]' -o \
 	  -iname \\*.cc -o -name \\*.cpp -o -name \\*.f90 \) -print | cscope -bqu -i -
+
+sources-checksum:
+	@echo ${SOURCES_CHKSUM_VALUE}
 
 ${TARGLIB}-objs := ptl_am/am_reqrep_shmem.o	\
 		   ptl_am/am_reqrep.o		\
@@ -362,7 +369,10 @@ ${TARGLIB}.so.${MAJOR}: ${lib_build_dir}/${TARGLIB}.so.${MAJOR}.${MINOR}
 # file around.  Generate it such that the ident command can find it
 # and strings -a | grep OPA does a reasonable job as well.
 ${TARGLIB}.so.${MAJOR}.${MINOR}: ${${TARGLIB}-objs}
-	date +'char psmi_hfi_revision[] ="$$""Date: %F %R ${rpm_extra_description}HFI $$";' > ${lib_build_dir}/_revision.c
+	echo "char psmi_hfi_IFS_version[]=\"`printenv RELEASE_TAG`\";" > ${lib_build_dir}/_revision.c
+	date +'char psmi_hfi_build_timestamp[] ="%F %T%:z";' >> ${lib_build_dir}/_revision.c
+	echo "char psmi_hfi_sources_checksum[] =\"${SOURCES_CHKSUM_VALUE}\";" >> ${lib_build_dir}/_revision.c
+	echo "char psmi_hfi_git_checksum[] =\"`git rev-parse HEAD`\";" >> ${lib_build_dir}/_revision.c
 	$(CC) -c $(BASECFLAGS) $(INCLUDES) _revision.c -o _revision.o
 	$(CC) $(LDFLAGS) -o $@ -Wl,-soname=${TARGLIB}.so.${MAJOR} -shared \
 		${${TARGLIB}-objs} _revision.o -Lopa $(LDLIBS)

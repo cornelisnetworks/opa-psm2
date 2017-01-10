@@ -141,7 +141,7 @@ psm2_error_t psmi_mq_wait_internal(psm2_mq_req_t *ireq);
  * sleep in a poll.
  *
  * Mutexlock should be used for experimentation while the more useful
- * mutexlock-debug should be enabled during developement to catch potential
+ * mutexlock-debug should be enabled during development to catch potential
  * errors.
  */
 #ifdef PSM_DEBUG

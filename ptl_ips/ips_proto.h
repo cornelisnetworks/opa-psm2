@@ -366,8 +366,8 @@ struct ips_proto {
 	struct cace {		/* CACongestionEntry */
 		uint8_t ccti_increase;	/* steps to increase */
 		/* uint16_t  ccti_timer;*/ /* CCTI Timer in units of 1.024 usec */
-		uint64_t ccti_timer_cycles; /* coverted from us_2_cycles() */
-		uint8_t ccti_threshold;	/* threshod to make log */
+		uint64_t ccti_timer_cycles; /* converted from us_2_cycles() */
+		uint8_t ccti_threshold;	/* threshold to make log */
 		uint8_t ccti_min;	/* min value for ccti */
 	} cace[32];		/* 32 service levels */
 
@@ -611,6 +611,10 @@ psm2_error_t ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t epaddr,
 			       uint32_t flags, psm2_mq_tag_t *tag,
 			       const void *ubuf, uint32_t len, void *context,
 			       psm2_mq_req_t *req_o);
+
+#define IPS_NON_DW_MUL_NOT_ALLOWED	0
+#define IPS_NON_DW_MUL_ALLOWED		1
+void ips_proto_mq_set_non_dw_mul_sdma(uint32_t mode);
 
 int ips_proto_am(struct ips_recvhdrq_event *rcv_ev);
 

@@ -107,7 +107,7 @@
   that will INClude the FNL's into the colleciton of functions to spill log data for.
 
   PSM_LOG_EXC_FUNCTION_NAMES is a list of FNL's (see below), that will EXClude the FNL's from the
-  colleciton of functions to spill log data for.
+  collection of functions to spill log data for.
 
   An FNL is a 'Function Name List' that is defined by the following grammar:
 

@@ -84,8 +84,8 @@ BASECFLAGS += $(BASE_FLAGS)
 LDFLAGS += $(BASE_FLAGS)
 ASFLAGS += $(BASE_FLAGS)
 
-ifeq ($(TESTING),1)
-BASECFLAGS += -DTESTING=1
+ifeq ($(PSM2_MOCK_TESTING),1)
+BASECFLAGS += -DPSM2_MOCK_TESTING=1
 # we skip the linker script for testing version, we want all symbols to be
 # reachable from outside the library
 else

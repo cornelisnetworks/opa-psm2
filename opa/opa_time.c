@@ -91,7 +91,7 @@ uint32_t __hfi_pico_per_cycle = SAFEDEFAULT_PICOS_PER_CYCLE;
    different cpu's can have different speeds, etc.
 
    Some architectures don't have their TSC-equivalent running at anything
-   related to the the processor speed (e.g. G5 Power systems use a fixed
+   related to the processor speed (e.g. G5 Power systems use a fixed
    33 MHz frequency).
 */
 

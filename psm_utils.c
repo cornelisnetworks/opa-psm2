@@ -1168,7 +1168,7 @@ static HD_Header_Type **HD_end_of_list = &HD_root_of_list;  /* Pointer to the
    of the singly linked list of heap allocations. */
 static int n_allocations = 0;
 
-/* HD_check_one_struct() checks one heap allocation for inegrity. */
+/* HD_check_one_struct() checks one heap allocation for integrity. */
 static inline void HD_check_one_struct(HD_Header_Type *p, int checkAA,const char *curloc)
 {
 	/* First check the magic values in the header and trailer: */
@@ -1238,7 +1238,7 @@ static void hd_est_hdr_trlr(HD_Header_Type *hd_alloc,
 			    const char *curloc)
 {
 #if 0
-	/* if we use this block of code, psm hangs runing mpistress.  See JIRA STL-5244.  */
+	/* if we use this block of code, psm hangs running mpistress.  See JIRA STL-5244.  */
 	memset(systemAlloc,HD_NO_MANS_LAND,systemSize);
 #else
 	/* write HD_NO_MANS_LAND to the area between the system allocation and the start of the hd header. */
@@ -1300,8 +1300,8 @@ static inline int hd_memalign(void **ptr,uint64_t alignment, size_t sz, const ch
 }
 
 /* hd_free() is the heap debug version of free().  First, hd_free() ensures that the ptr to be
- * freed infact is known by the HD code.  Next, hd_free() removes the ptr from the list. Then,
- * hd_free scribbbles to the ptr's area and actually frees the heap space. */
+ * freed in fact is known by the HD code.  Next, hd_free() removes the ptr from the list. Then,
+ * hd_free scribbles to the ptr's area and actually frees the heap space. */
 static inline void hd_free(void *ptr,const char *curloc)
 {
 	HD_Header_Type *hd_alloc = HD_AA_TO_HD_HDR(ptr);
@@ -1631,7 +1631,7 @@ psm2_error_t psmi_am_getopt(const void *am_obj, int optname,
    are passed to the PSM_LOG facility via environment variables.
    See psm_log.h for more information.
 
-   Note that treeNode is a node in a binary tree data structre. */
+   Note that treeNode is a node in a binary tree data structure. */
 typedef struct _treeNode
 {
 	const char *name;
@@ -1651,8 +1651,8 @@ typedef struct _epmTreeNode
 
 
 /* given a line range: [*line1 .. *line2], and another line, line
-   'join' the line range to the new line if the line immediately abutts
-   the line range.  The the new line does not abutt the existing range,
+   'join' the line range to the new line if the line immediately abuts
+   the line range.  The new line does not abut the existing range,
    return 0.  Else, return 1.
 
    For example, take the line range [ 20 .. 30 ] and the line: 19.
@@ -1742,7 +1742,7 @@ static int compareEpmNode(epmTreeNode *node,int opcode,int txrx,uint64_t fromepi
 	return 0;
 }
 
-/* Inserts a new node in the tree corresponsing to the parameters, or, retrieves the node in the tree.
+/* Inserts a new node in the tree corresponding to the parameters, or, retrieves the node in the tree.
    In either case, this code returns a pointer to the count in the node. */
 static int *insertNodeInEpmTree(epmTreeNode **root,int opcode,int txrx,uint64_t fromepid,uint64_t toepid)
 {

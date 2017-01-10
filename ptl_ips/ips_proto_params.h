@@ -157,7 +157,7 @@
 
 /* 0x10000000, interrupt when done */
 #define IPS_SEND_FLAG_INTR		(1<<HFI_KHDR_INTR_SHIFT)
-/* 0x20000000, header supression */
+/* 0x20000000, header suppression */
 #define IPS_SEND_FLAG_HDRSUPP		(1<<HFI_KHDR_SH_SHIFT)
 /* 0x80000000, request ack (normal) */
 #define IPS_SEND_FLAG_ACKREQ		(1<<HFI_BTH_ACK_SHIFT)

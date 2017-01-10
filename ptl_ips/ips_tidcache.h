@@ -78,7 +78,7 @@
  *    and length.
  * 2. driver pins the buffer pages, program hardware with the physical
  *    pages, get a list of tids.
- * 3. driver caches the tids with the correspoinding virtual address in
+ * 3. driver caches the tids with the corresponding virtual address in
  *    user space for each tid, and return the list of tids back to PSM.
  * 4. PSM also caches the list of tids with the corresponding virtual
  *    address for each tid, and use the list of tids for transmission.

@@ -53,7 +53,7 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
-#include "common_defines.h"
+#include "psm2_mock_testing.h"
 #include "psm_user.h"
 #include "ips_proto.h"
 #include "ips_scb.h"

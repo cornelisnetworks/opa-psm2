@@ -75,7 +75,7 @@
 
 /*
  * define connection version. this is the basic version, optimized
- * version will be added later for scability.
+ * version will be added later for scalability.
  */
 #define IPS_CONNECT_VERNO	  0x0001
 
@@ -237,7 +237,6 @@ ips_ipsaddr_set_req_params(struct ips_proto *proto,
 	int i, start, count;
 	uint64_t *data;
 	psmi_assert_always(req->mtu > 0);
-	uint16_t peer_sl = min(req->sl, proto->epinfo.ep_sl);
 	uint16_t common_mtu = min(req->mtu, proto->epinfo.ep_mtu);
 
 	ipsaddr->ep_mtu = req->mtu;
@@ -258,8 +257,6 @@ ips_ipsaddr_set_req_params(struct ips_proto *proto,
 			     pidx++) {
 				ipsaddr->pathgrp->pg_path[pidx][ptype]->pr_mtu =
 				    common_mtu;
-				ipsaddr->pathgrp->pg_path[pidx][ptype]->pr_sl =
-				    peer_sl;
 			}
 	}
 
@@ -390,7 +387,7 @@ ips_proto_send_ctrl_message_reply(struct ips_proto *proto,
 				    uint16_t *msg_queue_mask)
 {
 	/* This will try up to 100 times until the message is sent. The code
-	 * is persistent becausing dropping replies will lead to a lack of
+	 * is persistent because dropping replies will lead to a lack of
 	 * overall progress on the connection/disconnection. We do not want
 	 * to poll from here, and we cannot afford a lengthy timeout, since
 	 * this is called from the receive path.
@@ -570,10 +567,10 @@ ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
 	uint16_t lid, hfitype;
 
 	/* The PSM/PTL-level epaddr, ips-level epaddr, and per-peer msgctl
-	 * structures are colocated in memory for performance reasons -- this is
+	 * structures are collocated in memory for performance reasons -- this is
 	 * why ips allocates memory for all three together.
 	 *
-	 * The PSM/PTL structure data is filled in upon successfuly ep connect in
+	 * The PSM/PTL structure data is filled in upon successfully ep connect in
 	 * ips_ptl_connect().
 	 */
 	if (master) {
@@ -911,6 +908,9 @@ ptl_handle_connect_req(struct ips_proto *proto, psm2_epaddr_t epaddr,
 		   proto->epinfo.ep_pkey != HFI_DEFAULT_P_KEY &&
 		   proto->epinfo.ep_pkey != req->job_pkey) {
 		connect_result = PSM2_EPID_INVALID_PKEY;
+	} else if (req->sl != proto->epinfo.ep_sl) {
+		connect_result = PSM2_EPID_INVALID_CONNECT;
+		_HFI_ERROR("Connection error: Service Level mismatch (local:%d, remote:%d)\n", proto->epinfo.ep_sl, req->sl);
 	} else {
 		connect_result = PSM2_OK;
 		if (ipsaddr->cstate_outgoing == CSTATE_NONE) {
@@ -1243,7 +1243,7 @@ fail:
 	return err;
 }
 
-/* Repercutions on MQ.
+/* Repercussions on MQ.
  *
  * If num_connected==0, everything that exists in the posted queue should
  * complete and the error must be marked epid_was_closed.
@@ -1268,6 +1268,17 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 	uint64_t t_warning, t_start;
 	union psmi_envvar_val warn_intval;
 	unsigned warning_secs;
+
+	/* In case of a forced close, we cancel whatever timers are pending
+	 * on the proto so that we don't have zombie timers coming back
+	 * after the internal structures of PSM2 have been destroyed
+	 */
+	if (force) {
+		struct psmi_timer *t_cursor;
+		TAILQ_FOREACH(t_cursor, &proto->timerq->timerq, timer) {
+			psmi_timer_cancel(proto->timerq, t_cursor);
+		}
+	}
 
 	psmi_assert_always(numep > 0);
 

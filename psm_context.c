@@ -395,11 +395,11 @@ psm2_error_t psmi_context_close(psmi_context_t *context)
 }
 
 /*
- * This function works whether a context is intiialized or not in a psm2_ep.
+ * This function works whether a context is initialized or not in a psm2_ep.
  *
  * Returns one of
  *
- * PSM2_OK: Port status is ok (or context not intialized yet but still "ok")
+ * PSM2_OK: Port status is ok (or context not initialized yet but still "ok")
  * PSM2_OK_NO_PROGRESS: Cable pulled
  * PSM2_EP_NO_NETWORK: No network, no lid, ...
  * PSM2_EP_DEVICE_FAILURE: Chip failures, rxe/txe parity, etc.

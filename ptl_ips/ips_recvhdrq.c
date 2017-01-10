@@ -178,7 +178,7 @@ _get_proto_subcontext(const struct ips_message_header *p_hdr)
 		 HFI_BTH_SUBCTXT_SHIFT) & HFI_BTH_SUBCTXT_MASK);
 }
 
-/* Detrmine if FECN bit is set IBTA 1.2.1 CCA Annex A*/
+/* Determine if FECN bit is set IBTA 1.2.1 CCA Annex A*/
 static __inline__ uint8_t
 _is_cca_fecn_set(const struct ips_message_header *p_hdr)
 {
@@ -287,7 +287,7 @@ static int _check_headers(struct ips_recvhdrq_event *rcv_ev)
 
 		struct ips_recvhdrq_state *state = recvq->state;
 
-		/* Packet not targetted at us. Drop packet and continue */
+		/* Packet not targeted at us. Drop packet and continue */
 		ips_proto_dump_err_stats(proto);
 		_dump_invalid_pkt(rcv_ev);
 
@@ -510,7 +510,7 @@ psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 			 * bit/BECN generation is done in protoexp_data. Since
 			 * header suppression can result in even FECN packets
 			 * being suppressed the expected protocol generated
-			 * addiional BECN packets if a "large" number of
+			 * additional BECN packets if a "large" number of
 			 * generations are swapped without progress being made
 			 * for receive. "Large" is set empirically to 4.
 			 *

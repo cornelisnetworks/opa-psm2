@@ -152,7 +152,7 @@ extern "C" {
  * communications paradigms.
  *
  * With future releases of the PSM2 interface, more components will
- * be exposed to accomodate users that implement parallel communication
+ * be exposed to accommodate users that implement parallel communication
  * models that deviate from the Matched Queue semantics.  For example, PSM
  * plans to expose a connection management component to make it easier to
  * handle endpoint management for clients without their own connection
@@ -204,7 +204,7 @@ extern "C" {
  * Error handling is controlled by registering error handlers (@ref
  * psm2_error_register_handler).  The global error handler can
  * be set at any time (even before @ref psm2_init), whereas a per-endpoint error
- * handler can be set as soon as a new endpoint is succesfully created.  If a
+ * handler can be set as soon as a new endpoint is successfully created.  If a
  * per-endpoint handle is not registered, the per-endpoint handler inherits
  * from the global error handler at time of open.
  *
@@ -1264,7 +1264,7 @@ psm2_error_t psm2_ep_query(int *num_of_epinfo, psm2_epinfo_t *array_of_epinfo);
 /** @brief Query PSM2 for end-point connections.
  *
  * Function to query PSM2 for end-point connections. This allows retrieval of
- * end-point connnections in cases where the caller does not have access to the
+ * end-point connections in cases where the caller does not have access to the
  * results of psm2_ep_connect().  The epid values can be found using
  * psm2_ep_query() so that each PSM2 process can determine its own epid. These
  * values can then be distributed across the PSM2 process so that each PSM

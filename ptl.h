@@ -146,8 +146,8 @@ struct ptl_ctl {
 	 *         that ptl needs.
 	 * post 1: PTL marks error[i] as UNREACHABLE if PTL can't get to epid[i]
 	 * post 2: PTL marks error[i] as UNKNOWN for all epid[i] that couldn't
-	 *         be connected before a timeout occured.
-	 * post 3: PTL returns OK iff all epids are either OK or UNREACHABLE
+	 *         be connected before a timeout occurred.
+	 * post 3: PTL returns OK if all epids are either OK or UNREACHABLE
 	 * post 4: PTL defines content or epaddr[i] only if epaddr[i] is OK.
 	 */
 	 psm2_error_t(*ep_connect) (ptl_t *ptl,

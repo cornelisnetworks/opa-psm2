@@ -200,7 +200,7 @@ ips_tid_acquire(struct ips_tid *tidc,
 	}
 
 	/* Clip length if it exceeds worst case tid allocation,
-	   where each entry in the tid array can accomodate only
+	   where each entry in the tid array can accommodate only
 	   1 page. */
 	if (*length > 4096*tidc->tid_ctrl->tid_num_max)
 	{

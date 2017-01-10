@@ -618,7 +618,7 @@ static __inline__ void hfi_tidflow_reset(struct _hfi_ctrl *ctrl,
 {
 /*
  * If a tidflow table entry is set to "Invalid", we want to drop
- * header if payload is droped, we want to get a header if the payload
+ * header if payload is dropped, we want to get a header if the payload
  * is delivered.
  *
  * We set a tidflow table entry "Invalid" by setting FlowValid=1 and

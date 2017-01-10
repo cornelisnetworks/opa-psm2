@@ -56,7 +56,7 @@
 #ifndef _IPS_SCB_H
 #define _IPS_SCB_H
 
-#include "common_defines.h"
+#include "psm2_mock_testing.h"
 #include "psm_user.h"
 #include "ips_proto_header.h"
 

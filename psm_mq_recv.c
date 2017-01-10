@@ -285,7 +285,7 @@ psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		/* There is NO request match, and this is the first time
 		 * to try to process this packet, we leave the packet in
 		 * hardware queue for retry in hope there is a request
-		 * match nex time, this is for performance
+		 * match next time, this is for performance
 		 * consideration.
 		 */
 		rc = MQ_RET_UNEXP_NO_RESOURCES;
@@ -423,7 +423,7 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 	/*
 	 * Keep a callback here in case we want to fit some other high-level
 	 * protocols over MQ (i.e. shmem).  These protocols would bypass the
-	 * normal mesage handling and go to higher-level message handlers.
+	 * normal message handling and go to higher-level message handlers.
 	 */
 	if (msgorder && mq->unexpected_callback) {
 		mq->unexpected_callback(mq, opcode, epaddr, tag, send_msglen,

@@ -103,7 +103,7 @@ void hfi_touch_mmap(void *m, size_t bytes)
 
    Called when we had eager buffer overflows (ERR_TID/HFI_RHF_H_TIDERR
    was set in RHF errors), and no good eager packets were received, so
-   that eager head wasn't adavanced.  */
+   that eager head wasn't advanced.  */
 
 void hfi_flush_egr_bufs(struct _hfi_ctrl *ctrl)
 {
@@ -278,7 +278,7 @@ void hfi_release_names(char *namep)
 	/* names were initialised in the data section before. Now
 	 * they are allocated when hfi_hfifs_read() is called. Allocation
 	 * for names is done only once at init time. Should we eventually
-	 * have an "stats_type_unregister" type of routine to explicitely
+	 * have an "stats_type_unregister" type of routine to explicitly
 	 * deallocate memory and free resources ?
 	 */
 #if 0

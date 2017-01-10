@@ -202,7 +202,7 @@ struct ips_tid_send_desc {
 	/*
 	 * tid_session_list is 24 bytes, plus 512 tidpair for 2048 bytes,
 	 * so the max possible tid window size mq->hfi_window_rv is 4M.
-	 * However, PSM must fit tid grant message into a single tranfer
+	 * However, PSM must fit tid grant message into a single transfer
 	 * unit, either PIO or SDMA, PSM will shrink the window accordingly.
 	 */
 	uint16_t tsess_tidlist_length;
@@ -256,7 +256,7 @@ struct ips_tid_recv_desc {
 	/*
 	 * tid_session_list is 24 bytes, plus 512 tidpair for 2048 bytes,
 	 * so the max possible tid window size mq->hfi_window_rv is 4M.
-	 * However, PSM must fit tid grant message into a single tranfer
+	 * However, PSM must fit tid grant message into a single transfer
 	 * unit, either PIO or SDMA, PSM will shrink the window accordingly.
 	 */
 	uint16_t tsess_tidlist_length;

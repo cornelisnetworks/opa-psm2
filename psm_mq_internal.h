@@ -66,7 +66,7 @@
 #include <smmintrin.h>
 #include "psm_user.h"
 
-#include "common_defines.h"
+#include "psm2_mock_testing.h"
 
 #if 0
 typedef psm2_error_t(*psm_mq_unexpected_callback_fn_t)

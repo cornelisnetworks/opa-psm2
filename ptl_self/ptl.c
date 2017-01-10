@@ -112,7 +112,7 @@ psm2_error_t self_mq_send_testwait(psm2_mq_req_t *ireq)
 	PSMI_PLOCK_ASSERT();
 
 	/* We're waiting on a send request, and the matching receive has not been
-	 * posted yet.  This is a deadlock condition in MPI but we accodomate it
+	 * posted yet.  This is a deadlock condition in MPI but we accommodate it
 	 * here in the "self ptl" by using system-allocated memory.
 	 */
 	req->testwait_callback = NULL;	/* no more calls here */

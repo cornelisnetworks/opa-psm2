@@ -175,7 +175,7 @@ void psmi_free_internal(void *ptr, const char *curLoc);
 #ifdef PSM_HEAP_DEBUG
 /* During heap debug code, we can sprinkle function calls:
    HD_validate_heap_allocations(), that will examine all of the heap allocations
-   to ensure interity. */
+   to ensure integrity. */
 void _HD_validate_heap_allocations(const char *curloc);
 
 #define HD_validate_heap_allocations() _HD_validate_heap_allocations(PSMI_CURLOC)

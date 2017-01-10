@@ -107,7 +107,7 @@ static int psmi_mpool_allocate_chunk(mpool_t);
  * psmi_mpool_create()
  *
  * Create a memory pool and allocates <num_obj_per_chunk> objects of size
- * <obj_size>.  If more memory is needed to accomodate mpool_get()
+ * <obj_size>.  If more memory is needed to accommodate mpool_get()
  * requests, the memory pool will allocate another chunk of
  * <num_obj_per_chunk> objects, until it reaches the maximum number of objects
  * it can allocate.
@@ -138,7 +138,7 @@ psmi_mpool_create(size_t obj_size, uint32_t num_obj_per_chunk,
 	size_t hdr_size;
 
 #ifdef PSM_VALGRIND
-	/* For Valgrind we which to define a "redzone" before and after the
+	/* For Valgrind we wish to define a "redzone" before and after the
 	 * allocation block, so we also allocate a blank mpool_element
 	 * at the end of the user's block */
 #endif

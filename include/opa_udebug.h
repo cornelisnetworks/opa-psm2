@@ -63,6 +63,8 @@ extern unsigned hfi_debug;
 const char *hfi_get_unit_name(int unit);
 extern char *__progname;
 
+static const char hfi_ident_tag[] = "PSM2_IDENTIFY";
+
 #if _HFI_DEBUGGING
 
 extern char *__hfi_mylabel;

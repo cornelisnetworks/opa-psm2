@@ -433,8 +433,13 @@ psm2_error_t psmi_shm_map_remote(ptl_t *ptl, psm2_epid_t epid, uint16_t *shmidx_
 	dest_nodeinfo = (struct am_ctl_nodeinfo *)dest_mapptr;
 
 	/* We core dump right after here if we don't check the mmap */
-	void (*old_handler_segv) (int) = signal(SIGSEGV, amsh_mmap_fault);
-	void (*old_handler_bus) (int) = signal(SIGBUS, amsh_mmap_fault);
+	struct sigaction SIGSEGV_old_act;
+	struct sigaction SIGBUS_old_act;
+	struct sigaction act;
+	act.sa_handler = amsh_mmap_fault;
+
+	sigaction(SIGSEGV, &act, &SIGSEGV_old_act);
+	sigaction(SIGBUS, &act, &SIGBUS_old_act);
 
 	{
 		volatile uint16_t *is_init = &dest_nodeinfo->is_init;
@@ -497,8 +502,8 @@ psm2_error_t psmi_shm_map_remote(ptl_t *ptl, psm2_epid_t epid, uint16_t *shmidx_
 	}
 
 	/* install the old sighandler back */
-	signal(SIGSEGV, old_handler_segv);
-	signal(SIGBUS, old_handler_bus);
+	sigaction(SIGSEGV, &SIGSEGV_old_act, NULL);
+	sigaction(SIGBUS, &SIGBUS_old_act, NULL);
 
 	if (shmidx == (uint16_t)-1)
 		err = psmi_handle_error(NULL, PSM2_SHMEM_SEGMENT_ERR,
@@ -533,8 +538,14 @@ static psm2_error_t amsh_init_segment(ptl_t *ptl)
 	ptl->self_nodeinfo->amsh_qsizes.qrepFifoLong = AMSH_QSIZE(repFifoLong);
 
 	/* We core dump right after here if we don't check the mmap */
-	void (*old_handler_segv) (int) = signal(SIGSEGV, amsh_mmap_fault);
-	void (*old_handler_bus) (int) = signal(SIGBUS, amsh_mmap_fault);
+
+	struct sigaction SIGSEGV_old_act;
+	struct sigaction SIGBUS_old_act;
+	struct sigaction act;
+	act.sa_handler = amsh_mmap_fault;
+
+	sigaction(SIGSEGV, &act, &SIGSEGV_old_act);
+	sigaction(SIGBUS, &act, &SIGBUS_old_act);
 
 	/*
 	 * Now that we know our epid, update it in the shmidx array
@@ -576,8 +587,8 @@ static psm2_error_t amsh_init_segment(ptl_t *ptl)
 			    amsh_qcounts.qrepFifoLong);
 
 	/* install the old sighandler back */
-	signal(SIGSEGV, old_handler_segv);
-	signal(SIGBUS, old_handler_bus);
+	sigaction(SIGSEGV, &SIGSEGV_old_act, NULL);
+	sigaction(SIGBUS, &SIGBUS_old_act, NULL);
 
 fail:
 	return err;
@@ -1110,7 +1121,7 @@ amsh_ep_connreq_fini(ptl_t *ptl, struct ptl_connection_req *req)
 	psm2_error_t err = PSM2_OK;
 	int i;
 
-	/* Whereever we are at in our connect process, we've been instructed to
+	/* Wherever we are at in our connect process, we've been instructed to
 	 * finish the connection process */
 	if (req == NULL)
 		return PSM2_OK;
@@ -1173,7 +1184,7 @@ amsh_ep_connreq_fini(ptl_t *ptl, struct ptl_connection_req *req)
 	return err;
 }
 
-/* Wrapper for 2.0's use of connect/disconect.  The plan is to move the
+/* Wrapper for 2.0's use of connect/disconnect.  The plan is to move the
  * init/poll/fini interface up to the PTL level for 2.2 */
 #define CONNREQ_ZERO_POLLS_BEFORE_YIELD  20
 static

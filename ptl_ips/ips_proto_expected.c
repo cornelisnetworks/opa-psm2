@@ -160,7 +160,7 @@ ips_protoexp_init(const psmi_context_t *context,
 	else
 		protoexp->ctrl_xfer_type = PSM_TRANSFER_PIO;
 
-	/* Initialze tid flow control. */
+	/* Initialize tid flow control. */
 	err = ips_tf_init(protoexp, context, &protoexp->tfc,
 			       ips_tidflow_avail_callback);
 	if (err != PSM2_OK)
@@ -248,7 +248,7 @@ ips_protoexp_init(const psmi_context_t *context,
 		union psmi_envvar_val env_rts_cts_interleave;
 
 		psmi_getenv("PSM2_RTS_CTS_INTERLEAVE",
-			    "Interleave the handling of RTS to provide a fair disturbution between multiple senders",
+			    "Interleave the handling of RTS to provide a fair distribution between multiple senders",
 			    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
 			    (union psmi_envvar_val)0, &env_rts_cts_interleave);
 		if (env_rts_cts_interleave.e_uint)

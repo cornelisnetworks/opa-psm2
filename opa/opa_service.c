@@ -76,6 +76,22 @@
 #include <sys/ioctl.h>
 #endif
 
+typedef union
+{
+	struct
+	{
+		uint16_t minor;
+		uint16_t major;
+	};
+	uint32_t version;
+} sw_version_t;
+
+static sw_version_t sw_version =
+{
+	.major = HFI1_USER_SWMAJOR,
+	.minor = HFI1_USER_SWMINOR,
+};
+
 /*
  * This function is necessary in a udev-based world.  There can be an
  * arbitrarily long (but typically less than one second) delay between
@@ -169,11 +185,24 @@ static int (*_hfi_cmd_send)(int fd, struct hfi1_cmd *cmd, size_t count) = _hfi_c
 static int (*const _hfi_cmd_send)(int fd, struct hfi1_cmd *cmd, size_t count) = _hfi_cmd_write;
 #endif
 
-static int hfi1_user_major_version = HFI1_USER_SWMAJOR;
-
-int hfi_get_user_major_version(void)
+uint16_t hfi_get_user_major_version(void)
 {
-	return hfi1_user_major_version;
+	return sw_version.major;
+}
+
+void hfi_set_user_major_version(uint16_t major_version)
+{
+	sw_version.major = major_version;
+}
+
+uint16_t hfi_get_user_minor_version(void)
+{
+	return sw_version.minor;
+}
+
+void hfi_set_user_version(uint32_t version)
+{
+	sw_version.version = version;
 }
 
 int hfi_context_open(int unit, int port, uint64_t open_timeout)
@@ -226,19 +255,19 @@ int hfi_context_open_ex(int unit, int port, uint64_t open_timeout,
 
 		if (hfi_cmd_write(fd, &c, sizeof(c)) == -1) {
 			/* Let's assume that the driver is the old driver */
-			hfi1_user_major_version = IOCTL_CMD_API_MODULE_MAJOR - 1;
+			hfi_set_user_major_version(IOCTL_CMD_API_MODULE_MAJOR - 1);
 			/* the old driver uses write() for its command interface: */
 			_hfi_cmd_send = _hfi_cmd_write;
 		}
 		else
 		{
 			int major = c.addr >> HFI1_SWMAJOR_SHIFT;
-			if (major != hfi1_user_major_version) {
+			if (major != hfi_get_user_major_version()) {
 				/* If there is a skew between the major version of the driver
 				   that is executing and the major version which was used during
 				   compilation of PSM, we treat that is a fatal error. */
                                 _HFI_INFO("PSM2 and driver version mismatch: (%d != %d)\n",
-					  major, hfi1_user_major_version);
+					  major, hfi_get_user_major_version());
 				close(fd);
 				return -1;
 			}

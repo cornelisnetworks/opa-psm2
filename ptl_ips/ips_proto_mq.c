@@ -53,11 +53,19 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
-#include "common_defines.h"
+#include "psm2_mock_testing.h"
 #include "psm_user.h"
 #include "ipserror.h"
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
+
+static uint32_t non_dw_mul_sdma = 0;
+
+void
+ips_proto_mq_set_non_dw_mul_sdma(uint32_t mode)
+{
+	non_dw_mul_sdma = mode;
+}
 
 PSMI_NEVER_INLINE(ips_scb_t *
 		  ips_poll_scb(struct ips_proto *proto,
@@ -221,6 +229,7 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 	uint32_t nbytes_left, pktlen, offset, chunk_size;
 	uint16_t msgseq, padding;
 	ips_scb_t *scb;
+	uint32_t is_non_dw_mul_allowed = IPS_NON_DW_MUL_NOT_ALLOWED;
 
 	psmi_assert(len > 0);
 	psmi_assert(req != NULL);
@@ -229,6 +238,7 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 		psmi_assert((proto->flags & IPS_PROTO_FLAG_SPIO) == 0);
 		/* max chunk size is the rv window size */
 		chunk_size = proto->mq->hfi_window_rv;
+		is_non_dw_mul_allowed = non_dw_mul_sdma;
 	} else {
 		psmi_assert((proto->flags & IPS_PROTO_FLAG_SDMA) == 0);
 		chunk_size = flow->frag_size;
@@ -238,7 +248,13 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 	nbytes_left = len;
 	offset = 0;
 	do {
-		padding = nbytes_left & 0x3;
+		if (is_non_dw_mul_allowed) {
+			// no need to care about padding if non-double word multiple message size is allowed.
+			padding = 0;
+		} else {
+			padding = nbytes_left & 0x3;
+		}
+
 		if (padding) {
 			psmi_assert(nbytes_left > flow->frag_size);
 			/* over reading should be OK on sender because
@@ -250,7 +266,7 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 			pktlen = flow->frag_size - padding;
 		} else {
 			pktlen = min(chunk_size, nbytes_left);
-			psmi_assert((pktlen & 0x3) == 0);
+			psmi_assert(((pktlen & 0x3) == 0) || (IPS_NON_DW_MUL_ALLOWED == is_non_dw_mul_allowed));
 		}
 
 		scb = mq_alloc_pkts(proto, 1, 0, 0);
@@ -272,7 +288,7 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 		nbytes_left -= pktlen;
 
 		pktlen += padding;
-		psmi_assert((pktlen & 0x3) == 0);
+		psmi_assert(((pktlen & 0x3) == 0) || (IPS_NON_DW_MUL_ALLOWED == is_non_dw_mul_allowed));
 
 		scb->frag_size = flow->frag_size;
 		scb->nfrag = (pktlen + flow->frag_size - 1) / flow->frag_size;
@@ -707,8 +723,8 @@ ips_proto_mq_rts_match_callback(psm2_mq_req_t req, int was_posted)
 	 * have the sender complete the send.
 	 */
 	PSM2_LOG_MSG("entering");
-	if (req->recv_msglen <= proto->mq->hfi_thresh_rv ||	/* less rv theshold */
-	    proto->protoexp == NULL) {	/* no expected tid recieve */
+	if (req->recv_msglen <= proto->mq->hfi_thresh_rv ||	/* less rv threshold */
+	    proto->protoexp == NULL) {	/* no expected tid receive */
 
 		/* there is no order requirement, try to push CTS request
 		 * directly, if fails, then queue it for later try. */

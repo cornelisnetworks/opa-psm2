@@ -254,7 +254,7 @@ extern "C" {
 
 /** @brief Initialize the MQ component for MQ communication
  *
- * This function provides the Matched Queue handle necessary to performa all
+ * This function provides the Matched Queue handle necessary to perform all
  * Matched Queue communication operations.
  *
  * @param[in] ep Endpoint over which to initialize Matched Queue
@@ -293,11 +293,11 @@ extern "C" {
    	       uint64_t communicator_bits) // Where we store our communicator or
    	                                   // context bits in the 64-bit tag.
    	{
-   	    // Simplifed open, see psm2_ep_open documentation for more info
+   	    // Simplified open, see psm2_ep_open documentation for more info
    	    psm2_ep_open(job_uuid,
    	                NULL, // no options
    	                ep, epid);
-  
+
    	    // We initialize a matched queue by telling PSM the bits that are
    	    // order-significant in the tag.  Point-to-point ordering will not be
    	    // maintained between senders where the communicator bits are not the
@@ -307,7 +307,7 @@ extern "C" {
    	                NULL, // no other MQ options
    	                0,    // 0 options passed
    	                mq);  // newly initialized matched Queue
-  
+
    	    return 1;
    	}
    @endcode
@@ -450,7 +450,7 @@ typedef struct psm2_mq_req *psm2_mq_req_t;
  *
  * @param[in] value Pointer to storage that can be used to store the value of
  *            the option to be set.  It is up to the user to ensure that the
- *            pointer points to a memory location large enough to accomodate
+ *            pointer points to a memory location large enough to accommodate
  *            the value associated to the type.  Each option documents the size
  *            associated to its value.
  *
@@ -798,7 +798,7 @@ psm2_mq_isend2(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags,
  *
  * @retval PSM2_OK The iprobe is successful and status is updated if non-NULL.
  * @retval PSM2_MQ_NO_COMPLETIONS The iprobe is unsuccessful and status is
- *                               unchaged.
+ *                               unchanged.
  */
 psm2_error_t
 psm2_mq_iprobe(psm2_mq_t mq, uint64_t rtag, uint64_t rtagsel,
@@ -826,7 +826,7 @@ psm2_mq_iprobe(psm2_mq_t mq, uint64_t rtag, uint64_t rtagsel,
  *
  * @retval PSM2_OK The iprobe is successful and status is updated if non-NULL.
  * @retval PSM2_MQ_NO_COMPLETIONS The iprobe is unsuccessful and status is
- *                               unchaged.
+ *                               unchanged.
  */
 psm2_error_t
 psm2_mq_iprobe2(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *rtag,
@@ -856,7 +856,7 @@ psm2_mq_iprobe2(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *rtag,
  * error handler (@ref psm2_error_register_handler).
  *
  * @retval PSM2_OK The iprobe is successful and status is updated if non-NULL.
- * @retval PSM2_MQ_NO_COMPLETIONS The iprobe is unsuccessful and status is unchaged.
+ * @retval PSM2_MQ_NO_COMPLETIONS The iprobe is unsuccessful and status is unchanged.
  */
 psm2_error_t
 psm2_mq_improbe(psm2_mq_t mq, uint64_t rtag, uint64_t rtagsel, psm2_mq_req_t *req,
@@ -887,7 +887,7 @@ psm2_mq_improbe(psm2_mq_t mq, uint64_t rtag, uint64_t rtagsel, psm2_mq_req_t *re
  * error handler (@ref psm2_error_register_handler).
  *
  * @retval PSM2_OK The iprobe is successful and status is updated if non-NULL.
- * @retval PSM2_MQ_NO_COMPLETIONS The iprobe is unsuccessful and status is unchaged.
+ * @retval PSM2_MQ_NO_COMPLETIONS The iprobe is unsuccessful and status is unchanged.
  */
 psm2_error_t
 psm2_mq_improbe2(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *rtag,
@@ -1323,7 +1323,7 @@ struct psm2_mq_stats {
 /*! @see psm2_mq_stats */
 	typedef struct psm2_mq_stats psm2_mq_stats_t;
 
-/** @brief Retrieve statistics from an instantied MQ */
+/** @brief Retrieve statistics from an instantiated MQ */
 	void
 	 psm2_mq_get_stats(psm2_mq_t mq, psm2_mq_stats_t *stats);
 

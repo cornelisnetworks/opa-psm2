@@ -76,7 +76,7 @@ static psm2_error_t psmi_ep_open_device(const psm2_ep_t ep,
 				       psm2_epid_t *epid);
 
 /*
- * Device managment
+ * Device management
  *
  * PSM uses "devices" as components to manage communication to self, to peers
  * reachable via shared memory and finally to peers reachable only through
@@ -532,6 +532,9 @@ psm2_error_t __psm2_ep_open_opts_get_defaults(struct psm2_ep_open_opts *opts)
 
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
 
+	if (!opts)
+		return PSM2_PARAM_ERR;
+
 	/* Set in order in the structure. */
 	opts->timeout = 30000000000LL;	/* 30 sec */
 	opts->unit = HFI_UNIT_ID_ANY;
@@ -703,7 +706,7 @@ __psm2_ep_open_internal(psm2_uuid_t const unique_job_key, int *devid_enabled,
 		opts.imm_size = envvar_val.e_uint;
 	}
 
-	/* Get numner of send descriptors - by default this is 4 times the number
+	/* Get number of send descriptors - by default this is 4 times the number
 	 * of send buffers - mainly used for short/inlined messages.
 	 */
 	if (!psmi_getenv("PSM2_NUM_SEND_DESCRIPTORS",
@@ -925,6 +928,9 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 
 	PSM2_LOG_MSG("entering");
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
+
+	if (!epo || !epido)
+		return PSM2_PARAM_ERR;
 
 	/* Currently only one endpoint is supported. */
 	if (psmi_opened_endpoint_count > 0) {
