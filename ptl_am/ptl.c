@@ -67,6 +67,7 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 	psm2_epaddr_t epaddr = req->rts_peer;
 	ptl_t *ptl = epaddr->ptlctl->ptl;
 	int pid = 0;
+	int cma_succeed = 0;
 
 	PSM2_LOG_MSG("entering.");
 	psmi_assert((tok != NULL && was_posted)
@@ -81,7 +82,14 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 		/* cma can be done in handler context or not. */
 		size_t nbytes = cma_get(pid, (void *)req->rts_sbuf,
 					req->buf, req->recv_msglen);
-		psmi_assert_always(nbytes == req->recv_msglen);
+		if (nbytes == -1) {
+			ptl->psmi_kassist_mode = PSMI_KASSIST_OFF;
+			_HFI_ERROR("Reading from remote process' memory failed. Disabling CMA support\n");
+		}
+		else {
+			psmi_assert_always(nbytes == req->recv_msglen);
+			cma_succeed = 1;
+		}
 	}
 
 	args[0].u64w0 = (uint64_t) (uintptr_t) req->ptl_req_ptr;
@@ -89,7 +97,7 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 	args[2].u64w0 = (uint64_t) (uintptr_t) req->buf;
 	args[3].u32w0 = req->recv_msglen;
 	args[3].u32w1 = tok != NULL ? 1 : 0;
-	args[4].u64w0 = 0;
+	args[4].u32w0 = ptl->psmi_kassist_mode;		// pass current kassist mode to the peer process
 
 	if (tok != NULL) {
 		psmi_am_reqq_add(AMREQUEST_SHORT, tok->ptl,
@@ -100,8 +108,9 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 					args, 5, NULL, 0, 0);
 
 	/* 0-byte completion or we used kassist */
-	if (pid || req->recv_msglen == 0)
+	if (cma_succeed || req->recv_msglen == 0) {
 		psmi_mq_handle_rts_complete(req);
+	}
 	PSM2_LOG_MSG("leaving.");
 	return PSM2_OK;
 }
@@ -205,11 +214,24 @@ psmi_am_mq_handler_rtsmatch(void *toki, psm2_amarg_t *args, int narg, void *buf,
 	if (msglen > 0) {
 		rarg[0].u64w0 = args[1].u64w0;	/* rreq */
 		int kassist_mode = ptl->psmi_kassist_mode;
+		int kassist_mode_peer = args[4].u32w0;
+		// In general, peer process(es) shall have the same kassist mode set,
+		// but due to dynamic CMA failure detection, we must align local and remote state,
+		// and make protocol to adopt to that potential change.
+		if (kassist_mode_peer == PSMI_KASSIST_OFF && (kassist_mode & PSMI_KASSIST_MASK)) {
+			ptl->psmi_kassist_mode = PSMI_KASSIST_OFF;
+			goto no_kassist;
+		}
 
 		if (kassist_mode & PSMI_KASSIST_PUT) {
 			int pid = psmi_epaddr_pid(tok->tok.epaddr_incoming);
-
 			size_t nbytes = cma_put(sreq->buf, pid, dest, msglen);
+			if (nbytes == -1) {
+				_HFI_ERROR("Writing to remote process' memory failed. Disabling CMA support\n");
+				ptl->psmi_kassist_mode = PSMI_KASSIST_OFF;
+				goto no_kassist;
+			}
+
 			psmi_assert_always(nbytes == msglen);
 
 			/* Send response that PUT is complete */
@@ -217,10 +239,10 @@ psmi_am_mq_handler_rtsmatch(void *toki, psm2_amarg_t *args, int narg, void *buf,
 					      rarg, 1, NULL, 0, 0);
 		} else if (!(kassist_mode & PSMI_KASSIST_MASK)) {
 			/* Only transfer if kassist is off, i.e. neither GET nor PUT. */
+no_kassist:
 			psmi_amsh_long_reply(tok, mq_handler_rtsdone_hidx, rarg,
 					     1, sreq->buf, msglen, dest, 0);
 		}
-
 	}
 	psmi_mq_handle_rts_complete(sreq);
 }

@@ -1,0 +1,17 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS=hardening=+all
+
+# Specify the library installation directory
+export LIBDIR=/usr/lib
+
+.PHONY: override_dh_strip
+
+%:
+	dh $@ --parallel
+
+override_dh_strip:
+	dh_strip --dbg-package=libpsm2-dbg
+
+override_dh_installdocs:
+	dh_installdocs --link-doc=libpsm2

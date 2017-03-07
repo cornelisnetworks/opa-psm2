@@ -1,10 +1,11 @@
+#!/bin/bash
 #
 #  This file is provided under a dual BSD/GPLv2 license.  When using or
 #  redistributing this file, you may do so under either license.
 #
 #  GPL LICENSE SUMMARY
 #
-#  Copyright(c) 2015 Intel Corporation.
+#  Copyright(c) 2016 Intel Corporation.
 #
 #  This program is free software; you can redistribute it and/or modify
 #  it under the terms of version 2 of the GNU General Public License as
@@ -20,7 +21,7 @@
 #
 #  BSD LICENSE
 #
-#  Copyright(c) 2015 Intel Corporation.
+#  Copyright(c) 2016 Intel Corporation.
 #
 #  Redistribution and use in source and binary forms, with or without
 #  modification, are permitted provided that the following conditions
@@ -49,55 +50,54 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-ifeq (,$(top_srcdir))
-$(error top_srcdir must be set to include makefile fragment)
-endif
+set -e
 
-export os ?= $(shell uname -s | tr '[A-Z]' '[a-z]')
-export arch := $(shell uname -p | sed -e 's,\(i[456]86\|athlon$$\),i386,')
-export CCARCH ?= gcc
+OPTS="ghGbBAS"
+DEFAULT_OPT=S
 
-ifeq (${CCARCH},gcc)
-	export CC := gcc
-else
-	ifeq (${CCARCH},gcc4)
-		export CC := gcc4
-	else
-		ifeq (${CCARCH},icc)
-				 export CC := icc
-		else
-				 anerr := $(error Unknown C compiler arch: ${CCARCH})
-		endif # ICC
-	endif # gcc4
-endif # gcc
+function literate()
+{
+	echo $(sed "s/\B/&$2/g" <<< "$1")
+}
 
-BASECFLAGS += $(BASE_FLAGS)
-LDFLAGS += $(BASE_FLAGS)
-ASFLAGS += $(BASE_FLAGS)
+function usage()
+{
+	echo "Usage: $0 [debuild ($(literate $OPTS '|'))]"
+	exit 1
+}
 
-LINKER_SCRIPT_FILE := psm2_compat_linker_script.map
-LINKER_SCRIPT := -Wl,--version-script $(LINKER_SCRIPT_FILE)
-WERROR := -Werror
-INCLUDES := -I$(top_srcdir)/include -I$(top_srcdir)/include/$(os)-$(arch) -I$(top_srcdir)/mpspawn
+while getopts "$OPTS" OPT; do
+    case $OPT in
+	h)
+	    usage
+		;;
+	\?)
+	    usage
+		;;
+	*)
+	    DEFAULT_OPT=$OPT
+		;;
+    esac
+done
 
-BASECFLAGS +=-Wall $(WERROR)
+# Remove parsed options
+shift $((OPTIND-1))
 
-BASECFLAGS += -fpic -fPIC
+# Check if we have any non-option parameters 
+test ! $# -eq 0 && usage
 
-ASFLAGS += -g3 -fpic
+# Annotate changelog
+cat debian/changelog.tmpl > debian/changelog
 
-ifeq (${CCARCH},icc)
-    BASECFLAGS += -O3 -g3 -fpic -fPIC,
-    CFLAGS += $(BASECFLAGS)
-    LDFLAGS += -static-intel
-else
-	ifeq (${CCARCH},gcc)
-	    CFLAGS += $(BASECFLAGS) -Wno-strict-aliasing
-	else
-		ifeq (${CCARCH},gcc4)
-			CFLAGS += $(BASECFLAGS)
-		else
-			$(error Unknown compiler arch "${CCARCH}")
-		endif
-	endif
-endif
+GIT_TAG_RELEASE=$(git describe --tags --long --match='v*')
+VERSION=$(sed 's/^v\([0-9]\+\.[0-9]\+\)-\([0-9]\+\).\+/\1.\2/' <<< "$GIT_TAG_RELEASE")
+
+debchange --newversion=$VERSION ""
+
+debchange --release ""
+
+# Build package
+debuild -$DEFAULT_OPT -tc
+
+echo "The deb package(s) is (are) in parent directory"
+

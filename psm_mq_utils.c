@@ -90,6 +90,7 @@ psm2_mq_req_t MOCKABLE(psmi_mq_req_alloc)(psm2_mq_t mq, uint32_t type)
 		req->rts_peer = NULL;
 		req->peer = NULL;
 		req->ptl_req_ptr = NULL;
+		req->flags = 0;
 		return req;
 	} else {	/* we're out of reqs */
 		int issend = (type == MQE_TYPE_SEND);

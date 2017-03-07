@@ -51,8 +51,6 @@
 
 */
 
-/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
-
 #include <netdb.h>		/* gethostbyname */
 #include "psm_user.h"
 #include "psm_mq_internal.h"

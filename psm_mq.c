@@ -354,6 +354,8 @@ __psm2_mq_iprobe2(psm2_mq_t mq, psm2_epaddr_t src,
 	PSMI_ASSERT_INITIALIZED();
 
 	req = psmi_mq_iprobe_inner(mq, src, tag, tagsel, 0);
+	psmi_assert_req_not_internal(req);
+
 	if (req != NULL) {
 		if (status != NULL) {
 			mq_status2_copy(req, status);
@@ -385,6 +387,8 @@ __psm2_mq_iprobe(psm2_mq_t mq, uint64_t tag, uint64_t tagsel,
 	rtagsel.tag[2] = 0;
 
 	req = psmi_mq_iprobe_inner(mq, PSM2_MQ_ANY_ADDR, &rtag, &rtagsel, 0);
+	psmi_assert_req_not_internal(req);
+
 	if (req != NULL) {
 		if (status != NULL) {
 			mq_status_copy(req, status);
@@ -557,7 +561,8 @@ psmi_mq_wait_inner(psm2_mq_req_t *ireq, void *status,
 			err = PSM2_OK;
 	}
 
-	mq_qq_remove(&req->mq->completed_q, req);
+	if(!psmi_is_req_internal(req))
+		mq_qq_remove(&req->mq->completed_q, req);
 
 	if (status != NULL) {
 		status_copy(req, status);
@@ -581,6 +586,8 @@ __psm2_mq_wait2(psm2_mq_req_t *ireq, psm2_mq_status2_t *status)
 	psm2_error_t rv;
 	PSM2_LOG_MSG("entering");
 	PSMI_ASSERT_INITIALIZED();
+	psmi_assert_req_not_internal(*ireq);
+
 	rv = psmi_mq_wait_inner(ireq, status,
 				  (psmi_mq_status_copy_t) mq_status2_copy, 1);
 	PSM2_LOG_MSG("leaving");
@@ -594,6 +601,8 @@ __psm2_mq_wait(psm2_mq_req_t *ireq, psm2_mq_status_t *status)
 	psm2_error_t rv;
 	PSM2_LOG_MSG("entering");
 	PSMI_ASSERT_INITIALIZED();
+	psmi_assert_req_not_internal(*ireq);
+
 	rv = psmi_mq_wait_inner(ireq, status,
 				  (psmi_mq_status_copy_t) mq_status_copy, 1);
 	PSM2_LOG_MSG("leaving");
@@ -708,6 +717,7 @@ __psm2_mq_isend2(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags,
 #endif
 #endif
 	psmi_assert(*req != NULL);
+	psmi_assert_req_not_internal(*req);
 
 	(*req)->peer = dest;
 
@@ -747,6 +757,7 @@ __psm2_mq_isend(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags, uint64_t stag,
 #endif
 #endif
 	psmi_assert(*req != NULL);
+	psmi_assert_req_not_internal(*req);
 
 	(*req)->peer = dest;
 
@@ -911,6 +922,7 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 		req->buf_len = len;
 		req->recv_msglen = len;
 		req->recv_msgoff = 0;
+		req->context = context;
 
 		/* Nobody should touch the buffer after it's posted */
 		VALGRIND_MAKE_MEM_NOACCESS(buf, len);
@@ -926,13 +938,14 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 			  tag->tag[0], tag->tag[1], tag->tag[2],
 			  tagsel->tag[0], tagsel->tag[1], tagsel->tag[2], req);
 
+		req->context = context;
+
 		psm2_mq_irecv_inner(mq, req, buf, len);
 	}
 
-	req->context = context;
-
 ret:
 	PSMI_PUNLOCK();
+	psmi_assert_req_not_internal(req);
 	*reqo = req;
 	PSM2_LOG_MSG("leaving");
 
@@ -948,6 +961,8 @@ __psm2_mq_irecv(psm2_mq_t mq, uint64_t tag, uint64_t tagsel, uint32_t flags,
 	psm2_mq_tag_t rtag;
 	psm2_mq_tag_t rtagsel;
 
+	*reqo = NULL;
+
 	PSM2_LOG_MSG("entering");
 
 	*(uint64_t *) rtag.tag = tag;
@@ -958,6 +973,8 @@ __psm2_mq_irecv(psm2_mq_t mq, uint64_t tag, uint64_t tagsel, uint32_t flags,
 	rtagsel.tag[2] = 0;
 	rv = __psm2_mq_irecv2(mq, PSM2_MQ_ANY_ADDR, &rtag, &rtagsel,
 			       flags, buf, len, context, reqo);
+
+	psmi_assert_req_not_internal(*reqo);
 	PSM2_LOG_MSG("leaving");
 
 	return rv;
@@ -1029,9 +1046,13 @@ __psm2_mq_ipeek2(psm2_mq_t mq, psm2_mq_req_t *oreq, psm2_mq_status2_t *status)
 {
 	psm2_error_t rv;
 
+	*oreq = NULL;
+
 	PSM2_LOG_MSG("entering");
 	rv = psmi_mq_ipeek_inner(mq, oreq, status,
 				   (psmi_mq_status_copy_t) mq_status2_copy);
+
+	psmi_assert_req_not_internal(*oreq);
 	PSM2_LOG_MSG("leaving");
 	return rv;
 }
@@ -1041,9 +1062,13 @@ psm2_error_t
 __psm2_mq_ipeek(psm2_mq_t mq, psm2_mq_req_t *oreq, psm2_mq_status_t *status)
 {
 	psm2_error_t rv;
+
+	*oreq = NULL;
 	PSM2_LOG_MSG("entering");
 	rv = psmi_mq_ipeek_inner(mq, oreq, status,
 				   (psmi_mq_status_copy_t) mq_status_copy);
+
+	psmi_assert_req_not_internal(*oreq);
 	PSM2_LOG_MSG("leaving");
 	return rv;
 }
@@ -1121,6 +1146,12 @@ __psm2_mq_init(psm2_ep_t ep, uint64_t tag_order_mask,
 	      const struct psm2_optkey *opts, int numopts, psm2_mq_t *mqo)
 {
 	psm2_error_t err = PSM2_OK;
+
+	if (ep == NULL) {
+		err = PSM2_PARAM_ERR;
+		goto fail;
+	}
+
 	psm2_mq_t mq = ep->mq;
 	int i;
 
@@ -1128,8 +1159,8 @@ __psm2_mq_init(psm2_ep_t ep, uint64_t tag_order_mask,
 
 	PSMI_ERR_UNLESS_INITIALIZED(ep);
 
-	psmi_assert(mq != NULL);
-	psmi_assert(mq->ep != NULL);
+	psmi_assert_always(mq != NULL);
+	psmi_assert_always(mq->ep != NULL);
 
 	/* Process options */
 	for (i = 0; err == PSM2_OK && i < numopts; i++)

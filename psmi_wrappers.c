@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,28 +51,34 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
-#include "psm2_mock_testing.h"
+#include <stdlib.h>
+#include "opa_common.h"
+#include <unistd.h>
+#include "psmi_wrappers.h"
 
-#ifndef _PSMI_IN_USER_H
-#error psm_error.h not meant to be included directly, include psm_user.h instead
-#endif
+void MOCKABLE(psmi_exit)(int status)
+{
+	exit(status);
+}
+MOCK_DEF_EPILOGUE(psmi_exit);
 
-#ifndef _PSMI_ERROR_H
-#define _PSMI_ERROR_H
+ssize_t MOCKABLE(psmi_write)(int fd, const void *buf, size_t count)
+{
+	return write(fd, buf, count);
+}
+MOCK_DEF_EPILOGUE(psmi_write);
 
-#define PSMI_EP_NONE		    (NULL)
-#define PSMI_EP_NORETURN	    ((psm2_ep_t) -2)
-#define PSMI_EP_LOGEVENT	    ((psm2_ep_t) -3)
+int MOCKABLE(psmi_ioctl)(int fd, unsigned int cmd, unsigned long arg)
+{
+	return ioctl(fd, cmd, arg);
+}
+MOCK_DEF_EPILOGUE(psmi_ioctl);
 
-psm2_ep_errhandler_t psmi_errhandler_global;
+int MOCKABLE(psmi_sigaction)(int signum, const struct sigaction *act, struct sigaction *oldact)
+{
+	return sigaction(signum, act, oldact);
+}
+MOCK_DEF_EPILOGUE(psmi_sigaction);
 
-psm2_error_t MOCKABLE(psmi_handle_error)(psm2_ep_t ep, psm2_error_t error,
-			      const char *buf, ...)
-			      __attribute__((format(printf, 3, 4)));
-MOCK_DCL_EPILOGUE(psmi_handle_error);
 
-psm2_error_t psmi_error_cmp(psm2_error_t errA, psm2_error_t errB);
-int psmi_error_syslog_level(psm2_error_t error);
 
-#endif /* _PSMI_ERROR_H */

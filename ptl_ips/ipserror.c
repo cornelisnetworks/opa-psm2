@@ -58,7 +58,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include <ipserror.h>
+#include "ipserror.h"
 
 char *ips_err_str(int ips_error)
 {

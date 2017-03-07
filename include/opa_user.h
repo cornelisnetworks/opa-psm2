@@ -51,8 +51,6 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
-
 #ifndef OPA_USER_H
 #define OPA_USER_H
 
@@ -121,7 +119,10 @@
 #define HFI_RHF_DCERR 0x00800000
 #define HFI_RHF_DCUNCERR 0x00400000
 #define HFI_RHF_KHDRLENERR 0x00200000
-#define HFI_RHF_ERR_MASK 0xFFE00000
+/* Change from 0xFFE00000 to 0xFDE00000, so that we don't commit to the
+ * error path on a SeqErr too soon - with RSM, the HFI may report a
+ * false SeqErr condition */
+#define HFI_RHF_ERR_MASK 0xFDE00000
 
 /* TidFlow related bits */
 #define HFI_TF_SEQNUM_SHIFT                 0
@@ -600,12 +601,26 @@ static __inline__ void hfi_tidflow_set_entry(struct _hfi_ctrl *ctrl,
 					 uint32_t flowid, uint32_t genval,
 					 uint32_t seqnum)
 {
+/* For proper behavior with RSM interception of FECN packets for CCA,
+ * the tidflow entry needs the KeepAfterSequenceError bit set.
+ * A packet that is converted from expected to eager by RSM will not
+ * trigger an update in the tidflow state.  This will cause the tidflow
+ * to incorrectly report a sequence error on any non-FECN packets that
+ * arrive after the RSM intercepted packets.  If the KeepAfterSequenceError
+ * bit is set, PSM can properly detect this "false SeqErr" condition,
+ * and recover without dropping packets.
+ * Note that if CCA/RSM are not important, this change will slightly
+ * increase the CPU load when packets are dropped.  If this is significant,
+ * consider hiding this change behind a CCA/RSM environment variable.
+ */
+
 	ctrl->__hfi_rcvtidflow[flowid] = __cpu_to_le64(
 		((genval & HFI_TF_GENVAL_MASK) << HFI_TF_GENVAL_SHIFT) |
 		((seqnum & HFI_TF_SEQNUM_MASK) << HFI_TF_SEQNUM_SHIFT) |
 		((uint64_t)ctrl->__hfi_tfvalid << HFI_TF_FLOWVALID_SHIFT) |
 		(1ULL << HFI_TF_HDRSUPP_ENABLED_SHIFT) |
-		/* KeepAfterSeqErr = 0 */
+		/* KeepAfterSequenceError = 1 -- previously was 0 */
+		(1ULL << HFI_TF_KEEP_AFTER_SEQERR_SHIFT) |
 		(1ULL << HFI_TF_KEEP_ON_GENERR_SHIFT) |
 		/* KeePayloadOnGenErr = 0 */
 		(1ULL << HFI_TF_STATUS_SEQMISMATCH_SHIFT) |
@@ -788,7 +803,7 @@ static __inline__ int32_t hfi_update_tid(struct _hfi_ctrl *ctrl,
 	tidinfo.tidlist = tidlist;	/* driver copies tids back directly */
 	tidinfo.tidcnt = 0;		/* clear to zero */
 
-	cmd.type = HFI1_CMD_TID_UPDATE;
+	cmd.type = PSMI_HFI_CMD_TID_UPDATE;
 	cmd.len = sizeof(tidinfo);
 	cmd.addr = (__u64) &tidinfo;
 
@@ -812,7 +827,7 @@ static __inline__ int32_t hfi_free_tid(struct _hfi_ctrl *ctrl,
 	tidinfo.tidlist = tidlist;	/* input to driver */
 	tidinfo.tidcnt = tidcnt;
 
-	cmd.type = HFI1_CMD_TID_FREE;
+	cmd.type = PSMI_HFI_CMD_TID_FREE;
 	cmd.len = sizeof(tidinfo);
 	cmd.addr = (__u64) &tidinfo;
 
@@ -831,7 +846,7 @@ static __inline__ int32_t hfi_get_invalidation(struct _hfi_ctrl *ctrl,
 	tidinfo.tidlist = tidlist;	/* driver copies tids back directly */
 	tidinfo.tidcnt = 0;		/* clear to zero */
 
-	cmd.type = HFI1_CMD_TID_INVAL_READ;
+	cmd.type = PSMI_HFI_CMD_TID_INVAL_READ;
 	cmd.len = sizeof(tidinfo);
 	cmd.addr = (__u64) &tidinfo;
 

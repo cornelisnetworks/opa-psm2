@@ -146,6 +146,20 @@ static int psmi_get_envvar(const char *env)
 	return 0;
 }
 
+/* returns the 8-bit hash value of an uuid. */
+static inline
+uint8_t
+psmi_get_uuid_hash(psm2_uuid_t const uuid)
+{
+	int i;
+	uint8_t hashed_uuid = 0;
+
+	for (i=0; i < sizeof(psm2_uuid_t); ++i)
+		hashed_uuid ^= *((uint8_t const *)uuid + i);
+
+	return hashed_uuid;
+}
+
 static
 psm2_error_t
 psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
@@ -175,14 +189,11 @@ psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
 			}
 			else
 			{
-				int i;
-				uint8_t hashedjk = 0;
+				/* else, we are going to look at:
+				   (a hash of the job key plus the local rank id) mod nunits. */
 
-				/* else, we are going to being looking at:
-				   (a hash of the job key plus the local rank id ) mod nunits. */
-				for (i=0;i < sizeof(job_key);i++)
-					hashedjk ^= job_key[i];
-				*unit_start = (psmi_get_envvar("MPI_LOCALRANKID") + hashedjk) % nunits;
+				*unit_start = (psmi_get_envvar("MPI_LOCALRANKID") +
+					psmi_get_uuid_hash(job_key)) % nunits;
 				if (*unit_start > 0)
 					*unit_end = *unit_start - 1;
 				else
@@ -668,8 +679,10 @@ int psmi_sharedcontext_params(int *nranks, int *rankid)
 
 		*rankid = env_rankid.e_int;
 		*nranks = env_nranks.e_int;
-	}
-	return 1;
+
+		return 1;
+	} else
+		return 0;
 }
 
 static

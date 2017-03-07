@@ -51,25 +51,46 @@
 #  Copyright (c) 2003-2014 Intel Corporation. All rights reserved.
 #
 
-top_srcdir := ..
+OUTDIR = .
+
+this_srcdir = $(shell readlink -m .)
+top_srcdir := $(this_srcdir)/..
 include $(top_srcdir)/buildflags.mak
-INCLUDES += -I$(top_srcdir) -I$(top_srcdir)/ptl_ips
+INCLUDES += -I$(top_srcdir)
 
 ${TARGLIB}-objs := ptl.o ptl_rcvthread.o ips_proto.o ipserror.o ips_recvq.o \
 		   ips_recvhdrq.o ips_spio.o ips_proto_recv.o ips_proto_connect.o \
 		   ips_proto_dump.o ips_proto_mq.o ips_subcontext.o \
-		   ips_writehdrq.o ips_proto_expected.o ips_tid.o
+		   ips_writehdrq.o ips_proto_expected.o ips_tid.o \
+		   ips_scb.o ips_proto_am.o ips_opp_path_rec.o ips_tidflow.o \
+		   ips_epstate.o ips_crc32.o ips_path_rec.o ips_tidcache.o
+${TARGLIB}-objs := $(patsubst %.o, $(OUTDIR)/%.o, ${${TARGLIB}-objs})
 
-DEPS:= $(${TARGLIB}-objs:.o=.d)
--include $(DEPS)
+DEPS := $(${TARGLIB}-objs:.o=.d)
 
-all: ${${TARGLIB}-objs}
+.PHONY: all clean
+IGNORE_DEP_TARGETS = clean
 
-%.o: %.c
-	$(CC) $(CFLAGS) $(INCLUDES) -MMD -c $< -o $@
+all .DEFAULT: ${${TARGLIB}-objs}
+
+$(OUTDIR)/%.d: $(this_srcdir)/%.c
+	$(CC) $(CFLAGS) $(INCLUDES) $< -MM -MF $@ -MQ $(@:.d=.o)
+
+$(OUTDIR)/%.o: $(this_srcdir)/%.c | ${DEPS}
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 clean:
-	rm -f *.o *.d *.gcda *.gcno
+	@if [ -d $(OUTDIR) ]; then \
+		cd $(OUTDIR); \
+		rm -f *.o *.d *.gcda *.gcno; \
+		cd -; \
+	fi
+
+#ifeq prevents the deps from being included during clean
+#-include line is required to pull in auto-dependecies during 2nd pass
+ifeq ($(filter $(IGNORE_DEP_TARGETS), $(MAKECMDGOALS)),)
+-include ${DEPS}
+endif
 
 install:
 	@echo "Nothing to do for install."

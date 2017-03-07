@@ -82,6 +82,58 @@ static struct sigaction SIGILL_old_act;
 static struct sigaction SIGABRT_old_act;
 static struct sigaction SIGINT_old_act;
 static struct sigaction SIGTERM_old_act;
+#ifdef HFI_BRAKE_DEBUG
+static void hfi_brake_debug(void) __attribute__ ((constructor));
+
+/*
+  How to use hfi_break_debug code:
+
+  1. Build psm with HFI_BRAKE_DEBUG set in the environment.
+  2. Create a script for your test case (e.g. mpistress?).  In the script
+     make sure to choose a HFI brake file that corresponds to a network
+     file system that is common to all hosts where you will run your code.
+     Also, in the script, make sure to propagate the "HFI_BRAKE_FILE_NAME"
+     env var to all hosts.
+  3. Bring up 3 putty sessions to one of the hosts that your script uses.
+  4. In putty session number 1, touch the HFI_BRAKE_FILE and sync.
+  5. In putty session number 1, start the script.   You should see messages
+     of the form:
+-bash-4.2$ ./mpistress.0304.sc
+<hostname>:5716 remove the file: "/nfs/user/HFI_BRAKE"  to continue
+<hostname>:5717 remove the file: "/nfs/user/HFI_BRAKE"  to continue
+<hostname>:3456 remove the file: "/nfs/user/HFI_BRAKE"  to continue
+<hostname>:3457 remove the file: "/nfs/user/HFI_BRAKE"  to continue
+
+     Note that the hostname and process id are shown for all of the processes that are started
+     by your script.
+  6. In putty session 2, bring up gdb, and debug the program that is referenced in your script.
+     For example: /usr/mpi/gcc/openmpi-1.10.2-hfi/tests/intel/mpi_stress
+  7. In putty session 2 / gdb, attach to one of the processes that is shown in putty session 1.
+  8. Note, at this point, you have only one gdb session.  I leave it as an exercise to the reader to
+     determine how to bring up multiple gdb sessions.
+  9. In putty session 3, rm the HFI_BRAKE_FILE.
+ 10. You are now debugging a live session of psm.
+ */
+
+static void hfi_brake_debug(void)
+{
+	struct stat buff;
+	char hostname[80];
+	const char *hfi_brake_file_name = getenv("HFI_BRAKE_FILE_NAME");
+	gethostname(hostname, 80);
+	hostname[sizeof(hostname) - 1] = '\0';
+
+	if (!hfi_brake_file_name)
+		hfi_brake_file_name = "/tmp/HFI_BRAKE_FILE";
+	printf("%s:%d remove the file: \"%s\"  to continue\n",hostname,getpid(),hfi_brake_file_name);
+	while (0 == stat(hfi_brake_file_name, &buff))
+	{
+		printf("%s:%d remove the file: \"%s\"  to continue\n",hostname,getpid(),hfi_brake_file_name);
+		sleep(10);
+	}
+	printf("%s:%d continuing.\n",hostname,getpid());
+}
+#endif
 
 static void init_hfi_mylabel(void)
 {

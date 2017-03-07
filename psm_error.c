@@ -137,7 +137,7 @@ __psm2_error_register_handler(psm2_ep_t ep, const psm2_ep_errhandler_t errhandle
 PSMI_API_DECL(psm2_error_register_handler)
 
 psm2_error_t
-psmi_handle_error(psm2_ep_t ep, psm2_error_t error, const char *buf, ...)
+MOCKABLE (psmi_handle_error)(psm2_ep_t ep, psm2_error_t error, const char *buf, ...)
 {
 	va_list argptr;
 	int syslog_level;
@@ -191,6 +191,7 @@ psmi_handle_error(psm2_ep_t ep, psm2_error_t error, const char *buf, ...)
 
 	return newerr;
 }
+MOCK_DEF_EPILOGUE(psmi_handle_error);
 
 /* Returns the "worst" error out of errA and errB */
 psm2_error_t psmi_error_cmp(psm2_error_t errA, psm2_error_t errB)

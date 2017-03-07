@@ -51,8 +51,6 @@
 
 */
 
-/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
-
 #ifndef _PSMI_IN_USER_H
 #error psm_utils.h not meant to be included directly, include psm_user.h instead
 #endif

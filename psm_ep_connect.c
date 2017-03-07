@@ -228,6 +228,10 @@ __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epi
 			  (void *)array_of_epaddr[i]->ptlctl->ptl);
 	}
 
+        if (err == PSM2_OK)
+                for (i=0; i<num_of_epid; i++)
+                        array_of_errors[i] = PSM2_OK;
+
 connect_fail:
 	/* If the error is a timeout (at worse) and the client is OPA MPI,
 	 * just return timeout to let OPA MPI handle the hostnames that

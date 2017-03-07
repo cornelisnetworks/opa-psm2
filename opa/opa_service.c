@@ -51,8 +51,6 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
-
 /* This file contains hfi service routine interface used by the low
    level hfi protocol code. */
 
@@ -71,10 +69,7 @@
 #include <time.h>
 #include <poll.h>
 #include "opa_service.h"
-
-#if defined( IB_IOCTL_MAGIC )
-#include <sys/ioctl.h>
-#endif
+#include "psmi_wrappers.h"
 
 typedef union
 {
@@ -173,12 +168,12 @@ int hfi_wait_for_device(const char *path, long timeout)
 }
 
 /* fwd declaration */
-static int _hfi_cmd_write(int fd, struct hfi1_cmd *cmd, size_t count);
+ustatic int _hfi_cmd_write(int fd, struct hfi1_cmd *cmd, size_t count);
 
 #ifdef PSM2_SUPPORT_IW_CMD_API
 
 /* fwd declaration */
-static int _hfi_cmd_ioctl(int fd, struct hfi1_cmd *cmd, size_t count);
+ustatic int _hfi_cmd_ioctl(int fd, struct hfi1_cmd *cmd, size_t count);
 /* Function pointer. */
 static int (*_hfi_cmd_send)(int fd, struct hfi1_cmd *cmd, size_t count) = _hfi_cmd_ioctl;
 
@@ -251,7 +246,7 @@ int hfi_context_open_ex(int unit, int port, uint64_t open_timeout,
 		struct hfi1_cmd c;
 
 		memset(&c, 0, sizeof(struct hfi1_cmd));
-		c.type = HFI1_CMD_GET_VERS;
+		c.type = PSMI_HFI_CMD_GET_VERS;
 		c.len  = 0;
 		c.addr = 0;
 
@@ -295,14 +290,37 @@ int hfi_cmd_write(int fd, struct hfi1_cmd *cmd, size_t count)
 	return _hfi_cmd_send(fd, cmd, count);
 }
 
-static
+ustatic
 int _hfi_cmd_write(int fd, struct hfi1_cmd *cmd, size_t count)
 {
-	return write(fd, cmd, count);
+    const static unsigned int cmdTypeToWriteNum[PSMI_HFI_CMD_LAST] = {
+        [PSMI_HFI_CMD_ASSIGN_CTXT]      = LEGACY_HFI1_CMD_ASSIGN_CTXT,
+        [PSMI_HFI_CMD_CTXT_INFO]        = LEGACY_HFI1_CMD_CTXT_INFO,
+        [PSMI_HFI_CMD_USER_INFO]        = LEGACY_HFI1_CMD_USER_INFO,
+        [PSMI_HFI_CMD_TID_UPDATE]       = LEGACY_HFI1_CMD_TID_UPDATE,
+        [PSMI_HFI_CMD_TID_FREE]         = LEGACY_HFI1_CMD_TID_FREE,
+        [PSMI_HFI_CMD_CREDIT_UPD]       = LEGACY_HFI1_CMD_CREDIT_UPD,
+        [PSMI_HFI_CMD_RECV_CTRL]        = LEGACY_HFI1_CMD_RECV_CTRL,
+        [PSMI_HFI_CMD_POLL_TYPE]        = LEGACY_HFI1_CMD_POLL_TYPE,
+        [PSMI_HFI_CMD_ACK_EVENT]        = LEGACY_HFI1_CMD_ACK_EVENT,
+        [PSMI_HFI_CMD_SET_PKEY]         = LEGACY_HFI1_CMD_SET_PKEY,
+        [PSMI_HFI_CMD_CTXT_RESET]       = LEGACY_HFI1_CMD_CTXT_RESET,
+        [PSMI_HFI_CMD_TID_INVAL_READ]   = LEGACY_HFI1_CMD_TID_INVAL_READ,
+        [PSMI_HFI_CMD_GET_VERS]         = LEGACY_HFI1_CMD_GET_VERS,
+    };
+
+    if (cmd->type < PSMI_HFI_CMD_LAST) {
+        cmd->type = cmdTypeToWriteNum[cmd->type];
+
+	    return psmi_write(fd, cmd, count);
+    } else {
+        errno = EINVAL;
+        return -1;
+    }
 }
 
 #ifdef PSM2_SUPPORT_IW_CMD_API
-static
+ustatic
 int _hfi_cmd_ioctl(int fd, struct hfi1_cmd *cmd, size_t count)
 {
 	uint64_t addrOrLiteral[2] = { (uint64_t)cmd->addr, (uint64_t)&cmd->addr };
@@ -310,27 +328,24 @@ int _hfi_cmd_ioctl(int fd, struct hfi1_cmd *cmd, size_t count)
 	{
 		unsigned int ioctlCmd;
 		unsigned int addrOrLiteralIdx;
-	} cmdTypeToIoctlNum[HFI1_CMD_GET_VERS+1] = {
-		{-1                       , 0},    /*  0 */
-		{HFI1_IOCTL_ASSIGN_CTXT   , 0},    /*  1 */
-		{HFI1_IOCTL_CTXT_INFO     , 0},    /*  2 */
-		{HFI1_IOCTL_USER_INFO     , 0},    /*  3 */
-		{HFI1_IOCTL_TID_UPDATE    , 0},    /*  4 */
-		{HFI1_IOCTL_TID_FREE      , 0},    /*  5 */
-		{HFI1_IOCTL_CREDIT_UPD    , 1},    /*  6 */
-		{-1 /*HFI1_IOCTL_SDMA_STATUS_UPD */,0},/*  7 */
-		{HFI1_IOCTL_RECV_CTRL     , 1},    /*  8 */
-		{HFI1_IOCTL_POLL_TYPE     , 1},    /*  9 */
-		{HFI1_IOCTL_ACK_EVENT     , 1},    /* 10 */
-		{HFI1_IOCTL_SET_PKEY      , 1},    /* 11 */
-		{HFI1_IOCTL_CTXT_RESET    , 1},    /* 12 */
-		{HFI1_IOCTL_TID_INVAL_READ, 0},    /* 13 */
-		{HFI1_IOCTL_GET_VERS      , 1}     /* 14 */
-	};
+	} cmdTypeToIoctlNum[PSMI_HFI_CMD_LAST] = {
+        [PSMI_HFI_CMD_ASSIGN_CTXT]      = {HFI1_IOCTL_ASSIGN_CTXT   , 0},
+        [PSMI_HFI_CMD_CTXT_INFO]        = {HFI1_IOCTL_CTXT_INFO     , 0},
+        [PSMI_HFI_CMD_USER_INFO]        = {HFI1_IOCTL_USER_INFO     , 0},
+        [PSMI_HFI_CMD_TID_UPDATE]       = {HFI1_IOCTL_TID_UPDATE    , 0},
+        [PSMI_HFI_CMD_TID_FREE]         = {HFI1_IOCTL_TID_FREE      , 0},
+        [PSMI_HFI_CMD_CREDIT_UPD]       = {HFI1_IOCTL_CREDIT_UPD    , 1},
+        [PSMI_HFI_CMD_RECV_CTRL]        = {HFI1_IOCTL_RECV_CTRL     , 1},
+        [PSMI_HFI_CMD_POLL_TYPE]        = {HFI1_IOCTL_POLL_TYPE     , 1},
+        [PSMI_HFI_CMD_ACK_EVENT]        = {HFI1_IOCTL_ACK_EVENT     , 1},
+        [PSMI_HFI_CMD_SET_PKEY]         = {HFI1_IOCTL_SET_PKEY      , 1},
+        [PSMI_HFI_CMD_CTXT_RESET]       = {HFI1_IOCTL_CTXT_RESET    , 1},
+        [PSMI_HFI_CMD_TID_INVAL_READ]   = {HFI1_IOCTL_TID_INVAL_READ, 0},
+        [PSMI_HFI_CMD_GET_VERS]         = {HFI1_IOCTL_GET_VERS      , 1},
+    };
 
-	if ((cmd->type <= HFI1_CMD_GET_VERS) &&
-	    (cmdTypeToIoctlNum[cmd->type].ioctlCmd != (unsigned int)-1))
-		return ioctl(fd,
+	if (cmd->type < PSMI_HFI_CMD_LAST)
+		return psmi_ioctl(fd,
 			     cmdTypeToIoctlNum[cmd->type].ioctlCmd,
 			     addrOrLiteral[cmdTypeToIoctlNum[cmd->type].addrOrLiteralIdx]);
 	else
@@ -511,7 +526,7 @@ int hfi_get_port_lid(int unit, int port)
 			/* on loopback, by claiming a different LID for each context */
 			struct hfi1_ctxt_info info;
 			struct hfi1_cmd cmd;
-			cmd.type = HFI1_CMD_CTXT_INFO;
+			cmd.type = PSMI_HFI_CMD_CTXT_INFO;
 			cmd.cmd.ctxt_info = (uintptr_t) &info;
 			if (__hfi_lastfd == -1)
 				_HFI_INFO

@@ -51,8 +51,6 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
-
 #ifndef OPA_SERVICE_H
 #define OPA_SERVICE_H
 
@@ -76,6 +74,43 @@
 /* base name of path (without unit #) for qib driver */
 #define HFI_DEVICE_PATH "/dev/hfi1"
 #define HFI_CLASS_PATH "/sys/class/infiniband/hfi1"
+
+/* Commands used to communicate with driver. */
+enum PSMI_HFI_CMD {
+    PSMI_HFI_CMD_ASSIGN_CTXT = 0,   /* allocate HFI and context */
+    PSMI_HFI_CMD_CTXT_INFO,         /* find out what resources we got */
+    PSMI_HFI_CMD_USER_INFO,         /* set up userspace */
+    PSMI_HFI_CMD_TID_UPDATE,        /* update expected TID entries */
+    PSMI_HFI_CMD_TID_FREE,          /* free expected TID entries */
+    PSMI_HFI_CMD_CREDIT_UPD,        /* force an update of PIO credit */
+    PSMI_HFI_CMD_RECV_CTRL,         /* control receipt of packets */
+    PSMI_HFI_CMD_POLL_TYPE,         /* set the kind of polling we want */
+    PSMI_HFI_CMD_ACK_EVENT,         /* ack & clear user status bits */
+    PSMI_HFI_CMD_SET_PKEY,          /* set context's pkey */
+    PSMI_HFI_CMD_CTXT_RESET,        /* reset context's HW send context */
+    PSMI_HFI_CMD_TID_INVAL_READ,    /* read TID cache invalidations */
+    PSMI_HFI_CMD_GET_VERS,          /* get the version of the user cdev */
+
+    PSMI_HFI_CMD_LAST,
+};
+
+/* Legacy commands used to communicate with driver using 'write' */
+enum LEGACY_HFI1_CMD {
+    LEGACY_HFI1_CMD_ASSIGN_CTXT     = 1,     /* allocate HFI and context */
+    LEGACY_HFI1_CMD_CTXT_INFO       = 2,     /* find out what resources we got */
+    LEGACY_HFI1_CMD_USER_INFO       = 3,     /* set up userspace */
+    LEGACY_HFI1_CMD_TID_UPDATE      = 4,     /* update expected TID entries */
+    LEGACY_HFI1_CMD_TID_FREE        = 5,     /* free expected TID entries */
+    LEGACY_HFI1_CMD_CREDIT_UPD      = 6,     /* force an update of PIO credit */
+
+    LEGACY_HFI1_CMD_RECV_CTRL       = 8,     /* control receipt of packets */
+    LEGACY_HFI1_CMD_POLL_TYPE       = 9,     /* set the kind of polling we want */
+    LEGACY_HFI1_CMD_ACK_EVENT       = 10,    /* ack & clear user status bits */
+    LEGACY_HFI1_CMD_SET_PKEY        = 11,    /* set context's pkey */
+    LEGACY_HFI1_CMD_CTXT_RESET      = 12,    /* reset context's HW send context */
+    LEGACY_HFI1_CMD_TID_INVAL_READ  = 13,    /* read TID cache invalidations */
+    LEGACY_HFI1_CMD_GET_VERS        = 14     /* get the version of the user cdev */
+};
 
 /* Given a unit number and port number, returns 1 if the unit and port are active.
    returns 0 if the unit and port are not active. returns -1 when an error occurred. */

@@ -147,17 +147,19 @@ int64_t cma_get(pid_t pid, const void *src, void *dst, int64_t n)
 		.iov_base = (void *)src,
 		.iov_len = n
 	};
-
 	nr = sum = 0;
-	while ((sum != n) && (nr != -1)) {
+	while (sum != n) {
 		nr = process_vm_readv(pid, &local, 1, &remote, 1, 0);
+		if (nr == -1) {
+			return -1;
+		}
 		sum += nr;
 		local.iov_base += nr;
 		local.iov_len -= nr;
 		remote.iov_base += nr;
 		remote.iov_len -= nr;
 	}
-	return (nr != -1) ? sum : nr;
+	return sum;
 }
 
 int64_t cma_put(const void *src, pid_t pid, void *dst, int64_t n)
@@ -173,15 +175,18 @@ int64_t cma_put(const void *src, pid_t pid, void *dst, int64_t n)
 	};
 
 	nr = sum = 0;
-	while ((sum != n) && (nr != -1)) {
+	while (sum != n) {
 		nr = process_vm_writev(pid, &local, 1, &remote, 1, 0);
+		if (nr == -1) {
+			return -1;
+		}
 		sum += nr;
 		local.iov_base += nr;
 		local.iov_len -= nr;
 		remote.iov_base += nr;
 		remote.iov_len -= nr;
 	}
-	return (nr != -1) ? sum : nr;
+	return sum;
 }
 
 /* Test if CMA is available by trying a no-op call. */

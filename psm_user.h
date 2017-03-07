@@ -68,8 +68,8 @@
 #include "opa_queue.h"
 
 #ifdef PSM_VALGRIND
-#include "valgrind/valgrind.h"
-#include "valgrind/memcheck.h"
+#include <valgrind/valgrind.h>
+#include <valgrind/memcheck.h>
 #endif
 
 #include "psm_log.h"
@@ -111,6 +111,7 @@
 #include "psm_ep.h"
 #include "psm_lock.h"
 #include "psm_stats.h"
+#include "psm2_mock_testing.h"
 #undef _PSMI_IN_USER_H
 
 #define PSMI_VERNO_MAKE(major, minor) ((((major)&0xff)<<8)|((minor)&0xff))
@@ -120,7 +121,8 @@
 
 int psmi_verno_client();
 int psmi_verno_isinteroperable(uint16_t verno);
-int psmi_isinitialized();
+int MOCKABLE(psmi_isinitialized)();
+MOCK_DCL_EPILOGUE(psmi_isinitialized);
 
 psm2_error_t psmi_poll_internal(psm2_ep_t ep, int poll_amsh);
 psm2_error_t psmi_mq_wait_internal(psm2_mq_req_t *ireq);

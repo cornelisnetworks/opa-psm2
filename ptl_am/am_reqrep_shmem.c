@@ -51,8 +51,6 @@
 
 */
 
-/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
-
 #include <sys/types.h>		/* shm_open and signal handling */
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -63,6 +61,7 @@
 #include "psm_mq_internal.h"
 #include "psm_am_internal.h"
 #include "cmarw.h"
+#include "psmi_wrappers.h"
 
 int psmi_shm_mq_rv_thresh = PSMI_MQ_RV_THRESH_NO_KASSIST;
 
@@ -86,6 +85,12 @@ static const amsh_qinfo_t amsh_qelemsz = {
 	.qrepFifoLong = AMLONG_SZ
 };
 
+ustatic struct {
+	void *addr;
+	size_t len;
+	struct sigaction SIGSEGV_old_act;
+	struct sigaction SIGBUS_old_act;
+} action_stash;
 
 static psm2_error_t amsh_poll(ptl_t *ptl, int replyonly);
 static void process_packet(ptl_t *ptl, am_pkt_short_t *pkt, int isreq);
@@ -171,20 +176,54 @@ void amsh_atexit()
 	return;
 }
 
-static
-void amsh_mmap_fault(int sig)
+ustatic
+void amsh_mmap_fault(int signo, siginfo_t *siginfo, void *context)
 {
-	static char shm_errmsg[256];
+	if ((unsigned long int) siginfo->si_addr >= (unsigned long int) action_stash.addr &&
+	    (unsigned long int) siginfo->si_addr <  (unsigned long int) action_stash.addr + (unsigned long int) action_stash.len) {
 
-	snprintf(shm_errmsg, sizeof(shm_errmsg),
-		 "%s: Unable to allocate shared memory for intra-node messaging.\n"
-		 "%s: Delete stale shared memory files in /dev/shm.\n",
-		 psmi_gethostname(), psmi_gethostname());
-	amsh_atexit();
-	if (write(2, shm_errmsg, strlen(shm_errmsg) + 1) == -1)
-		exit(2);
-	else
-		exit(1);	/* XXX revisit this... there's probably a better way to exit */
+		static char shm_errmsg[256];
+
+		snprintf(shm_errmsg, sizeof(shm_errmsg),
+			 "%s: Unable to allocate shared memory for intra-node messaging.\n"
+			 "%s: Delete stale shared memory files in /dev/shm.\n",
+			 psmi_gethostname(), psmi_gethostname());
+		amsh_atexit();
+		if (psmi_write(2, shm_errmsg, strlen(shm_errmsg) + 1) == -1)
+			psmi_exit(2);
+		else
+			psmi_exit(1); /* XXX revisit this... there's probably a better way to exit */
+	} else {
+		if (signo == SIGSEGV) {
+			if (action_stash.SIGSEGV_old_act.sa_sigaction == (void*) SIG_DFL) {
+				psmi_sigaction(SIGSEGV, &action_stash.SIGSEGV_old_act, NULL);
+				raise(SIGSEGV);
+				struct sigaction act;
+				act.sa_sigaction = amsh_mmap_fault;
+				act.sa_flags = SA_SIGINFO;
+				psmi_sigaction(SIGSEGV, &act, NULL);
+			} else if (action_stash.SIGSEGV_old_act.sa_sigaction == (void*) SIG_IGN) {
+				return;
+			} else {
+				action_stash.SIGSEGV_old_act.sa_sigaction(signo, siginfo, context);
+			}
+		} else if (signo == SIGBUS) {
+			if (action_stash.SIGBUS_old_act.sa_sigaction == (void*) SIG_DFL) {
+				psmi_sigaction(SIGBUS, &action_stash.SIGBUS_old_act, NULL);
+				raise(SIGBUS);
+				struct sigaction act;
+				act.sa_sigaction = amsh_mmap_fault;
+				act.sa_flags = SA_SIGINFO;
+				psmi_sigaction(SIGBUS, &act, NULL);
+			} else if (action_stash.SIGBUS_old_act.sa_sigaction == (void*) SIG_IGN) {
+				return;
+			} else {
+				action_stash.SIGBUS_old_act.sa_sigaction(signo, siginfo, context);
+			}
+		} else {
+			psmi_exit(signo);
+		}
+	}
 }
 
 /**
@@ -433,13 +472,15 @@ psm2_error_t psmi_shm_map_remote(ptl_t *ptl, psm2_epid_t epid, uint16_t *shmidx_
 	dest_nodeinfo = (struct am_ctl_nodeinfo *)dest_mapptr;
 
 	/* We core dump right after here if we don't check the mmap */
-	struct sigaction SIGSEGV_old_act;
-	struct sigaction SIGBUS_old_act;
-	struct sigaction act;
-	act.sa_handler = amsh_mmap_fault;
+	action_stash.addr = dest_mapptr;
+	action_stash.len = segsz;
 
-	sigaction(SIGSEGV, &act, &SIGSEGV_old_act);
-	sigaction(SIGBUS, &act, &SIGBUS_old_act);
+	struct sigaction act;
+	act.sa_sigaction = amsh_mmap_fault;
+	act.sa_flags = SA_SIGINFO;
+
+	sigaction(SIGSEGV, &act, &action_stash.SIGSEGV_old_act);
+	sigaction(SIGBUS, &act, &action_stash.SIGBUS_old_act);
 
 	{
 		volatile uint16_t *is_init = &dest_nodeinfo->is_init;
@@ -502,8 +543,8 @@ psm2_error_t psmi_shm_map_remote(ptl_t *ptl, psm2_epid_t epid, uint16_t *shmidx_
 	}
 
 	/* install the old sighandler back */
-	sigaction(SIGSEGV, &SIGSEGV_old_act, NULL);
-	sigaction(SIGBUS, &SIGBUS_old_act, NULL);
+	sigaction(SIGSEGV, &action_stash.SIGSEGV_old_act, NULL);
+	sigaction(SIGBUS, &action_stash.SIGBUS_old_act, NULL);
 
 	if (shmidx == (uint16_t)-1)
 		err = psmi_handle_error(NULL, PSM2_SHMEM_SEGMENT_ERR,
@@ -539,13 +580,12 @@ static psm2_error_t amsh_init_segment(ptl_t *ptl)
 
 	/* We core dump right after here if we don't check the mmap */
 
-	struct sigaction SIGSEGV_old_act;
-	struct sigaction SIGBUS_old_act;
 	struct sigaction act;
-	act.sa_handler = amsh_mmap_fault;
+	act.sa_sigaction = amsh_mmap_fault;
+	act.sa_flags = SA_SIGINFO;
 
-	sigaction(SIGSEGV, &act, &SIGSEGV_old_act);
-	sigaction(SIGBUS, &act, &SIGBUS_old_act);
+	sigaction(SIGSEGV, &act, &action_stash.SIGSEGV_old_act);
+	sigaction(SIGBUS, &act, &action_stash.SIGBUS_old_act);
 
 	/*
 	 * Now that we know our epid, update it in the shmidx array
@@ -587,8 +627,8 @@ static psm2_error_t amsh_init_segment(ptl_t *ptl)
 			    amsh_qcounts.qrepFifoLong);
 
 	/* install the old sighandler back */
-	sigaction(SIGSEGV, &SIGSEGV_old_act, NULL);
-	sigaction(SIGBUS, &SIGBUS_old_act, NULL);
+	sigaction(SIGSEGV, &action_stash.SIGSEGV_old_act, NULL);
+	sigaction(SIGBUS, &action_stash.SIGBUS_old_act, NULL);
 
 fail:
 	return err;

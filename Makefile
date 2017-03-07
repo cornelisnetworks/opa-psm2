@@ -4,7 +4,7 @@
 #
 #  GPL LICENSE SUMMARY
 #
-#  Copyright(c) 2015 Intel Corporation.
+#  Copyright(c) 2016 Intel Corporation.
 #
 #  This program is free software; you can redistribute it and/or modify
 #  it under the terms of version 2 of the GNU General Public License as
@@ -20,7 +20,7 @@
 #
 #  BSD LICENSE
 #
-#  Copyright(c) 2015 Intel Corporation.
+#  Copyright(c) 2016 Intel Corporation.
 #
 #  Redistribution and use in source and binary forms, with or without
 #  modification, are permitted provided that the following conditions
@@ -48,19 +48,27 @@
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-#  Copyright (c) 2003-2014 Intel Corporation. All rights reserved.
-#
+
+OUTDIR = .
+MOCK_OUTDIR = mock_build
+DEBUG_OUTDIR = debug_build
+
+OPTIONS =
+HISTORY = .outdirs
+HISTORIC_TARGETS = $(patsubst %, %_clean, $(shell cat $(HISTORY) 2> /dev/null))
 
 RPM_NAME := libpsm2
 
 SUBDIRS:= ptl_self ptl_ips ptl_am libuuid opa
 export build_dir := .
 
+LINKER_SCRIPT_FILE := psm2_linker_script.map
+
 PSM2_VERNO_MAJOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_MAJOR.*0x0\?\([1-9a-f]\?[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h)
 PSM2_VERNO_MINOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_MINOR.*0x\([0-9]\?[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h)
 PSM2_LIB_MAJOR   := $(shell printf "%d" ${PSM2_VERNO_MAJOR})
 PSM2_LIB_MINOR   := $(shell printf "%d" `sed -n 's/^\#define.*PSM2_VERNO_MINOR.*\(0x[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h`)
-SOURCES_CHKSUM_FILES = Makefile buildflags.mak psm2_linker_script.map \
+SOURCES_CHKSUM_FILES = Makefile buildflags.mak $(LINKER_SCRIPT_FILE) \
 		`find . -regex '\(.*\.h\|.*\.c\)' -not -path "./test/*" -not -path "./tools/*" -not -path "_revision.c" | sort`
 SOURCES_CHKSUM_VALUE = $(shell cat ${SOURCES_CHKSUM_FILES} | sha1sum | cut -d' ' -f 1)
 
@@ -76,9 +84,10 @@ export OPA_LIB_MINOR
 export CCARCH ?= gcc
 export FCARCH ?= gfortran
 
-top_srcdir := .
+top_srcdir := $(shell readlink -m .)
 include $(top_srcdir)/buildflags.mak
 lib_build_dir := $(build_dir)
+INCLUDES += -I$(top_srcdir)
 
 ifneq (x86_64,$(arch))
    ifneq (i386,$(arch))
@@ -111,6 +120,7 @@ nthreads := $(shell echo $$(( `nproc` * 2 )) )
 #  'rhel' if the host is running RHEL.
 #  'suse' if the host is running SUSE.
 #  'fedora' if the host is running Fedora.
+#  'ubuntu' if the host is running Ubuntu.
 #
 # The DISTRO variable is used subsequently for variable
 # behaviors of the 3 distros.
@@ -193,40 +203,85 @@ export UDEVDIR
 #    target.
 DIST := ${RPM_NAME}-${VERSION_RELEASE}
 
-all: symlinks
-	for subdir in $(SUBDIRS); do \
-		$(MAKE) -j $(nthreads) -C $$subdir $@ ;\
+all: symlinks outdir
+	@mkdir -p $(OUTDIR) && \
+	if [ ! -e $(HISTORY) ] || [ -z "`grep -E '^$(OUTDIR)$$' $(HISTORY)`" ]; then \
+		echo $(OUTDIR) >> $(HISTORY); \
+	fi
+	@for subdir in $(SUBDIRS); do \
+		mkdir -p $(OUTDIR)/$$subdir; \
+		$(MAKE) -j $(nthreads) -C $$subdir OUTDIR=$(OUTDIR)/$$subdir $(OPTIONS); \
 	done
-	$(MAKE) -j $(nthreads) ${TARGLIB}.so
-	$(MAKE) -j $(nthreads) -C compat all
+	$(MAKE) -j $(nthreads) OUTDIR=$(OUTDIR) $(OPTIONS) $(OUTDIR)/${TARGLIB}.so
+	@mkdir -p $(OUTDIR)/compat
+	$(MAKE) -j $(nthreads) -C compat OUTDIR=$(OUTDIR)/compat $(OPTIONS)
 
-clean:
-	rm -f _revision.c
-	for subdir in $(SUBDIRS) ; do \
-		$(MAKE) -j $(nthreads) -C $$subdir $@ ;\
+%_clean:
+	make OUTDIR=$* clean
+
+clean: outdir
+	@rm -f _revision.c
+	@for subdir in $(SUBDIRS) compat; do \
+		$(MAKE) -C $$subdir OUTDIR=$(OUTDIR)/$$subdir clean; \
+		if [ -d $(OUTDIR)/$$subdir ] && [ -n "`find $(OUTDIR)/$$subdir -maxdepth 0 -empty`" ]; then \
+			rmdir --ignore-fail-on-non-empty $(OUTDIR)/$$subdir; \
+		fi; \
 	done
-	$(MAKE) -j $(nthreads) -C compat clean
-	rm -f *.o *.d *.gcda *.gcno ${TARGLIB}.so*
+	@if [ -d $(OUTDIR) ]; then \
+		cd $(OUTDIR); \
+		rm -f *.o *.d *.gcda *.gcno ${TARGLIB}.so*; \
+		cd -; \
+	fi
+	@if [ -e $(HISTORY) ] && [ -n "`grep -E '^$(OUTDIR)$$' $(HISTORY)`" ]; then \
+		DELETEME=$(OUTDIR); \
+		while [ -d $$DELETEME ] && [ -n "`find $$DELETEME -maxdepth 0 -empty`" ]; do \
+			rmdir --ignore-fail-on-non-empty $$DELETEME; \
+			DELETEME=`echo $$DELETEME | rev | cut -d "/" -f 2- | rev`; \
+		done; \
+	fi
+	@if [ -e $(HISTORY) ]; then \
+		grep -v -E "^$(OUTDIR)$$" $(HISTORY) > $(HISTORY)_tmp; \
+		mv $(HISTORY)_tmp $(HISTORY); \
+		if [ "`wc -c $(HISTORY) | cut -d ' ' -f 1`" -eq 0 ]; then \
+			rm -f $(HISTORY); \
+		fi; \
+	fi
 
-distclean: cleanlinks clean
+mock: OUTDIR = $(top_srcdir)/$(MOCK_OUTDIR)
+mock: OPTIONS = PSM2_MOCK_TESTING=1
+mock:
+	$(MAKE) OUTDIR=$(OUTDIR) OPTIONS=$(OPTIONS)
+
+debug: OUTDIR = $(top_srcdir)/$(DEBUG_OUTDIR)
+debug: OPTIONS = PSM_DEBUG=1
+debug:
+	$(MAKE) OUTDIR=$(OUTDIR) OPTIONS=$(OPTIONS)
+
+distclean: cleanlinks $(HISTORIC_TARGETS)
 	rm -f ${RPM_NAME}.spec
 	rm -f ${DIST}.tar.gz
 	rm -fr temp.[0-9]*
 
-.PHONY: symlinks
+outdir:
+ifneq ("$(shell echo $(OUTDIR) | cut -c 1)", "/")
+	$(eval override OUTDIR := $(shell readlink -m $(OUTDIR)))
+endif
+
 symlinks:
-	@[[ -L $(build_dir)/include/linux-x86_64 ]] || \
+	@test -L $(build_dir)/include/linux-x86_64 || \
 		ln -sf linux-i386 $(build_dir)/include/linux-x86_64
 
 cleanlinks:
-	rm -f $(build_dir)/include/linux-x86_64
+	rm -rf $(build_dir)/include/linux-x86_64
 
 install: all
-	for subdir in $(SUBDIRS); do \
-		$(MAKE) -j $(nthreads) -C $$subdir $@ ;\
+	for subdir in $(SUBDIRS) ; do \
+		mkdir -p $(OUTDIR)/$$subdir ; \
+		$(MAKE) -j $(nthreads) -C $$subdir OUTDIR=$(OUTDIR)/$$subdir install ; \
 	done
+	$(MAKE) -j $(nthreads) $(OUTDIR)/${TARGLIB}.so OUTDIR=$(OUTDIR)
 	$(MAKE) -j $(nthreads) -C compat install
-	install -D ${TARGLIB}.so.${MAJOR}.${MINOR} \
+	install -D $(OUTDIR)/${TARGLIB}.so.${MAJOR}.${MINOR} \
 		${DESTDIR}${INSTALL_LIB_TARG}/${TARGLIB}.so.${MAJOR}.${MINOR}
 	(cd ${DESTDIR}${INSTALL_LIB_TARG} ; \
 		ln -sf ${TARGLIB}.so.${MAJOR}.${MINOR} ${TARGLIB}.so.${MAJOR} ; \
@@ -254,6 +309,7 @@ endif
 	install -m 0644 -D include/psm2_mock_testing.h ${DESTDIR}/usr/include/hfi1diag/psm2_mock_testing.h
 	install -m 0644 -D include/hfi1_deprecated.h ${DESTDIR}/usr/include/hfi1diag/hfi1_deprecated.h
 	install -m 0644 -D include/opa_revision.h ${DESTDIR}/usr/include/hfi1diag/opa_revision.h
+	install -m 0644 -D psmi_wrappers.h ${DESTDIR}/usr/include/hfi1diag/psmi_wrappers.h
 
 specfile:
 	sed -e 's/@VERSION@/'${VERSION_RELEASE}'/g' ${RPM_NAME}.spec.in | \
@@ -290,6 +346,7 @@ dist: distclean
 			-name "psm.supp"                       -prune -o	\
 			-name "test"                           -prune -o	\
 			-name "tools"                          -prune -o	\
+			-name "artifacts"                      -prune -o	\
 			-print); do \
 		dir=$$(dirname $$x); \
 		mkdir -p ${DIST}/$$dir; \
@@ -357,32 +414,32 @@ ${TARGLIB}-objs := ptl_am/am_reqrep_shmem.o	\
 		   ptl_ips/ips_writehdrq.o	\
 		   ptl_self/ptl.o		\
 		   opa/*.o			\
-		   psm_diags.o
+		   psm_diags.o 			\
+		   psmi_wrappers.o
+
+${TARGLIB}-objs := $(patsubst %.o, $(OUTDIR)/%.o, ${${TARGLIB}-objs})
 
 DEPS:= $(${TARGLIB}-objs:.o=.d)
 -include $(DEPS)
 
-${TARGLIB}.so: ${lib_build_dir}/${TARGLIB}.so.${MAJOR}
+$(OUTDIR)/${TARGLIB}.so: $(OUTDIR)/${TARGLIB}.so.${MAJOR}
 	ln -fs ${TARGLIB}.so.${MAJOR}.${MINOR} $@
 
-${TARGLIB}.so.${MAJOR}: ${lib_build_dir}/${TARGLIB}.so.${MAJOR}.${MINOR}
+$(OUTDIR)/${TARGLIB}.so.${MAJOR}: $(OUTDIR)/${TARGLIB}.so.${MAJOR}.${MINOR}
 	ln -fs ${TARGLIB}.so.${MAJOR}.${MINOR} $@
 
 # when we build the shared library, generate a revision and date
 # string in it, for easier id'ing when people may have copied the
 # file around.  Generate it such that the ident command can find it
 # and strings -a | grep OPA does a reasonable job as well.
-${TARGLIB}.so.${MAJOR}.${MINOR}: ${${TARGLIB}-objs}
+$(OUTDIR)/${TARGLIB}.so.${MAJOR}.${MINOR}: ${${TARGLIB}-objs}
 	echo "char psmi_hfi_IFS_version[]=\"`printenv RELEASE_TAG`\";" > ${lib_build_dir}/_revision.c
 	date +'char psmi_hfi_build_timestamp[] ="%F %T%:z";' >> ${lib_build_dir}/_revision.c
 	echo "char psmi_hfi_sources_checksum[] =\"${SOURCES_CHKSUM_VALUE}\";" >> ${lib_build_dir}/_revision.c
 	echo "char psmi_hfi_git_checksum[] =\"`git rev-parse HEAD`\";" >> ${lib_build_dir}/_revision.c
-	$(CC) -c $(BASECFLAGS) $(INCLUDES) _revision.c -o _revision.o
-	$(CC) $(LDFLAGS) -o $@ -Wl,-soname=${TARGLIB}.so.${MAJOR} -shared \
-		${${TARGLIB}-objs} _revision.o -Lopa $(LDLIBS)
+	$(CC) -c $(BASECFLAGS) $(INCLUDES) _revision.c -o $(OUTDIR)/_revision.o
+	$(CC) $(LINKER_SCRIPT) $(LDFLAGS) -o $@ -Wl,-soname=${TARGLIB}.so.${MAJOR} -shared \
+		${${TARGLIB}-objs} $(OUTDIR)/_revision.o -Lopa $(LDLIBS)
 
-%.o: %.c
+$(OUTDIR)/%.o: $(top_srcdir)/%.c
 	$(CC) $(CFLAGS) $(INCLUDES) -MMD -c $< -o $@
-
-.PHONY: $(SUBDIRS)
-

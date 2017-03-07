@@ -401,9 +401,9 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 		union psmi_envvar_val env_bbs;
 
 		psmi_getenv("PSM2_BOUNCE_SZ",
-			"PSM bounce buffer size (default is 512B)",
+			"PSM bounce buffer size (default is 8192B)",
 			PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
-			(union psmi_envvar_val)512,
+			(union psmi_envvar_val)8192,
 			&env_bbs);
 
 		proto->scb_bufsize = env_bbs.e_uint;

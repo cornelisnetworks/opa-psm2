@@ -50,14 +50,18 @@
 #
 #  Copyright (c) 2003-2014 Intel Corporation. All rights reserved.
 #
+
+OUTDIR = .
+
 TARGLIB := libopa
 MAJOR := $(OPA_LIB_MAJOR)
 MINOR := $(OPA_LIB_MINOR)
 
-top_srcdir := ..
+this_srcdir := $(shell readlink -m .)
+top_srcdir := $(this_srcdir)/..
 include $(top_srcdir)/buildflags.mak
 BASECFLAGS += -D_GNU_SOURCE
-INCLUDES += -I.. -I../ptl_ips
+INCLUDES += -I$(top_srcdir) -I$(top_srcdir)/ptl_ips
 
 ifeq (${arch},x86_64)
 	PLATFORM_OBJ=opa_dwordcpy-x86_64-fast.o
@@ -70,20 +74,40 @@ ${TARGLIB}-objs := opa_debug.o opa_time.o opa_proto.o \
 	opa_dwordcpy-$(arch).o opa_i2cflash.o opa_sysfs.o opa_syslog.o \
 	$(PLATFORM_OBJ)
 
-DEPS:= $(${TARGLIB}-objs:.o=.d)
--include $(DEPS)
+${TARGLIB}-objs := $(patsubst %.o, $(OUTDIR)/%.o, ${${TARGLIB}-objs})
+DEPS := $(${TARGLIB}-objs:.o=.d)
 
-all .DEFAULT:  ${${TARGLIB}-objs}
+.PHONY: all clean
+IGNORE_DEP_TARGETS = clean
+
+all .DEFAULT: ${${TARGLIB}-objs}
 
 install: all
 	@echo "Nothing to do for install."
 
-%.o: %.c
-	$(CC) $(CFLAGS) $(INCLUDES) -MMD -c $< -o $@
+$(OUTDIR)/%.d:  $(this_srcdir)/%.c
+	$(CC) $(CFLAGS) $(INCLUDES) $< -MM -MF $@ -MQ $(@:.d=.o)
 
-%.o: %.S
+$(OUTDIR)/%.d:  $(this_srcdir)/%.S
+	$(CC) $(CFLAGS) $(INCLUDES) $< -MM -MF $@ -MQ $(@:.d=.o)
+
+$(OUTDIR)/%.o: $(this_srcdir)/%.c | ${DEPS}
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OUTDIR)/%.o: $(this_srcdir)/%.S | ${DEPS}
 	$(CC) $(ASFLAGS) -c $< -o $@
 
 clean:
-	rm -f _revision.c
-	rm -f *.o *.d *.gcda *.gcno ${TARGLIB}.*
+	@rm -f $(OUTDIR)/_revision.c
+	@if [ -d $(OUTDIR) ]; then \
+		cd $(OUTDIR); \
+		rm -f *.o *.d *.gcda *.gcno ${TARGLIB}.*; \
+		cd -; \
+	fi
+
+
+#ifeq prevents the deps from being included during clean
+#-include line is required to pull in auto-dependecies during 2nd pass
+ifeq ($(filter $(IGNORE_DEP_TARGETS), $(MAKECMDGOALS)),)
+-include ${DEPS}
+endif

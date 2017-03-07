@@ -721,7 +721,7 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 	struct ips_message_header *p_hdr = rcv_ev->p_hdr;
 	struct ips_tid_recv_desc *tidrecvc;
 	ptl_arg_t desc_id;
-	psmi_seqnum_t sequence_num;
+	psmi_seqnum_t sequence_num, tf_sequence_num;
 
 	psmi_assert(_get_proto_hfi_opcode(p_hdr) == OPCODE_EXPTID);
 
@@ -774,11 +774,16 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 			seq_off += 2048; /* seq is 11 bits */
 		psmi_assert(seq_off < 1024);
 #endif
-		/* Update the shadow tidflow_genseq */
-		tidrecvc->tidflow_genseq.psn_seq = sequence_num.psn_seq + 1;
+		/* NOTE: with RSM in use, we should not automatically update
+		 * our PSN from the HFI's PSN.  The HFI doesn't know about
+		 * RSM interceptions.
+		 */
+		/* (DON'T!) Update the shadow tidflow_genseq */
+		/* tidrecvc->tidflow_genseq.psn_seq = sequence_num.psn_seq + 1; */
 
-	} else
-	if_pf(sequence_num.psn_num == tidrecvc->tidflow_genseq.psn_num) {
+	}
+	/* Always check the sequence number if we get a header, even if SH. */
+	if_pt(sequence_num.psn_num == tidrecvc->tidflow_genseq.psn_num) {
 		/* Update the shadow tidflow_genseq */
 		tidrecvc->tidflow_genseq.psn_seq = sequence_num.psn_seq + 1;
 
@@ -791,15 +796,41 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 			tidrecvc->tidflow_genseq.psn_seq);
 	} else {
 		/* Generation mismatch */
-		if (sequence_num.psn_gen != tidrecvc->tidflow_genseq.psn_gen)
+		if (sequence_num.psn_gen != tidrecvc->tidflow_genseq.psn_gen) {
 			ips_protoexp_do_tf_generr(protoexp,
 						tidrecvc, p_hdr);
-		else
-		/* Sequence mismatch error */
-			ips_protoexp_do_tf_seqerr(protoexp, tidrecvc, p_hdr);
+			PSM2_LOG_MSG("leaving");
+			return IPS_RECVHDRQ_CONTINUE;
+		} else {
+			/* Possible sequence mismatch error */
+			/* First, check if this is a recoverable SeqErr -
+			 * caused by a good packet arriving in a tidflow that
+			 * has had a FECN bit set on some earlier packet.
+			 */
 
-		PSM2_LOG_MSG("leaving");
-		return IPS_RECVHDRQ_CONTINUE;
+			/* If this is the first RSM packet, our own PSN state
+			 * is probably old.  Pull from the HFI if it has
+			 * newer data.
+			 */
+			tf_sequence_num.psn_val =
+				hfi_tidflow_get_seqnum(
+					hfi_tidflow_get(tidrecvc->context->ctrl,
+							tidrecvc->rdescid._desc_idx));
+			if (tf_sequence_num.psn_val > tidrecvc->tidflow_genseq.psn_seq)
+				tidrecvc->tidflow_genseq.psn_seq = tf_sequence_num.psn_seq;
+
+			/* Now re-check the sequence numbers. */
+			if (sequence_num.psn_seq > tidrecvc->tidflow_genseq.psn_seq) {
+				/* It really was a sequence error.  Restart. */
+				ips_protoexp_do_tf_seqerr(protoexp, tidrecvc, p_hdr);
+				PSM2_LOG_MSG("leaving");
+				return IPS_RECVHDRQ_CONTINUE;
+			} else {
+				/* False SeqErr.  We can accept this packet. */
+				if (sequence_num.psn_seq == tidrecvc->tidflow_genseq.psn_seq)
+					tidrecvc->tidflow_genseq.psn_seq++;
+			}
+		}
 	}
 
 	/* Reset the swapped generation count as we received a valid packet */

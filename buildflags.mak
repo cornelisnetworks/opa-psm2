@@ -4,7 +4,7 @@
 #
 #  GPL LICENSE SUMMARY
 #
-#  Copyright(c) 2015 Intel Corporation.
+#  Copyright(c) 2016 Intel Corporation.
 #
 #  This program is free software; you can redistribute it and/or modify
 #  it under the terms of version 2 of the GNU General Public License as
@@ -20,7 +20,7 @@
 #
 #  BSD LICENSE
 #
-#  Copyright(c) 2015 Intel Corporation.
+#  Copyright(c) 2016 Intel Corporation.
 #
 #  Redistribution and use in source and binary forms, with or without
 #  modification, are permitted provided that the following conditions
@@ -48,7 +48,7 @@
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-#  Copyright (c) 2003-2015 Intel Corporation. All rights reserved.
+#  Copyright (c) 2003-2016 Intel Corporation. All rights reserved.
 #
 
 # set top_srcdir and include this file
@@ -89,11 +89,17 @@ BASECFLAGS += -DPSM2_MOCK_TESTING=1
 # we skip the linker script for testing version, we want all symbols to be
 # reachable from outside the library
 else
-LDFLAGS += -Wl,--version-script psm2_linker_script.map
+LINKER_SCRIPT := -Wl,--version-script $(LINKER_SCRIPT_FILE)
 endif
 
 WERROR := -Werror
 INCLUDES := -I. -I$(top_srcdir)/include -I$(top_srcdir)/mpspawn -I$(top_srcdir)/include/$(os)-$(arch)
+
+#
+# use IFS provided hfi1_user.h if installed.
+#
+IFS_HFI_HEADER_PATH := /usr/include/uapi
+INCLUDES += -I${IFS_HFI_HEADER_PATH}
 
 BASECFLAGS +=-Wall $(WERROR)
 
@@ -138,6 +144,9 @@ endif
 #
 BASECFLAGS += -D_DEFAULT_SOURCE -D_SVID_SOURCE -D_BSD_SOURCE
 
+ifneq (,${HFI_BRAKE_DEBUG})
+  BASECFLAGS += -DHFI_BRAKE_DEBUG
+endif
 ifneq (,${PSM_DEBUG})
   BASECFLAGS += -O -g3 -DPSM_DEBUG -D_HFI_DEBUGGING -funit-at-a-time -Wp,-D_FORTIFY_SOURCE=2
 else
@@ -181,7 +190,7 @@ ifeq (${CCARCH},icc)
     LDFLAGS += -static-intel
 else
 	ifeq (${CCARCH},gcc)
-	    CFLAGS += $(BASECFLAGS) -Wno-strict-aliasing 
+	    CFLAGS += $(BASECFLAGS) -Wno-strict-aliasing -Wno-format-security
 	else
 	    ifeq (${CCARCH},gcc4)
 		CFLAGS += $(BASECFLAGS)

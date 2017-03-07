@@ -51,8 +51,6 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
-
 /* This file contains the initialization functions used by the low
    level hfi protocol code. */
 
@@ -70,8 +68,8 @@
 #include <malloc.h>
 
 #ifdef PSM_VALGRIND
-#include "valgrind/valgrind.h"
-#include "valgrind/memcheck.h"
+#include <valgrind/valgrind.h>
+#include <valgrind/memcheck.h>
 #endif
 
 #include "ipserror.h"
@@ -123,7 +121,7 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 
 	/* 1. ask driver to assign context to current process */
 	memset(&c, 0, sizeof(struct hfi1_cmd));
-	c.type = HFI1_CMD_ASSIGN_CTXT;
+	c.type = PSMI_HFI_CMD_ASSIGN_CTXT;
 
 #ifdef PSM2_SUPPORT_IW_CMD_API
 	/* If psm is communicating with a MAJOR version 6 driver, we need
@@ -133,7 +131,7 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 	   is identical to the MAJOR version 5 struct hfi1_user_info. */
 	if (hfi_get_user_major_version() == IOCTL_CMD_API_MODULE_MAJOR)
 	{
-		/* If psm is communication with a MAJOR version 6 driver,
+		/* If psm is communicating with a MAJOR version 6 driver,
 		   we copy uinfo into uinfo_new and pass uinfo_new to the driver. */
 		c.len = sizeof(uinfo_new);
 		c.addr = (__u64) (&uinfo_new);
@@ -182,7 +180,7 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 #endif
 
 	/* 2. get context info from driver */
-	c.type = HFI1_CMD_CTXT_INFO;
+	c.type = PSMI_HFI_CMD_CTXT_INFO;
 	c.len = sizeof(*cinfo);
 	c.addr = (__u64) cinfo;
 
@@ -248,14 +246,9 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 		}
 	}
 
-        if (getenv("PSM2_IDENTIFY")) {
-                printf("%s %s run-time driver interface v%d.%d\n",
-                          hfi_get_mylabel(), hfi_ident_tag, hfi_get_user_major_version(), hfi_get_user_minor_version());
-        }
-
 
 	/* 4. Get user base info from driver */
-	c.type = HFI1_CMD_USER_INFO;
+	c.type = PSMI_HFI_CMD_USER_INFO;
 	c.len = sizeof(*binfo);
 	c.addr = (__u64) binfo;
 
@@ -279,6 +272,11 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 		  "statusbase %llx, tailaddr %llx\n", binfo->user_regbase,
 		  binfo->events_bufbase, binfo->status_bufbase,
 		  binfo->rcvhdrtail_base);
+
+	if (getenv("PSM2_IDENTIFY")) {
+                printf("%s %s run-time driver interface v%d.%d\n",
+                          hfi_get_mylabel(), hfi_ident_tag, hfi_get_user_major_version(), hfi_get_user_minor_version());
+        }
 
 	/*
 	 * Check if driver version matches PSM version,

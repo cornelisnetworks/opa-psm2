@@ -98,10 +98,11 @@ int psmi_verno_isinteroperable(uint16_t verno)
 	return 1;
 }
 
-int psmi_isinitialized()
+int MOCKABLE(psmi_isinitialized)()
 {
 	return (psmi_isinit == PSMI_INITIALIZED);
 }
+MOCK_DEF_EPILOGUE(psmi_isinitialized);
 
 
 psm2_error_t __psm2_init(int *major, int *minor)

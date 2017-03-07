@@ -179,6 +179,17 @@ struct psm2_mq {
 typedef psm2_error_t(*mq_rts_callback_fn_t) (psm2_mq_req_t req, int was_posted);
 typedef psm2_error_t(*mq_testwait_callback_fn_t) (psm2_mq_req_t *req);
 
+
+/* If request is marked as internal, then it will not
+   be exposed to the user, will not be added to the mq->completed_q.
+   This flag is set if request is used by e.g. MPI_SEND */
+#define PSMI_REQ_FLAG_IS_INTERNAL (1 << 0)
+
+#define psmi_is_req_internal(req) ((req)->flags & PSMI_REQ_FLAG_IS_INTERNAL)
+
+#define psmi_assert_req_not_internal(req) psmi_assert(((req) == PSM2_MQ_REQINVALID) || \
+							(!psmi_is_req_internal(req)))
+
 /* receive mq_req, the default */
 struct psm2_mq_req {
 	struct {
@@ -215,6 +226,8 @@ struct psm2_mq_req {
 		uint32_t recv_msgposted;
 	};
 	uint32_t rts_reqidx_peer;
+
+	uint64_t flags;
 
 	/* Used for request to send messages */
 	void *context;		/* user context associated to sends or receives */
@@ -380,6 +393,7 @@ PSMI_ALWAYS_INLINE(void mq_qq_append(struct mqq *q, psm2_mq_req_t req))
 #else
 #define mq_qq_append(qq, req)						\
 	do {								\
+		psmi_assert_req_not_internal(req);			\
 		(req)->next[PSM2_ANYTAG_ANYSRC] = NULL;			\
 		(req)->prev[PSM2_ANYTAG_ANYSRC] = (qq)->last;		\
 		if ((qq)->last)						\

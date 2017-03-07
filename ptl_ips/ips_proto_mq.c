@@ -125,7 +125,8 @@ int ips_proto_mq_eager_complete(void *reqp, uint32_t nbytes)
 	if (req->send_msgoff >= req->send_msglen) {
 		req->state = MQ_STATE_COMPLETE;
 		ips_barrier();
-		mq_qq_append(&req->mq->completed_q, req);
+		if(!psmi_is_req_internal(req))
+			mq_qq_append(&req->mq->completed_q, req);
 	}
 	return IPS_RECVHDRQ_CONTINUE;
 }
@@ -493,22 +494,9 @@ ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 		 * is not possible to set to this 'buf' address.
 		 */
 		if (ips_scb_buffer(scb) == (void *)ubuf) {
-			if (paylen > proto->scb_bufsize ||
-					!ips_scbctrl_bufalloc(scb)) {
-				/* payload is larger than bounce buffer,
-				 * or, can't allocate bounce buffer,
-				 * continue to send from user buffer */
-				ips_scb_cb(scb) = ips_proto_mq_eager_complete;
-				ips_scb_cb_param(scb) = req;
-			} else {
-				/* copy to bounce buffer */
-				ips_shortcpy(ips_scb_buffer(scb),
-					(void*)ubuf, paylen);
-
-				/* mark the message done */
-				req->state = MQ_STATE_COMPLETE;
-				mq_qq_append(&mq->completed_q, req);
-			}
+			/* continue to send from user buffer */
+			ips_scb_cb(scb) = ips_proto_mq_eager_complete;
+			ips_scb_cb_param(scb) = req;
 		} else {
 			/* mark the message done */
 			req->state = MQ_STATE_COMPLETE;
@@ -630,9 +618,11 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 		 * is not possible to set to this 'ubuf' address.
 		 */
 		if (ips_scb_buffer(scb) == (void *)ubuf) {
-			if (paylen > proto->scb_bufsize ||
-					!ips_scbctrl_bufalloc(scb)) {
-				/* payload is larger than bounce buffer,
+			if (flow->transfer != PSM_TRANSFER_PIO ||
+			    paylen > proto->scb_bufsize ||
+			    !ips_scbctrl_bufalloc(scb)) {
+				/* sdma transfer (can't change user buffer),
+				 * or, payload is larger than bounce buffer,
 				 * or, can't allocate bounce buffer,
 				 * send from user buffer till complete */
 				PSMI_BLOCKUNTIL(mq->ep, err,
@@ -674,6 +664,7 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 		req->send_msglen = len;
 		req->tag = *tag;
 		req->send_msgoff = 0;
+		req->flags |= PSMI_REQ_FLAG_IS_INTERNAL;
 
 		err = ips_ptl_mq_eager(proto, req, flow, tag, ubuf, len);
 		if (err != PSM2_OK)
@@ -696,6 +687,7 @@ do_rendezvous:
 
 		req->type |= MQE_TYPE_WAITING;
 		req->tag = *tag;
+		req->flags |= PSMI_REQ_FLAG_IS_INTERNAL;
 		err = ips_ptl_mq_rndv(proto, req, ipsaddr, ubuf, len);
 		if (err != PSM2_OK)
 			return err;

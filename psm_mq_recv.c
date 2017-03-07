@@ -78,7 +78,8 @@ void psmi_mq_handle_rts_complete(psm2_mq_req_t req)
 	psmi_mq_stats_rts_account(req);
 	req->state = MQ_STATE_COMPLETE;
 	ips_barrier();
-	mq_qq_append(&mq->completed_q, req);
+	if(!psmi_is_req_internal(req))
+		mq_qq_append(&mq->completed_q, req);
 #ifdef PSM_VALGRIND
 	if (MQE_TYPE_IS_RECV(req->type))
 		PSM_VALGRIND_DEFINE_MQ_RECV(req->buf, req->buf_len,
