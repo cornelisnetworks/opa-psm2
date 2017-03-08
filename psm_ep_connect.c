@@ -309,7 +309,7 @@ connect_fail:
 			}
 		}
 		errbuf[sizeof(errbuf) - 1] = '\0';
-		err = psmi_handle_error(ep, err, errbuf);
+		err = psmi_handle_error(ep, err, "%s", errbuf);
 	}
 
 fail:

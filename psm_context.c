@@ -425,7 +425,6 @@ psm2_error_t psmi_context_check_status(const psmi_context_t *contexti)
 	psmi_context_t *context = (psmi_context_t *) contexti;
 	struct hfi1_status *status =
 	    (struct hfi1_status *)context->ctrl->base_info.status_bufbase;
-	char *errmsg = NULL;
 
 	/* Fatal chip-related errors */
 	if (!(status->dev & HFI1_STATUS_CHIP_PRESENT) ||
@@ -442,11 +441,10 @@ psm2_error_t psmi_context_check_status(const psmi_context_t *contexti)
 						  errmsg_sp);
 			else {
 				if (status->dev & HFI1_STATUS_HWERROR)
-					errmsg = "Hardware error";
+					psmi_handle_error(context->ep, err, "Hardware error");
 				else
-					errmsg = "Hardware not found";
+					psmi_handle_error(context->ep, err, "Hardware not found");
 
-				psmi_handle_error(context->ep, err, errmsg);
 			}
 		}
 	}
