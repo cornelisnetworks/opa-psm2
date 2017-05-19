@@ -54,7 +54,7 @@ $(error top_srcdir must be set to include makefile fragment)
 endif
 
 export os ?= $(shell uname -s | tr '[A-Z]' '[a-z]')
-export arch := $(shell uname -p | sed -e 's,\(i[456]86\|athlon$$\),i386,')
+export arch := $(shell uname -m | sed -e 's,\(i[456]86\|athlon$$\),i386,')
 export CCARCH ?= gcc
 
 ifeq (${CCARCH},gcc)
