@@ -229,3 +229,26 @@ OFED Support
 Intel OPA is not yet included within OFED. But the hfi1 driver is available
 publicly at kernel.org. Please do pull the driver from either kernel.org or
 the github page for opa-hfi1 driver (https://github.com/01org/opa-hfi1)
+
+PSM Compatibility Support
+------------
+
+libpsm2-compat suppports applications that use the PSM API instead of
+the PSM2 API, through a compatibility library. This library is an interface
+between PSM applications and the PSM2 API.
+
+If the system has an application that is coded to use PSM and has requirements
+to use PSM2 (i.e. the host has Omni-Path hardware), the compatibility library
+must be used.
+
+The compatibility library is enabled through ldconfig. The system
+administrator must add the following configuration in order to use PSM2
+compatibility over PSM:
+
+File:  /etc/ld.so.conf.d/psm2-compat.conf
+/usr/lib/psm2-compat/
+
+After adding this configuration, the superuser must execute ldconfig.
+This puts the libpsm2-compat version of libpsm_infinipath.so.1 in preference
+to that of libpsm-infinipath. Doing so allows applications coded to PSM
+to transparently use the PSM2 API and devices which require it.
