@@ -285,7 +285,7 @@ connect_fail:
 		} else
 			len = snprintf(errbuf, sizeof(errbuf) - 1,
 				       "%s", err == PSM2_TIMEOUT ?
-				       "Dectected connection timeout" :
+				       "Detected connection timeout" :
 				       psm2_error_get_string(err));
 
 		/* first pass, look for all nodes with the error */
