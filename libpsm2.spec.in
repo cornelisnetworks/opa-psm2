@@ -4,7 +4,7 @@
 #
 #  GPL LICENSE SUMMARY
 #
-#  Copyright(c) 2015 Intel Corporation.
+#  Copyright(c) 2017 Intel Corporation.
 #
 #  This program is free software; you can redistribute it and/or modify
 #  it under the terms of version 2 of the GNU General Public License as
@@ -20,7 +20,7 @@
 #
 #  BSD LICENSE
 #
-#  Copyright(c) 2015 Intel Corporation.
+#  Copyright(c) 2017 Intel Corporation.
 #
 #  Redistribution and use in source and binary forms, with or without
 #  modification, are permitted provided that the following conditions
@@ -48,9 +48,7 @@
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# Copyright (c) 2014-2015 Intel Corporation. All rights reserved.
-#
-Summary: Intel PSM Libraries
+Summary: Intel PSM2 Libraries
 Name: @RPM_NAME@
 Version: @VERSION@
 Release: 1@SPEC_FILE_RELEASE_DIST@
@@ -66,7 +64,6 @@ Source0: %{name}-%{version}.tar.gz
 
 # The OPA product is supported on x86 64 only:
 ExclusiveArch: x86_64
-BuildRequires: libuuid-devel
 
 %if 0%{?rhel}==0 || 0%{?rhel} > 6
 BuildRequires: systemd
@@ -76,14 +73,13 @@ Provides: hfi1-psm
 Obsoletes: hfi1-psm < 1.0.0
 
 %package devel
-Summary: Development files for Intel PSM
+Summary: Development files for Intel PSM2
 Requires: %{name}%{?_isa} = %{version}-%{release}
-Requires: libuuid-devel
 Provides: hfi1-psm-devel
 Obsoletes: hfi1-psm-devel < 1.0.0
 
 %package compat
-Summary: Compat library for Intel PSM
+Summary: Compat library for Intel PSM2
 Requires: %{name}%{?_isa} = %{version}-%{release}
 %if 0%{?fedora}
 Requires: systemd-udev
@@ -92,14 +88,14 @@ Provides: hfi1-psm-compat
 Obsoletes: hfi1-psm-compat < 1.0.0
 
 %description
-The PSM Messaging API, or PSM API, is the low-level
+The PSM2 Messaging API, or PSM2 API, is the low-level
 user-level communications interface for the Intel(R) OPA
-family of products. PSM users are enabled with mechanisms
+family of products. PSM2 users are enabled with mechanisms
 necessary to implement higher level communications
 interfaces in parallel environments.
 
 %description devel
-Development files for the Intel PSM library
+Development files for the Intel PSM2 library
 
 %description compat
 Support for MPIs linked with PSM versions < 2

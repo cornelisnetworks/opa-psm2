@@ -409,7 +409,7 @@ static int psmi_getenv_is_verblevel(int printlevel)
 	} while (0)
 
 int
-psmi_getenv(const char *name, const char *descr, int level,
+MOCKABLE(psmi_getenv)(const char *name, const char *descr, int level,
 	    int type, union psmi_envvar_val defval,
 	    union psmi_envvar_val *newval)
 {
@@ -560,6 +560,7 @@ psmi_getenv(const char *name, const char *descr, int level,
 
 	return used_default;
 }
+MOCK_DEF_EPILOGUE(psmi_getenv);
 
 /*
  * Parsing int parameters set in string tuples.
@@ -993,6 +994,7 @@ struct psmi_memtype_hdr {
 		uint64_t magic:8;
 		uint64_t type:8;
 	};
+	void *original_allocation;
 };
 
 struct psmi_stats_malloc psmi_stats_memory;
@@ -1036,11 +1038,6 @@ void psmi_log_memstats(psmi_memtype_t type, int64_t nbytes)
 }
 
 // Memory stats will only be collected under debug builds
-// Memory stats at O3 optimization will cause memory problems
-// because the 8B header to memory will throw off alignment assumptions
-//
-// This can be re-enabled with padding to prevent alignment issues
-// if it is determined that the stats are needed
 
 #ifdef PSM_DEBUG
 #define psmi_stats_mask PSMI_STATSTYPE_MEMORY
@@ -1379,8 +1376,6 @@ void *psmi_malloc_internal(psm2_ep_t ep, psmi_memtype_t type,
 	size_t newsz = sz;
 	void *newa;
 
-	psmi_assert(sizeof(struct psmi_memtype_hdr) == 8);
-
 	if_pf(psmi_stats_mask & PSMI_STATSTYPE_MEMORY)
 	    newsz += sizeof(struct psmi_memtype_hdr);
 
@@ -1396,6 +1391,7 @@ void *psmi_malloc_internal(psm2_ep_t ep, psmi_memtype_t type,
 		hdr->size = newsz;
 		hdr->type = type;
 		hdr->magic = 0x8c;
+		hdr->original_allocation = newa;
 		psmi_log_memstats(type, newsz);
 		newa = (void *)(hdr + 1);
 		/* _HFI_INFO("alloc is %p\n", newa); */
@@ -1411,12 +1407,22 @@ void *psmi_memalign_internal(psm2_ep_t ep, psmi_memtype_t type,
 {
 	size_t newsz = sz;
 	void *newa;
-	int ret;
-
-	psmi_assert(sizeof(struct psmi_memtype_hdr) == 8);
+	int ret, preambleSize = 0;
 
 	if_pf(psmi_stats_mask & PSMI_STATSTYPE_MEMORY)
-		newsz += sizeof(struct psmi_memtype_hdr);
+	{
+		if (sizeof(struct psmi_memtype_hdr) > alignment)
+		{
+			int n = sizeof(struct psmi_memtype_hdr) / alignment;
+			int r = sizeof(struct psmi_memtype_hdr) % alignment;
+			if (r)
+				n++;
+			preambleSize = n * alignment;
+		}
+		else
+			preambleSize = alignment;
+		newsz += preambleSize;
+	}
 
 	ret = my_memalign(&newa, alignment, newsz, curloc);
 	if (ret) {
@@ -1426,12 +1432,14 @@ void *psmi_memalign_internal(psm2_ep_t ep, psmi_memtype_t type,
 	}
 
 	if_pf(psmi_stats_mask & PSMI_STATSTYPE_MEMORY) {
-		struct psmi_memtype_hdr *hdr = (struct psmi_memtype_hdr *)newa;
+		void *rv = newa + preambleSize;
+		struct psmi_memtype_hdr *hdr = (struct psmi_memtype_hdr *)(rv-sizeof(struct psmi_memtype_hdr));
 		hdr->size = newsz;
 		hdr->type = type;
 		hdr->magic = 0x8c;
+		hdr->original_allocation = newa;
 		psmi_log_memstats(type, newsz);
-		newa = (void *)(hdr + 1);
+		newa = rv;
 		/* _HFI_INFO("alloc is %p\n", newa); */
 	}
 	return newa;
@@ -1480,7 +1488,7 @@ void psmi_free_internal(void *ptr,const char *curloc)
 		int magic = (int)hdr->magic;
 		psmi_log_memstats(type, -size);
 		psmi_assert_always(magic == 0x8c);
-		ptr = (void *)hdr;
+		ptr = hdr->original_allocation;
 	}
 	my_free(ptr,curloc);
 }
@@ -1491,15 +1499,16 @@ psmi_coreopt_ctl(const void *core_obj, int optname,
 		 void *optval, uint64_t *optlen, int get))
 {
 	psm2_error_t err = PSM2_OK;
-	char err_string[256];
 
 	switch (optname) {
 	case PSM2_CORE_OPT_DEBUG:
 		/* Sanity check length */
 		if (*optlen < sizeof(unsigned)) {
-			snprintf(err_string, 256, "Option value length error");
+			err =  psmi_handle_error(NULL,
+					PSM2_PARAM_ERR,
+					"Option value length error");
 			*optlen = sizeof(unsigned);
-			goto fail;
+			return err;
 		}
 
 		if (get) {
@@ -1514,17 +1523,18 @@ psmi_coreopt_ctl(const void *core_obj, int optname,
 
 			/* Sanity check epaddr */
 			if (!epaddr) {
-				snprintf(err_string, 256,
-					 "Invalid endpoint address");
-				goto fail;
+				return psmi_handle_error(NULL,
+						PSM2_PARAM_ERR,
+						"Invalid endpoint address");
 			}
 
 			/* Sanity check length */
 			if (*optlen < sizeof(unsigned long)) {
-				snprintf(err_string, 256,
-					 "Option value length error");
+				err =  psmi_handle_error(NULL,
+						PSM2_PARAM_ERR,
+						"Option value length error");
 				*optlen = sizeof(void *);
-				goto fail;
+				return err;
 			}
 
 			if (get) {
@@ -1536,16 +1546,13 @@ psmi_coreopt_ctl(const void *core_obj, int optname,
 		break;
 	default:
 		/* Unknown/unrecognized option */
-		snprintf(err_string, 256, "Unknown PSM2_CORE option %u.",
-			 optname);
-		goto fail;
+		err = psmi_handle_error(NULL,
+				PSM2_PARAM_ERR,
+				"Unknown PSM2_CORE option %u.",
+				optname);
+		break;
 	}
-
 	return err;
-
-fail:
-	/* Unrecognized/unknown option */
-	return psmi_handle_error(NULL, PSM2_PARAM_ERR, err_string);
 }
 
 psm2_error_t psmi_core_setopt(const void *core_obj, int optname,

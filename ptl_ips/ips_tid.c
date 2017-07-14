@@ -186,6 +186,7 @@ ips_tid_acquire(struct ips_tid *tidc,
 {
 	struct ips_tid_ctrl *ctrl = tidc->tid_ctrl;
 	psm2_error_t err = PSM2_OK;
+	uint16_t flags = 0;
 	int rc;
 
 	psmi_assert(((uintptr_t) buf & 0xFFF) == 0);
@@ -207,9 +208,14 @@ ips_tid_acquire(struct ips_tid *tidc,
 		*length = 4096*tidc->tid_ctrl->tid_num_max;
 	}
 
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*) buf))
+		flags = HFI1_BUF_GPU_MEM;
+#endif
+
 	rc = hfi_update_tid(tidc->context->ctrl,
 		    (uint64_t) (uintptr_t) buf, length,
-		    (uint64_t) (uintptr_t) tid_array, tidcnt);
+		    (uint64_t) (uintptr_t) tid_array, tidcnt, flags);
 	if (rc < 0) {
 		/* Unable to pin pages? retry later */
 		err = PSM2_EP_DEVICE_FAILURE;

@@ -14,18 +14,6 @@ Description: Intel PSM2 library
  mechanisms necessary to implement higher level communications
  interfaces in parallel environments.
 
-Package: libpsm2-dbg
-Section: debug
-Priority: extra
-Architecture: linux-any
-Depends: ${misc:Depends}, libpsm2 (= ${binary:Version})
-Description: Debugging symbols for Intel PSM2 library
- PSM2 is Intel's low-level user-space communications interface for
- the Intel(R) OPA family of products. PSM2 users are enabled with
- mechanisms necessary to implement higher level communications
- interfaces in parallel environments. This package contains the
- debugging symbols for Intel PSM2 library.
-
 Package: libpsm2-dev
 Architecture: linux-any
 Section: libdevel
@@ -36,11 +24,3 @@ Description: Development files for Intel PSM2 library
  mechanisms necessary to implement higher level communications
  interfaces in parallel environments. This package contains the
  development headers for Intel PSM2 library.
-
-Package: libpsm2-compat
-Architecture: linux-any
-Depends: ${misc:Depends}, ${shlibs:Depends}, libpsm2 (= ${binary:Version})
-Description: Compat library for Intel PSM2
- PSM compatibility API is Intel's low-level user-space communications
- interface for the Intel(R) TrueScale family of products. This library
- adds support for MPIs linked with PSM versions < 2.

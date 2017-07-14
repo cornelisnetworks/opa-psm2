@@ -624,7 +624,8 @@ fail:
 	return err;
 }
 
-psm2_error_t ips_ibta_init(struct ips_proto *proto)
+psm2_error_t
+MOCKABLE(ips_ibta_init)(struct ips_proto *proto)
 {
 	psm2_error_t err = PSM2_OK;
 	union psmi_envvar_val psm_path_policy;
@@ -773,6 +774,7 @@ finishcca:
 fail:
 	return err;
 }
+MOCK_DEF_EPILOGUE(ips_ibta_init);
 
 psm2_error_t ips_ibta_fini(struct ips_proto *proto)
 {

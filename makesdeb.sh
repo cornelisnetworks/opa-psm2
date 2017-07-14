@@ -5,7 +5,7 @@
 #
 #  GPL LICENSE SUMMARY
 #
-#  Copyright(c) 2016 Intel Corporation.
+#  Copyright(c) 2017 Intel Corporation.
 #
 #  This program is free software; you can redistribute it and/or modify
 #  it under the terms of version 2 of the GNU General Public License as
@@ -50,54 +50,56 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
+# Stop on error
 set -e
 
-OPTS="ghGbBAS"
-DEFAULT_OPT=S
+BUILD_OPTS="gFGbBAS"
+BUILD_OPT=F
 
 function literate()
 {
-	echo $(sed "s/\B/&$2/g" <<< "$1")
+    echo $(sed "s/\B/&$2/g" <<< "$1")
 }
 
 function usage()
 {
-	echo "Usage: $0 [debuild ($(literate $OPTS '|'))]"
-	exit 1
+    echo "Usage: ${0##*/} [-h] [debuild -($(literate $BUILD_OPTS '|'))]"
+    exit $1
 }
 
-while getopts "$OPTS" OPT; do
+while getopts "h$BUILD_OPTS" OPT; do
     case $OPT in
-	h)
-	    usage
-		;;
-	\?)
-	    usage
-		;;
-	*)
-	    DEFAULT_OPT=$OPT
-		;;
+        h)
+            usage
+                ;;
+        \?)
+            usage 1
+                ;;
+        *)
+            BUILD_OPT=$OPT
+                ;;
     esac
 done
 
 # Remove parsed options
 shift $((OPTIND-1))
 
-# Check if we have any non-option parameters 
+# Check if we have any non-option parameters
 test ! $# -eq 0 && usage
 
 # Annotate changelog
-cat debian/changelog.tmpl > debian/changelog
+cat debian/changelog.in > debian/changelog
 
-GIT_TAG_RELEASE=$(git describe --tags --long --match='v*')
-VERSION=$(sed 's/^v\([0-9]\+\.[0-9]\+\)-\([0-9]\+\).\+/\1.\2/' <<< "$GIT_TAG_RELEASE")
+GIT_TAG_PREFIX=v
+GIT_TAG_RELEASE=$(git describe --tags --long --match="$GIT_TAG_PREFIX*")
+VERSION=$(sed -e "s/^$GIT_TAG_PREFIX\(.\+\)-\(.\+\)-.\+/\1_\2/" -e 's/_/./g' <<< "$GIT_TAG_RELEASE")
 
-debchange --newversion=$VERSION ""
+debchange --newversion=$VERSION "Bump up version to $VERSION"
 
 debchange --release ""
 
 # Build package
-debuild -$DEFAULT_OPT -tc
+debuild -$BUILD_OPT -tc
 
 echo "The deb package(s) is (are) in parent directory"
 

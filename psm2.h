@@ -116,7 +116,7 @@ extern "C" {
  * connecting endpoints to enable communication (@ref psm2_ep_connect) are two
  * decoupled mechanisms.  Users that do not dynamically change the number of
  * endpoints beyond parallel startup will probably lump both mechanisms
- * together at startup.  Users that wish to manipulate the location and amount
+ * together at startup.  Users that wish to manipulate the location and number
  * of endpoints at runtime can do so by explicitly connecting sets or subsets
  * of endpoints.
  *
@@ -461,7 +461,7 @@ typedef enum psm2_path_res psm2_path_res_t;
    	    // We were able to initialize PSM2 but will defer all further error
    	    // handling since most of the errors beyond this point will be fatal.
    	    int err = psm2_error_register_handler(NULL,  // Global handler
-   	                                          PSM2_ERRHANDLER_PSM2_HANDLER);
+   	                                          PSM2_ERRHANDLER_PSM_HANDLER);
    	    if (err) {
    	       fprintf(stderr, "Couldn't register global errhandler: %s\n",
    	   	          psm2_error_get_string(err));
@@ -632,7 +632,7 @@ uint64_t psm2_epid_port(psm2_epid_t epid);
 
 /** @brief List the number of available OPA units
  *
- * Function used to determine the amount of locally available OPA units.
+ * Function used to determine the number of locally available OPA units.
  * For @c N units, valid unit numbers in @ref psm2_ep_open are @c 0 to @c N-1.
  *
  * @returns PSM2_OK unless the user has not called @ref psm2_init
@@ -730,7 +730,7 @@ struct psm2_ep_open_opts {
  *    from generating the same uuid_t.
  *
  * The following options are relevent when opening an endpoint:
- *   @li @c timeout establishes the amount of nanoseconds to wait before
+ *   @li @c timeout establishes the number of nanoseconds to wait before
  *                  failing to open a port (with -1, defaults to 15 secs).
  *   @li @c unit sets the OPA unit number to use to open a port (with
  *               -1, PSM2 determines the best unit to open the port).  If @c
@@ -743,7 +743,7 @@ struct psm2_ep_open_opts {
  *                   set or not (@ref PSM2_EP_OPEN_AFFINITY_FORCE).
  *                   If @c HFI_NO_CPUAFFINITY is set in the environment, this
  *                   setting is ignored.
- *   @li @c shm_mbytes sets a maximum amount of megabytes that can be allocated
+ *   @li @c shm_mbytes sets a maximum number of megabytes that can be allocated
  *		       to each local endpoint ID connected through this
  *		       endpoint (with -1, defaults to 10 MB).
  *   @li @c sendbufs_num sets the number of send buffers that can be
@@ -903,8 +903,8 @@ psm2_map_nid_hostname(int num, const uint64_t *nids, const char **hostnames);
  *
  * @param[in] ep PSM2 endpoint handle
  *
- * @param[in] num_of_epid The amount of endpoints to connect to, which
- *                        also establishes the amount of elements contained in
+ * @param[in] num_of_epid The number of endpoints to connect to, which
+ *                        also establishes the number of elements contained in
  *                        all of the function's array-based parameters.
  *
  * @param[in] array_of_epid User-allocated array that contains @c num_of_epid
@@ -1002,6 +1002,92 @@ psm2_error_t
 psm2_ep_connect(psm2_ep_t ep, int num_of_epid, const psm2_epid_t *array_of_epid,
 		   const int *array_of_epid_mask, psm2_error_t *array_of_errors,
 		   psm2_epaddr_t *array_of_epaddr, int64_t timeout);
+
+/* @brief Disconnect one or more remote endpoints from a local endpoint.
+*
+* Function to non-collectively disconnect a connection to a set of endpoint
+* addresses and free the endpoint addresses. After disconnecting, the
+* application cannot send messages to the remote processes and PSM2 is
+* restored back to the state before calling psm2_ep_connect. The application
+* must call psm2_ep_connect to establish the connections again.
+*
+* @param[in] ep PSM2 endpoint handle
+*
+* @param[in] num_of_epaddr The number of endpoint addresses to disconnect from,
+*                          which also indicates the number of elements contained
+*                          in all of the function’s array-based parameters.
+*
+* @param[in] array_of_epaddr User-allocated array that contains num_of_epaddr
+*                            valid endpoint addresses. Each endpoint address (or
+*                            epaddr) has been obtained through a previous
+*                            psm2_ep_connect call.
+*
+* @param[in] array_of_epaddr_mask User-allocated array that contains
+*                                 num_of_epaddr integers. This array of masks
+*                                 allows users to select which of the
+*                                 epaddresses in array_of_epaddr should be
+*                                 disconnected. If the integer at index i is
+*                                 zero, PSM2 does not attempt to disconnect to
+*                                 the epaddr at index i in array_of_epaddr. If
+*                                 this parameter is NULL, PSM2 tries to
+*                                 disconnect all epaddr in array_of_epaddr.
+*
+* @param[out] array_of_errors User-allocated array of at least num_of_epaddr
+*                             elements. If the function does not return PSM2_OK,
+*                             this array can be consulted for each endpoint
+*                             address not masked off by array_of_epaddr_mask to
+*                             know why the endpoint could not be disconnected.
+*                             Any endpoint address that could not be
+*                             disconnected because of an unrelated failure is
+*                             marked as PSM2_EPID_UNKNOWN. If the function
+*                             returns PSM2_OK, the errors for all endpoint
+*                             addresses also contain PSM2_OK.
+*
+* @param[in] timeout Timeout in nanoseconds after which disconnection attempts
+*                    are abandoned. Setting this value to 0 disables timeout and
+*                    waits until all endpoints have been successfully
+*                    disconnected or until an error is detected.
+*
+* @pre You have established the connections with previous psm2_ep_connect calls.
+*
+* @post If the disconnect is successful, the corresponding epaddr in
+*       array_of_epaddr is reset to NULL pointer.
+*
+* @post If unsuccessful, you can query the return status of each individual
+*       remote endpoint in array_of_errors.
+*
+* @post PSM2 does not keep any reference to the arrays passed into the function
+*       and the caller is free to deallocate them.
+*
+* @post The error value with the highest importance is returned by the function
+*       if some portion of the communication failed. Refer to individual errors
+*       in array_of_errors whenever the function cannot return PSM2_OK.
+*
+* @returns PSM2_OK The entire set of endpoint IDs were successfully disconnected
+*          and endpoint addresses are freed by PSM2.
+*
+* @code{.c}
+int disconnect_endpoints(psm2_ep_t ep, int num_epaddr,
+             const psm2_epaddr_t *array_of_epaddr)
+{
+    psm2_error_t *errors =
+        (psm2_error_t *)calloc(num_epaddr, sizeof(psm2_error_t));
+    if (errors == NULL)
+        return -1;
+    psm2_ep_disconnect(
+        ep, num_epaddr, array_of_epaddr,
+        NULL, // We want to disconnect all epaddrs, no mask needed,
+        errors,
+        30 * e9); // 30 second timeout, <1 ns is forever
+    free(errors);
+    return 1;
+}
+@endcode
+*/
+psm2_error_t psm2_ep_disconnect(psm2_ep_t ep, int num_of_epaddr,
+				psm2_epaddr_t *array_of_epaddr,
+				const int *array_of_epaddr_mask,
+				psm2_error_t *array_of_errors, int64_t timeout);
 
 /** @brief Ensure endpoint communication progress
  *
@@ -1125,7 +1211,7 @@ void *psm2_epaddr_getctxt(psm2_epaddr_t epaddr);
 
 #define PSM2_MQ_OPT_SYSBUF_MYBYTES   0x303
 #define PSM2_MQ_MAX_SYSBUF_MBYTES    PSM2_MQ_OPT_SYSBUF_MYBYTES
-  /**< [@b uint32_t ] Maximum amount of bytes to allocate for unexpected
+  /**< [@b uint32_t ] Maximum number of bytes to allocate for unexpected
    * messages.
    *
    * component object: PSM2 Matched Queue (@ref psm2_mq_t).

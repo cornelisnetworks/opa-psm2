@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 /*
  * IPS - Interconnect Protocol Stack.
@@ -79,9 +79,38 @@
 #define CTRL_MSG_DISCONNECT_REQUEST_QUEUED	0x0080
 #define CTRL_MSG_DISCONNECT_REPLY_QUEUED	0x0100
 
+#ifdef PSM_CUDA
+uint32_t gpudirect_send_threshold;
+uint32_t gpudirect_recv_threshold;
+#endif
+
 static void ctrlq_init(struct ips_ctrlq *ctrlq, struct ips_proto *proto);
 static psm2_error_t proto_sdma_init(struct ips_proto *proto,
 				   const psmi_context_t *context);
+
+#ifdef PSM_CUDA
+void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *context, void *obj)
+{
+	struct ips_cuda_hostbuf *icb;
+	struct ips_cuda_hostbuf_mpool_cb_context *ctxt =
+		(struct ips_cuda_hostbuf_mpool_cb_context *) context;
+
+	icb = (struct ips_cuda_hostbuf *)obj;
+	if (is_alloc) {
+		PSMI_CUDA_CALL(cudaHostAlloc,
+			       (void **) &icb->host_buf,
+			       ctxt->bufsz,
+			       cudaHostAllocPortable);
+		PSMI_CUDA_CALL(cudaEventCreate, &icb->copy_status);
+	} else {
+		if (icb->host_buf) {
+			PSMI_CUDA_CALL(cudaFreeHost, icb->host_buf);
+			PSMI_CUDA_CALL(cudaEventDestroy, icb->copy_status);
+		}
+	}
+	return;
+}
+#endif
 
 psm2_error_t
 ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
@@ -179,7 +208,25 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	    (struct hfi1_sdma_comp_entry *) base_info->sdma_comp_bufbase;
 	proto->sdma_queue_size = ctxt_info->sdma_ring_size;
 	/* don't use the last slot */
-	proto->sdma_avail_counter = proto->sdma_queue_size - 1;
+
+	{
+		/* configure sdma_avail_counter */
+		union psmi_envvar_val env_sdma_avail;
+		int tmp_queue_size = proto->sdma_queue_size - 1;
+
+		psmi_getenv("PSM2_MAX_PENDING_SDMA_REQS",
+			"PSM maximum pending SDMA requests",
+			PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
+			(union psmi_envvar_val) tmp_queue_size,
+			&env_sdma_avail);
+
+		if ((env_sdma_avail.e_int < 8) || (env_sdma_avail.e_int > proto->sdma_queue_size - 1))
+			proto->sdma_avail_counter = proto->sdma_queue_size - 1;
+		else
+			proto->sdma_avail_counter = env_sdma_avail.e_int;
+	}
+
+
 	proto->sdma_fill_index = 0;
 	proto->sdma_done_index = 0;
 	proto->sdma_scb_queue = (struct ips_scb **)
@@ -207,6 +254,22 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	proto->psmi_logevent_tid_send_reqs.interval_secs = 15;
 	proto->psmi_logevent_tid_send_reqs.next_warning = 0;
 	proto->psmi_logevent_tid_send_reqs.count = 0;
+#ifdef PSM_CUDA
+	/*
+	 * We will need to add two extra bytes to iov_len
+	 * when passing sdma hdr info to driver due to
+	 * the new flags member in the struct.
+	 */
+	if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
+		proto->ips_extra_sdmahdr_size = sizeof(struct sdma_req_info) -
+						sizeof(struct sdma_req_info_v6_3);
+	else
+#endif
+	if (sizeof(struct sdma_req_info) != sizeof(struct sdma_req_info_v6_3))
+		proto->ips_extra_sdmahdr_size = sizeof(struct sdma_req_info) -
+						sizeof(struct sdma_req_info_v6_3);
+	else
+		proto->ips_extra_sdmahdr_size = 0;
 
 	/* Initialize IBTA related stuff (path record, SL2VL, CCA etc.) */
 	if ((err = ips_ibta_init(proto)))
@@ -240,7 +303,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	{
 		/* Number of credits per flow */
 		union psmi_envvar_val env_flow_credits;
-		int df_flow_credits = min(PSM_FLOW_CREDITS, num_of_send_desc);
+		int df_flow_credits = min(PSM2_FLOW_CREDITS, num_of_send_desc);
 
 		psmi_getenv("PSM2_FLOW_CREDITS",
 			    "Number of unacked packets (credits) per flow (default is 64)",
@@ -429,6 +492,15 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	protoexp_flags = env_tid.e_uint;
 
 	if (protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED) {
+#ifdef PSM_CUDA
+	if (cuda_runtime_version >= 7000) {
+		PSMI_CUDA_CALL(cudaStreamCreateWithFlags,
+			       &proto->cudastream_send, cudaStreamNonBlocking);
+	} else {
+		PSMI_CUDA_CALL(cudaStreamCreate,
+			       &proto->cudastream_send);
+	}
+#endif
 		proto->scbc_rv = NULL;
 		if ((err = ips_protoexp_init(context, proto, protoexp_flags,
 					     num_of_send_bufs, num_of_send_desc,
@@ -530,7 +602,142 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 		host_pid = __cpu_to_be32(host_pid);
 	}
 #endif
+#ifdef PSM_CUDA
+	union psmi_envvar_val env_gpudirect_rdma;
+	psmi_getenv("PSM2_GPUDIRECT",
+				"Use GPUDirect RDMA support to allow the HFI to directly read"
+				" from the GPU for SDMA.  Requires driver support.(default is "
+				" disabled i.e. 0)",
+				PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
+				(union psmi_envvar_val)0, /* Disabled by default */
+				&env_gpudirect_rdma);
 
+	/* Default Send threshold for Gpu-direct set to 30000 */
+	union psmi_envvar_val env_gpudirect_send_thresh;
+	psmi_getenv("PSM2_GPUDIRECT_SEND_THRESH",
+		    "Threshold to switch off Gpu-Direct feature on send side",
+		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
+		    (union psmi_envvar_val)30000, &env_gpudirect_send_thresh);
+	gpudirect_send_threshold = env_gpudirect_send_thresh.e_uint;
+
+	union psmi_envvar_val env_gpudirect_recv_thresh;
+	psmi_getenv("PSM2_GPUDIRECT_RECV_THRESH",
+		    "Threshold to switch off Gpu-Direct feature on receive side",
+		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
+		    (union psmi_envvar_val)0, &env_gpudirect_recv_thresh);
+	gpudirect_recv_threshold = env_gpudirect_recv_thresh.e_uint;
+
+	if (env_gpudirect_rdma.e_uint && device_support_gpudirect) {
+		if (!PSMI_IS_CUDA_ENABLED ||
+			/* All pio, No SDMA*/
+			(proto->flags & IPS_PROTO_FLAG_SPIO) ||
+			!(protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED) ||
+			!PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
+			err = psmi_handle_error(PSMI_EP_NORETURN,
+					PSM2_INTERNAL_ERR,
+					"Requires hfi1 driver with GPU-Direct feature enabled.\n");
+		proto->flags |= IPS_PROTO_FLAG_GPUDIRECT_RDMA_SEND;
+		proto->flags |= IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV;
+	} else {
+		/* The following environment variables are here for internal
+		 * experimentation and will not be documented for any customers.
+		 */
+		/* Use GPUDirect RDMA for SDMA send? */
+		union psmi_envvar_val env_gpudirect_rdma_send;
+		psmi_getenv("PSM2_GPUDIRECT_RDMA_SEND",
+					"Use GPUDirect RDMA support to allow the HFI to directly"
+					" read from the GPU for SDMA.  Requires driver"
+					" support.(default is disabled i.e. 0)",
+					PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
+					(union psmi_envvar_val)0, /* Disabled by default */
+					&env_gpudirect_rdma_send);
+
+		if (env_gpudirect_rdma_send.e_uint && device_support_gpudirect) {
+			if (!PSMI_IS_CUDA_ENABLED ||
+				/* All pio, No SDMA*/
+				(proto->flags & IPS_PROTO_FLAG_SPIO))
+				err = psmi_handle_error(PSMI_EP_NORETURN,
+						PSM2_INTERNAL_ERR,
+						"Unable to start run as PSM would require cuda, sdma"
+						"and TID support\n");
+			proto->flags |= IPS_PROTO_FLAG_GPUDIRECT_RDMA_SEND;
+		}
+		/* Use GPUDirect RDMA for recv? */
+		union psmi_envvar_val env_gpudirect_rdma_recv;
+		psmi_getenv("PSM2_GPUDIRECT_RDMA_RECV",
+					"Use GPUDirect RDMA support to allow the HFI to directly"
+					" write into GPU.  Requires driver support.(default is"
+					" disabled i.e. 0)",
+					PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
+					(union psmi_envvar_val)0, /* Disabled by default */
+					&env_gpudirect_rdma_recv);
+
+		if (env_gpudirect_rdma_recv.e_uint && device_support_gpudirect) {
+			if (!PSMI_IS_CUDA_ENABLED ||
+				!(protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED))
+					err = psmi_handle_error(PSMI_EP_NORETURN,
+							PSM2_INTERNAL_ERR,
+							"Unable to start run as PSM would require cuda,"
+							" sdma and TID support\n");
+			proto->flags |= IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV;
+		}
+	}
+
+	if (protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED) {
+		struct psmi_rlimit_mpool rlim = CUDA_HOSTBUFFER_LIMITS;
+		uint32_t maxsz, chunksz, max_elements;
+
+		if ((err = psmi_parse_mpool_env(proto->mq, 1,
+						&rlim, &maxsz, &chunksz)))
+			goto fail;
+
+		/* the maxsz is the amount in MB, not the number of entries,
+		 * since the element size depends on the window size */
+		max_elements = (maxsz*1024*1024) / proto->mq->hfi_window_rv;
+		/* mpool requires max_elements to be power of 2. round down. */
+		max_elements = 1 << (31 - __builtin_clz(max_elements));
+		proto->cuda_hostbuf_send_cfg.bufsz = proto->mq->hfi_window_rv;
+		proto->cuda_hostbuf_pool_send =
+			psmi_mpool_create_for_cuda(sizeof(struct ips_cuda_hostbuf),
+						   chunksz, max_elements, 0,
+						   UNDEFINED, NULL, NULL,
+						   psmi_cuda_hostbuf_alloc_func,
+						   (void *)
+						   &proto->cuda_hostbuf_send_cfg);
+
+		if (proto->cuda_hostbuf_pool_send == NULL) {
+			err = psmi_handle_error(proto->ep, PSM2_NO_MEMORY,
+						"Couldn't allocate CUDA host send buffer pool");
+			goto fail;
+		}
+
+		/* use the same number of elements for the small pool */
+		proto->cuda_hostbuf_small_send_cfg.bufsz = CUDA_SMALLHOSTBUF_SZ;
+		proto->cuda_hostbuf_pool_small_send =
+			psmi_mpool_create_for_cuda(sizeof(struct ips_cuda_hostbuf),
+						   chunksz, max_elements, 0,
+						   UNDEFINED, NULL, NULL,
+						   psmi_cuda_hostbuf_alloc_func,
+						   (void *)
+						   &proto->cuda_hostbuf_small_send_cfg);
+
+		if (proto->cuda_hostbuf_pool_small_send == NULL) {
+			err = psmi_handle_error(proto->ep, PSM2_NO_MEMORY,
+						"Couldn't allocate CUDA host small send buffer pool");
+			goto fail;
+		}
+
+		/* Configure the amount of prefetching */
+		union psmi_envvar_val env_prefetch_limit;
+
+		psmi_getenv("PSM2_CUDA_PREFETCH_LIMIT",
+			    "How many TID windows to prefetch at RTS time(default is 2)",
+			    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
+			    (union psmi_envvar_val)CUDA_WINDOW_PREFETCH_DEFAULT,
+			    &env_prefetch_limit);
+		proto->cuda_prefetch_limit = env_prefetch_limit.e_uint;
+	}
+#endif
 fail:
 	return err;
 }
@@ -1330,11 +1537,14 @@ psm2_error_t ips_proto_dma_completion_update(struct ips_proto *proto)
 {
 	ips_scb_t *scb;
 	struct hfi1_sdma_comp_entry *comp;
+	uint32_t status;
 
 	while (proto->sdma_done_index != proto->sdma_fill_index) {
 		comp = &proto->sdma_comp_queue[proto->sdma_done_index];
+		status = comp->status;
+		ips_rmb();
 
-		if (comp->status == QUEUED)
+		if (status == QUEUED)
 			return PSM2_OK;
 
 		/* Mark sdma request is complete */
@@ -1344,7 +1554,7 @@ psm2_error_t ips_proto_dma_completion_update(struct ips_proto *proto)
 			proto->sdma_scb_queue[proto->sdma_done_index] = NULL;
 		}
 
-		if (comp->status == ERROR && ((int)comp->errcode) != -2) {
+		if (status == ERROR && ((int)comp->errcode) != -2) {
 			psm2_error_t err =
 			   psmi_handle_error(proto->ep, PSM2_EP_DEVICE_FAILURE,
 				"SDMA completion error: %d (fd=%d, index=%d)",
@@ -1467,7 +1677,8 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 	/*
 	 * Setup SDMA header and io vector.
 	 */
-	sdmahdr = psmi_get_sdma_req_info(scb);
+	sdmahdr = (struct sdma_req_info *)
+		   psmi_get_sdma_req_info(scb, proto->ips_extra_sdmahdr_size);
 	sdmahdr->npkts = 1;
 	sdmahdr->fragsize = flow->frag_size;
 
@@ -1477,15 +1688,27 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 
 	iovcnt = 1;
 	iovec[0].iov_base = sdmahdr;
-	iovec[0].iov_len = HFI_SDMA_HDR_SIZE;
+	iovec[0].iov_len = HFI_SDMA_HDR_SIZE +
+				 proto->ips_extra_sdmahdr_size;
 	if (paylen > 0) {
 		iovcnt++;
 		iovec[1].iov_base = payload;
 		iovec[1].iov_len = paylen;
 	}
+
+#ifdef PSM_CUDA
+	if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED) {
+		sdmahdr->ctrl = 2 |
+		    (EAGER << HFI1_SDMA_REQ_OPCODE_SHIFT) |
+		    (iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
+	} else {
+#endif
 	sdmahdr->ctrl = 1 |
 	    (EAGER << HFI1_SDMA_REQ_OPCODE_SHIFT) |
 	    (iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
+#ifdef PSM_CUDA
+	}
+#endif
 
 	/*
 	 * Write into driver to do SDMA work.
@@ -1660,7 +1883,9 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 		    scb->payload_size +
 			(have_cksum ? PSM_CRC_SIZE_IN_BYTES : 0));
 
-		sdmahdr = psmi_get_sdma_req_info(scb);
+		sdmahdr = (struct sdma_req_info *)
+			   psmi_get_sdma_req_info(scb, proto->ips_extra_sdmahdr_size);
+
 		sdmahdr->npkts =
 		    scb->nfrag > 1 ? scb->nfrag_remaining : scb->nfrag;
 		sdmahdr->fragsize =
@@ -1676,7 +1901,8 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 		 * Setup io vector.
 		 */
 		iovec[vec_idx].iov_base = sdmahdr;
-		iovec[vec_idx].iov_len = HFI_SDMA_HDR_SIZE;
+		iovec[vec_idx].iov_len = HFI_SDMA_HDR_SIZE +
+					 proto->ips_extra_sdmahdr_size;
 		vec_idx++;
 		iovcnt = 1;
 		_HFI_VDBG("hdr=%p,%d\n",
@@ -1697,6 +1923,28 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 						     : scb->payload_size;
 			vec_idx++;
 			iovcnt++;
+#ifdef PSM_CUDA
+			if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM(scb->payload)) {
+			    	/* without this attr, CUDA memory accesses
+				 * do not synchronize with gpudirect-rdma accesses.
+				 * We set this field only if the currently loaded driver
+				 * supports this field. If not, we have other problems
+				 * where we have a non gpu-direct enabled driver loaded
+				 * and PSM2 is trying to use GPU features.
+				 */
+
+				if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
+					sdmahdr->flags = HFI1_BUF_GPU_MEM;
+				else
+					sdmahdr->flags = 0;
+			} else if (PSMI_IS_CUDA_MEM(scb->payload) && !PSMI_IS_CUDA_ENABLED) {
+				err = psmi_handle_error(PSMI_EP_NORETURN,
+								PSM2_INTERNAL_ERR,
+								"Use of GPU buffer with PSM2_CUDA disabled \n");
+				goto fail;
+			} else if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
+					sdmahdr->flags = 0;
+#endif
 
 			_HFI_VDBG("seqno=%d hdr=%p,%d payload=%p,%d\n",
 				  scb->seq_num.psn_num,
@@ -1728,17 +1976,40 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 			vec_idx++;
 			iovcnt++;
 
-			sdmahdr->ctrl =
-			    1 | (EXPECTED << HFI1_SDMA_REQ_OPCODE_SHIFT) |
-			    (iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
-
+#ifdef PSM_CUDA
+			/*
+			 * The driver knows to check for "flags" field in
+			 * sdma_req_info only if ctrl=2.
+			 */
+			if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED) {
+				sdmahdr->ctrl = 2 |
+					(EXPECTED << HFI1_SDMA_REQ_OPCODE_SHIFT) |
+					(iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
+			} else {
+#endif
+			sdmahdr->ctrl = 1 |
+				(EXPECTED << HFI1_SDMA_REQ_OPCODE_SHIFT) |
+				(iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
+#ifdef PSM_CUDA
+			}
+#endif
 			_HFI_VDBG("tid-info=%p,%d\n",
 				  iovec[vec_idx - 1].iov_base,
 				  (int)iovec[vec_idx - 1].iov_len);
 		} else {
-			sdmahdr->ctrl = 1 |
+#ifdef PSM_CUDA
+			if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED) {
+				sdmahdr->ctrl = 2 |
 					(EAGER << HFI1_SDMA_REQ_OPCODE_SHIFT) |
 					(iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
+			} else {
+#endif
+			sdmahdr->ctrl = 1 |
+				(EAGER << HFI1_SDMA_REQ_OPCODE_SHIFT) |
+				(iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
+#ifdef PSM_CUDA
+			}
+#endif
 		}
 
 		/* Can bound the number to send by 'num' */

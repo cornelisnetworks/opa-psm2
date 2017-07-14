@@ -542,7 +542,7 @@ psm2_error_t ips_opp_init(struct ips_proto *proto)
 		goto fail;
 	}
 
-	/* If PSM_IDENTIFY is set display the OPP library location being used. */
+	/* If PSM2_IDENTIFY is set display the OPP library location being used. */
 	if (getenv("PSM2_IDENTIFY")) {
 		Dl_info info_opp;
 		_HFI_INFO

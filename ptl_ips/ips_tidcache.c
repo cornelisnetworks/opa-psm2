@@ -144,6 +144,7 @@ ips_tidcache_register(struct ips_tid *tidc,
 	cl_qmap_t *p_map = &tidc->tid_cachemap;
 	uint32_t tidoff, tidlen;
 	uint32_t idx, tidcnt;
+	uint16_t flags = 0;
 	psm2_error_t err;
 
 	/*
@@ -179,11 +180,28 @@ ips_tidcache_register(struct ips_tid *tidc,
 
 retry:
 	tidcnt = 0;
+
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*) start))
+		flags = HFI1_BUF_GPU_MEM;
+#endif
+
 	if (hfi_update_tid(tidc->context->ctrl,
 			(uint64_t) start, &length,
-			(uint64_t) tidc->tid_array, &tidcnt) < 0) {
+			(uint64_t) tidc->tid_array, &tidcnt, flags) < 0) {
 		/* if driver reaches lockable memory limit */
-		if (errno == ENOMEM && NIDLE) {
+		if ((errno == ENOMEM
+#ifdef PSM_CUDA
+			/* This additional check is in place for just the cuda
+			 * version. It is a temporary workaround for a known
+			 * issue where nvidia driver returns EINVAL instead of
+			 * ENOMEM when there is no BAR1 space left to pin pages.
+			 * PSM frees tidcache enteries when the driver sends
+			 * EINVAL there by unpinning pages and freeing some
+			 * BAR1 space.*/
+			|| errno == EINVAL
+#endif
+			) && NIDLE) {
 			uint64_t lengthEvicted = ips_tidcache_evict(tidc,length);
 
 			if (lengthEvicted >= length)

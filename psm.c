@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #include <dlfcn.h>
 #include "psm_user.h"
@@ -68,6 +68,13 @@ static int psmi_verno_client_val;
 #define PSMI_FINALIZED         -1	/* Prevent the user from calling psm2_init
 					 * once psm_finalize has been called. */
 static int psmi_isinit = PSMI_NOT_INITIALIZED;
+
+#ifdef PSM_CUDA
+int is_cuda_enabled;
+int device_support_gpudirect;
+int cuda_runtime_version;
+int is_driver_gpudirect_enabled;
+#endif
 
 int psmi_verno_client()
 {
@@ -104,6 +111,121 @@ int MOCKABLE(psmi_isinitialized)()
 }
 MOCK_DEF_EPILOGUE(psmi_isinitialized);
 
+
+#ifdef PSM_CUDA
+int psmi_cuda_initialize()
+{
+	psm2_error_t err = PSM2_OK;
+	int num_devices, dev;
+	struct cudaDeviceProp dev_prop;
+	char *dlerr;
+
+	PSM2_LOG_MSG("entering");
+	_HFI_VDBG("Enabling CUDA support.\n");
+
+	psmi_cuda_lib = dlopen("libcuda.so", RTLD_LAZY);
+	psmi_cudart_lib = dlopen("libcudart.so", RTLD_LAZY);
+	if (!psmi_cuda_lib || !psmi_cudart_lib) {
+		dlerr = dlerror();
+		_HFI_ERROR("Unable to open libcuda.so and libcudart.so.  Error %s\n",
+			   dlerr ? dlerr : "no dlerror()");
+		goto fail;
+	}
+
+	psmi_cudaRuntimeGetVersion = dlsym(psmi_cudart_lib, "cudaRuntimeGetVersion");
+
+	if (!psmi_cudaRuntimeGetVersion) {
+		_HFI_ERROR
+			("Unable to resolve symbols in CUDA libraries.\n");
+		goto fail;
+	}
+
+	PSMI_CUDA_CALL(cudaRuntimeGetVersion, &cuda_runtime_version);
+	if (cuda_runtime_version < 4010) {
+		_HFI_ERROR("Please update CUDA runtime, required minimum version is 4.1 \n");
+		goto fail;
+	}
+
+
+	psmi_cuCtxGetCurrent = dlsym(psmi_cuda_lib, "cuCtxGetCurrent");
+	psmi_cuCtxSetCurrent = dlsym(psmi_cuda_lib, "cuCtxSetCurrent");
+	psmi_cuPointerGetAttribute = dlsym(psmi_cuda_lib, "cuPointerGetAttribute");
+	psmi_cuPointerSetAttribute = dlsym(psmi_cuda_lib, "cuPointerSetAttribute");
+
+	psmi_cudaGetDeviceCount = dlsym(psmi_cudart_lib, "cudaGetDeviceCount");
+	psmi_cudaGetDeviceProperties = dlsym(psmi_cudart_lib, "cudaGetDeviceProperties");
+	psmi_cudaGetDevice = dlsym(psmi_cudart_lib, "cudaGetDevice");
+	psmi_cudaSetDevice = dlsym(psmi_cudart_lib, "cudaSetDevice");
+	psmi_cudaStreamCreate = dlsym(psmi_cudart_lib, "cudaStreamCreate");
+	psmi_cudaDeviceSynchronize = dlsym(psmi_cudart_lib, "cudaDeviceSynchronize");
+	psmi_cudaStreamSynchronize = dlsym(psmi_cudart_lib, "cudaStreamSynchronize");
+	psmi_cudaEventCreate = dlsym(psmi_cudart_lib, "cudaEventCreate");
+	psmi_cudaEventDestroy = dlsym(psmi_cudart_lib, "cudaEventDestroy");
+	psmi_cudaEventQuery = dlsym(psmi_cudart_lib, "cudaEventQuery");
+	psmi_cudaEventRecord = dlsym(psmi_cudart_lib, "cudaEventRecord");
+	psmi_cudaEventSynchronize = dlsym(psmi_cudart_lib, "cudaEventSynchronize");
+	psmi_cudaMalloc = dlsym(psmi_cudart_lib, "cudaMalloc");
+	psmi_cudaHostAlloc = dlsym(psmi_cudart_lib, "cudaHostAlloc");
+	psmi_cudaFreeHost = dlsym(psmi_cudart_lib, "cudaFreeHost");
+	psmi_cudaMemcpy = dlsym(psmi_cudart_lib, "cudaMemcpy");
+	psmi_cudaMemcpyAsync = dlsym(psmi_cudart_lib, "cudaMemcpyAsync");
+
+	psmi_cudaIpcGetMemHandle = dlsym(psmi_cudart_lib, "cudaIpcGetMemHandle");
+	psmi_cudaIpcOpenMemHandle = dlsym(psmi_cudart_lib, "cudaIpcOpenMemHandle");
+	psmi_cudaIpcCloseMemHandle = dlsym(psmi_cudart_lib, "cudaIpcCloseMemHandle");
+
+	if (!psmi_cuCtxGetCurrent || !psmi_cuCtxSetCurrent ||
+	    !psmi_cuPointerGetAttribute || !psmi_cuPointerSetAttribute ||
+	    !psmi_cudaGetDeviceCount || !psmi_cudaGetDeviceProperties ||
+	    !psmi_cudaGetDevice || !psmi_cudaSetDevice ||
+	    !psmi_cudaStreamCreate ||
+	    !psmi_cudaDeviceSynchronize || !psmi_cudaStreamSynchronize ||
+	    !psmi_cudaEventCreate || !psmi_cudaEventDestroy ||
+	    !psmi_cudaEventQuery || !psmi_cudaEventRecord ||
+	    !psmi_cudaEventSynchronize ||
+	    !psmi_cudaMalloc || !psmi_cudaHostAlloc || !psmi_cudaFreeHost ||
+	    !psmi_cudaMemcpy || !psmi_cudaMemcpyAsync || !psmi_cudaIpcGetMemHandle ||
+	    !psmi_cudaIpcOpenMemHandle || !psmi_cudaIpcCloseMemHandle) {
+		_HFI_ERROR
+			("Unable to resolve symbols in CUDA libraries.\n");
+		goto fail;
+	}
+
+	if (cuda_runtime_version > 7000) {
+		psmi_cudaStreamCreateWithFlags = dlsym(psmi_cudart_lib,
+						       "cudaStreamCreateWithFlags");
+		if (!psmi_cudaStreamCreateWithFlags) {
+			_HFI_ERROR
+				("Unable to resolve symbols in CUDA libraries.\n");
+			goto fail;
+		}
+	}
+
+	/* Check if all devices support Unified Virtual Addressing. */
+	PSMI_CUDA_CALL(cudaGetDeviceCount, &num_devices);
+	for (dev = 0; dev < num_devices; dev++) {
+		PSMI_CUDA_CALL(cudaGetDeviceProperties, &dev_prop, dev);
+		if (dev_prop.unifiedAddressing != 1) {
+			_HFI_ERROR("CUDA device %d does not support Unified Virtual Addressing.\n", dev);
+			goto fail;
+		}
+		/* Only devices based on Kepler and
+		 * above can support GPU Direct.
+		 */
+		if (dev_prop.major >= 3 && cuda_runtime_version >= 5000)
+			device_support_gpudirect = 1;
+		else {
+			device_support_gpudirect = 0;
+			_HFI_INFO("Device %d does not GPUDirect RDMA (Non-fatal error) \n", dev);
+		}
+	}
+	PSM2_LOG_MSG("leaving");
+	return err;
+fail:
+	err = psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR, "Unable to initialize PSM2 CUDA support.\n");
+	return err;
+}
+#endif
 
 psm2_error_t __psm2_init(int *major, int *minor)
 {
@@ -213,6 +335,15 @@ psm2_error_t __psm2_init(int *major, int *minor)
 			     "with mallopt()\n");
 	}
 
+#ifdef PSM_CUDA
+	union psmi_envvar_val env_enable_cuda;
+	psmi_getenv("PSM2_CUDA",
+		    "Enable (set envvar to 1) for cuda support in PSM (Disabled by default)",
+		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
+		    (union psmi_envvar_val)0, &env_enable_cuda);
+	is_cuda_enabled = env_enable_cuda.e_int;
+#endif
+
 	if (getenv("PSM2_IDENTIFY")) {
                 Dl_info info_psm;
 		char ofed_delta[100] = "";
@@ -223,11 +354,21 @@ psm2_error_t __psm2_init(int *major, int *minor)
 		       "%s %s src checksum %s\n"
                        "%s %s git checksum %s\n"
                        "%s %s built against driver interface v%d.%d\n",
-                          hfi_get_mylabel(), hfi_ident_tag, PSM2_VERNO_MAJOR,PSM2_VERNO_MINOR, (strcmp(psmi_hfi_IFS_version,"") != 0) ? ofed_delta : "",
-                          hfi_get_mylabel(), hfi_ident_tag, dladdr(psm2_init, &info_psm) ? info_psm.dli_fname : "libpsm2 not available",
+			  hfi_get_mylabel(), hfi_ident_tag,
+					     PSM2_VERNO_MAJOR,PSM2_VERNO_MINOR,
+					     (strcmp(psmi_hfi_IFS_version,"") != 0) ? ofed_delta
+#ifdef PSM_CUDA
+						: "-cuda",
+#else
+						: "",
+#endif
+                          hfi_get_mylabel(), hfi_ident_tag, dladdr(psm2_init, &info_psm) ?
+					     info_psm.dli_fname : "libpsm2 not available",
                           hfi_get_mylabel(), hfi_ident_tag, psmi_hfi_build_timestamp,
                           hfi_get_mylabel(), hfi_ident_tag, psmi_hfi_sources_checksum,
-			  hfi_get_mylabel(), hfi_ident_tag, (strcmp(psmi_hfi_git_checksum,"") != 0) ? psmi_hfi_git_checksum : "<not available>",
+			  hfi_get_mylabel(), hfi_ident_tag,
+					     (strcmp(psmi_hfi_git_checksum,"") != 0) ?
+					     psmi_hfi_git_checksum : "<not available>",
 			  hfi_get_mylabel(), hfi_ident_tag, HFI1_USER_SWMAJOR, HFI1_USER_SWMINOR);
 	}
 #ifdef PSMI_PLOCK_IS_SPINLOCK
@@ -247,6 +388,12 @@ psm2_error_t __psm2_init(int *major, int *minor)
 		goto fail;
 
 	psmi_epid_init();
+
+#ifdef PSM_CUDA
+	err = psmi_cuda_initialize();
+	if (err != PSM2_OK)
+		goto fail;
+#endif
 
 update:
 	*major = (int)psmi_verno_major;

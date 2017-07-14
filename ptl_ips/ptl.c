@@ -596,7 +596,7 @@ ips_ptl_optctl(const void *core_obj, int optname,
 	default:
 		err =
 		    psmi_handle_error(NULL, PSM2_PARAM_ERR,
-				      "Unknown PSM_IB option %u.", optname);
+				      "Unknown PSM2_IB option %u.", optname);
 	}
 
 exit_fn:
@@ -935,7 +935,6 @@ ips_ptl_disconnect(ptl_t *ptl, int force, int numep,
 {
 	psm2_error_t err;
 
-	fprintf(stderr, "Aiee! ips_proto_disconnect() called.\n");
 	PSMI_PLOCK_ASSERT();
 	err = ips_proto_disconnect(&ptl->proto, force, numep, array_of_epaddr,
 				   array_of_epaddr_mask, array_of_errors,

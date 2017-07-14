@@ -56,6 +56,11 @@
 #include <unistd.h>
 #include "psmi_wrappers.h"
 
+/* The following indirection wrappers for external functions
+ * are only created if this is a mocking tests build
+ */
+#ifdef PSM2_MOCK_TESTING
+
 void MOCKABLE(psmi_exit)(int status)
 {
 	exit(status);
@@ -80,5 +85,4 @@ int MOCKABLE(psmi_sigaction)(int signum, const struct sigaction *act, struct sig
 }
 MOCK_DEF_EPILOGUE(psmi_sigaction);
 
-
-
+#endif /* def PSM2_MOCK_TESTING */

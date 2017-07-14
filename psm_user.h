@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,13 +51,15 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #ifndef _PSMI_USER_H
 #define _PSMI_USER_H
 
 #include <inttypes.h>
 #include <pthread.h>
+
+#include <syscall.h>
 
 #include "psm2.h"
 #include "psm2_mq.h"
@@ -126,6 +128,10 @@ MOCK_DCL_EPILOGUE(psmi_isinitialized);
 
 psm2_error_t psmi_poll_internal(psm2_ep_t ep, int poll_amsh);
 psm2_error_t psmi_mq_wait_internal(psm2_mq_req_t *ireq);
+
+#ifdef PSM_CUDA
+int psmi_get_current_proc_location();
+#endif
 
 /*
  * Default setting for Receive thread
@@ -258,4 +264,174 @@ void psmi_profile_reblock(int did_no_progress) __attribute__ ((weak));
 #define PSMI_PROFILE_REBLOCK(noprog)
 #endif
 
+#ifdef PSM_CUDA
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include <driver_types.h>
+
+#if CUDART_VERSION < 4010
+#error Please update CUDA runtime, required minimum version is 4.1
+#endif
+
+extern int is_cuda_enabled;
+extern int device_support_gpudirect;
+extern int cuda_runtime_version;
+
+extern CUcontext ctxt;
+void *psmi_cudart_lib;
+void *psmi_cuda_lib;
+CUresult (*psmi_cuCtxGetCurrent)(CUcontext *c);
+CUresult (*psmi_cuCtxSetCurrent)(CUcontext c);
+CUresult (*psmi_cuPointerGetAttribute)(void *data, CUpointer_attribute pa, CUdeviceptr p);
+CUresult (*psmi_cuPointerSetAttribute)(void *data, CUpointer_attribute pa, CUdeviceptr p);
+cudaError_t (*psmi_cudaRuntimeGetVersion)(int *runtime_version);
+cudaError_t (*psmi_cudaGetDeviceCount)(int *n);
+cudaError_t (*psmi_cudaGetDeviceProperties)(struct cudaDeviceProp *p, int d);
+cudaError_t (*psmi_cudaGetDevice)(int *n);
+cudaError_t (*psmi_cudaSetDevice)(int n);
+cudaError_t (*psmi_cudaStreamCreate)(cudaStream_t *s);
+cudaError_t (*psmi_cudaStreamCreateWithFlags)(cudaStream_t *s, unsigned f);
+cudaError_t (*psmi_cudaStreamSynchronize)(cudaStream_t s);
+cudaError_t (*psmi_cudaDeviceSynchronize)();
+cudaError_t (*psmi_cudaEventCreate)(cudaEvent_t *event);
+cudaError_t (*psmi_cudaEventDestroy)(cudaEvent_t event);
+cudaError_t (*psmi_cudaEventQuery)(cudaEvent_t event);
+cudaError_t (*psmi_cudaEventRecord)(cudaEvent_t event, cudaStream_t stream);
+cudaError_t (*psmi_cudaEventSynchronize)(cudaEvent_t event);
+cudaError_t (*psmi_cudaMemcpy)(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind);
+cudaError_t (*psmi_cudaMemcpyAsync)(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, cudaStream_t s);
+cudaError_t (*psmi_cudaMalloc)(void **devPtr, size_t size);
+cudaError_t (*psmi_cudaHostAlloc)(void **devPtr, size_t size, unsigned int flags);
+cudaError_t (*psmi_cudaFreeHost)(void *ptr);
+
+cudaError_t (*psmi_cudaIpcGetMemHandle)(cudaIpcMemHandle_t* handle, void* devPtr);
+cudaError_t (*psmi_cudaIpcOpenMemHandle)(void** devPtr, cudaIpcMemHandle_t handle, unsigned int  flags);
+cudaError_t (*psmi_cudaIpcCloseMemHandle)(void* devPtr);
+
+#define PSMI_CUDA_DRIVER_API_CALL(func, args...) do {			\
+		CUresult cudaerr;					\
+		cudaerr = psmi_##func(args);				\
+		if (cudaerr != CUDA_SUCCESS) {				\
+			if (ctxt == NULL)				\
+				_HFI_ERROR(				\
+				"Check if cuda runtime is initialized"	\
+				"before psm2_ep_open call \n");	\
+			_HFI_ERROR(					\
+				"CUDA failure: %s() (at %s:%d)"	\
+				"returned %d\n",			\
+				#func, __FILE__, __LINE__, cudaerr);	\
+			psmi_handle_error(				\
+				PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,	\
+				"Error returned from CUDA function.\n");\
+		}							\
+	} while (0)
+
+#define PSMI_CUDA_CALL(func, args...) do {				\
+		cudaError_t cudaerr;					\
+		cudaerr = psmi_##func(args);				\
+		if (cudaerr != cudaSuccess) {				\
+			if (ctxt == NULL)				\
+				_HFI_ERROR(				\
+				"Check if cuda runtime is initialized"	\
+				"before psm2_ep_open call \n");	\
+			_HFI_ERROR(					\
+				"CUDA failure: %s() (at %s:%d)"	\
+				"returned %d\n",			\
+				#func, __FILE__, __LINE__, cudaerr);    \
+			psmi_handle_error(				\
+				PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,	\
+				"Error returned from CUDA function.\n");\
+		}							\
+	} while (0)
+
+#define PSMI_CUDA_CHECK_EVENT(event, cudaerr) do {			\
+		cudaerr = psmi_cudaEventQuery(event);			\
+		if ((cudaerr != cudaSuccess) &&			\
+		    (cudaerr != cudaErrorNotReady)) {			\
+			_HFI_ERROR(					\
+				"CUDA failure: %s() returned %d\n",	\
+				"cudaEventQuery", cudaerr);		\
+			psmi_handle_error(				\
+				PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,	\
+				"Error returned from CUDA function.\n");\
+		}							\
+	} while (0)
+
+
+
+PSMI_ALWAYS_INLINE(
+int
+_psmi_is_cuda_mem(void *ptr))
+{
+	CUresult cres;
+	CUmemorytype mt;
+	cres = psmi_cuPointerGetAttribute(
+		&mt, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr) ptr);
+	if ((cres == CUDA_SUCCESS) && (mt == CU_MEMORYTYPE_DEVICE))
+		return 1;
+	else
+		return 0;
+}
+
+PSMI_ALWAYS_INLINE(
+int
+_psmi_is_cuda_enabled())
+{
+	return is_cuda_enabled;
+}
+
+#define PSMI_IS_CUDA_ENABLED _psmi_is_cuda_enabled()
+
+#define PSMI_IS_CUDA_MEM(p) _psmi_is_cuda_mem(p)
+/* XXX TODO: Getting the gpu page size from driver at init time */
+#define PSMI_GPU_PAGESIZE 65536
+
+struct ips_cuda_hostbuf {
+	STAILQ_ENTRY(ips_cuda_hostbuf) req_next;
+	STAILQ_ENTRY(ips_cuda_hostbuf) next;
+	uint32_t size, offset, bytes_read;
+	/* This flag indicates whether a chb is
+	 * pulled from a mpool or dynamically
+	 * allocated using calloc. */
+	uint8_t is_tempbuf;
+	cudaEvent_t copy_status;
+	psm2_mq_req_t req;
+	void *host_buf, *gpu_buf;
+};
+
+struct ips_cuda_hostbuf_mpool_cb_context {
+	unsigned bufsz;
+};
+void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *context, void *obj);
+
+#define CUDA_HOSTBUFFER_LIMITS {				\
+	    .env = "PSM_CUDA_BOUNCEBUFFERS_MAX",		\
+	    .descr = "Max CUDA bounce buffers (in MB)",		\
+	    .env_level = PSMI_ENVVAR_LEVEL_HIDDEN,		\
+	    .minval = 1,					\
+	    .maxval = 1<<30,					\
+	    .mode[PSMI_MEMMODE_NORMAL]  = {  16, 256 },		\
+	    .mode[PSMI_MEMMODE_MINIMAL] = {   1,   1 },		\
+	    .mode[PSMI_MEMMODE_LARGE]   = {  32, 512 }		\
+	}
+
+#define CUDA_SMALLHOSTBUF_SZ	(256*1024)
+#define CUDA_WINDOW_PREFETCH_DEFAULT	2
+#define GPUDIRECT_THRESH_RV 3
+
+extern uint32_t gpudirect_send_threshold;
+extern uint32_t gpudirect_recv_threshold;
+
+enum psm2_chb_match_type {
+	/* Complete data found in a single chb */
+	PSMI_CUDA_FULL_MATCH_FOUND = 0,
+	/* Data is spread across two chb's */
+	PSMI_CUDA_SPLIT_MATCH_FOUND = 1,
+	/* Data is only partially prefetched */
+	PSMI_CUDA_PARTIAL_MATCH_FOUND = 2,
+	PSMI_CUDA_CONTINUE = 3
+};
+typedef enum psm2_chb_match_type psm2_chb_match_type_t;
+
+#endif /* PSM_CUDA */
 #endif /* _PSMI_USER_H */

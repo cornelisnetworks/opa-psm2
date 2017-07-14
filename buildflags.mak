@@ -165,14 +165,17 @@ endif
 ifneq (,${PSM_PROFILE})
   BASECFLAGS += -DPSM_PROFILE
 endif
+ifneq (,${PSM_CUDA})
+  BASECFLAGS += -DNVIDIA_GPU_DIRECT -DPSM_CUDA
+  CUDA_HOME ?= /usr/local/cuda
+  INCLUDES += -I$(CUDA_HOME)/include
+endif
 
 BASECFLAGS += -fpic -fPIC -D_GNU_SOURCE
 
 ifeq ($CC,gcc)
   BASECFLAGS += -funwind-tables
 endif
-
-EXTRA_LIBS = -luuid
 
 ifneq (,${PSM_VALGRIND})
   CFLAGS += -DPSM_VALGRIND
@@ -190,7 +193,7 @@ ifeq (${CCARCH},icc)
     LDFLAGS += -static-intel
 else
 	ifeq (${CCARCH},gcc)
-	    CFLAGS += $(BASECFLAGS) -Wno-strict-aliasing -Wno-format-security
+	    CFLAGS += $(BASECFLAGS) -Wno-strict-aliasing -Wformat-security
 	else
 	    ifeq (${CCARCH},gcc4)
 		CFLAGS += $(BASECFLAGS)

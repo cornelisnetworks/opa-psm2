@@ -94,7 +94,7 @@ static mpool_t ips_am_msg_pool;
 #define calc_optimal_num_reply_slots(nslots) (((nslots)*2 / 3) + 1)
 
 psm2_error_t
-ips_proto_am_init(struct ips_proto *proto,
+MOCKABLE(ips_proto_am_init)(struct ips_proto *proto,
 		  int num_send_slots,
 		  uint32_t imm_size,
 		  struct ips_proto_am *proto_am)
@@ -151,6 +151,7 @@ ips_proto_am_init(struct ips_proto *proto,
 fail:
 	return err;
 }
+MOCK_DEF_EPILOGUE(ips_proto_am_init);
 
 psm2_error_t ips_proto_am_fini(struct ips_proto_am *proto_am)
 {

@@ -4,7 +4,7 @@
 #
 #  GPL LICENSE SUMMARY
 #
-#  Copyright(c) 2016 Intel Corporation.
+#  Copyright(c) 2017 Intel Corporation.
 #
 #  This program is free software; you can redistribute it and/or modify
 #  it under the terms of version 2 of the GNU General Public License as
@@ -20,7 +20,7 @@
 #
 #  BSD LICENSE
 #
-#  Copyright(c) 2016 Intel Corporation.
+#  Copyright(c) 2017 Intel Corporation.
 #
 #  Redistribution and use in source and binary forms, with or without
 #  modification, are permitted provided that the following conditions
@@ -130,7 +130,10 @@ DISTRO := $(shell . /etc/os-release; echo $$ID)
 # By default the following two variables have the following values:
 LIBPSM2_COMPAT_CONF_DIR := /etc
 LIBPSM2_COMPAT_SYM_CONF_DIR := /etc
-SPEC_FILE_RELEASE_DIST :=#nothing
+#We can't set SPEC_FILE_RELEASE_DIST to an empty value, a space will result.
+#It then messes up sed operations for PSM_CUDA=1.
+#So leaving the commented out line here as documentation to NOT set it.
+#SPEC_FILE_RELEASE_DIST :=
 UDEV_40_PSM_RULES := %{_udevrulesdir}/40-psm.rules
 
 ifeq (fedora,$(DISTRO))
@@ -143,6 +146,11 @@ else ifeq (rhel,${DISTRO})
 	# Insert code specific to RHEL here.
 else ifeq (sles,${DISTRO})
 	# Insert code specific to SLES here.
+endif
+
+ifdef PSM_CUDA
+#Value needs to be something without spaces or dashes '-'
+SPEC_FILE_RELEASE_DIST += cuda
 endif
 
 export 	LIBPSM2_COMPAT_CONF_DIR
@@ -183,7 +191,11 @@ DIST_SHA := ${shell if [ -e .git ] ; then git log -n1 --pretty=format:%H ; \
 		else echo DIST_SHA ; fi}
 
 # Concatenated version and release
+ifndef VERSION_RELEASE_OVERRIDE
 VERSION_RELEASE := $(VERSION).$(RELEASE)
+else
+VERSION_RELEASE := ${VERSION_RELEASE_OVERRIDE}
+endif
 
 LDLIBS := -lrt -lpthread -ldl ${EXTRA_LIBS}
 
@@ -257,10 +269,15 @@ debug: OPTIONS = PSM_DEBUG=1
 debug:
 	$(MAKE) OUTDIR=$(OUTDIR) OPTIONS=$(OPTIONS)
 
-distclean: cleanlinks $(HISTORIC_TARGETS)
+test_clean:
+	$(MAKE) -C test clean
+
+specfile_clean:
 	rm -f ${RPM_NAME}.spec
+
+distclean: specfile_clean cleanlinks $(HISTORIC_TARGETS) test_clean
 	rm -f ${DIST}.tar.gz
-	rm -fr temp.[0-9]*
+	rm -fr temp.*
 
 outdir:
 ifneq ("$(shell echo $(OUTDIR) | cut -c 1)", "/")
@@ -311,7 +328,7 @@ endif
 	install -m 0644 -D include/opa_revision.h ${DESTDIR}/usr/include/hfi1diag/opa_revision.h
 	install -m 0644 -D psmi_wrappers.h ${DESTDIR}/usr/include/hfi1diag/psmi_wrappers.h
 
-specfile:
+specfile: specfile_clean
 	sed -e 's/@VERSION@/'${VERSION_RELEASE}'/g' ${RPM_NAME}.spec.in | \
 		sed -e 's/@TARGLIB@/'${TARGLIB}'/g' \
 			-e 's/@RPM_NAME@/'${RPM_NAME}'/g' \
@@ -322,7 +339,7 @@ specfile:
 			-e 's/@MINOR@/'${MINOR}'/g' \
 			-e 's:@LIBPSM2_COMPAT_CONF_DIR@:'${LIBPSM2_COMPAT_CONF_DIR}':g' \
 			-e 's:@LIBPSM2_COMPAT_SYM_CONF_DIR@:'${LIBPSM2_COMPAT_SYM_CONF_DIR}':g' \
-			-e 's/@SPEC_FILE_RELEASE_DIST@/'${SPEC_FILE_RELEASE_DIST}'/g'  \
+			-e 's;@SPEC_FILE_RELEASE_DIST@;'${SPEC_FILE_RELEASE_DIST}';g'  \
 			-e 's/@DIST_SHA@/'${DIST_SHA}'/g' > \
 		${RPM_NAME}.spec
 	if [ -f /etc/redhat-release ] && [ `grep -o "[0-9.]*" /etc/redhat-release | cut -d"." -f1` -lt 7 ]; then \
@@ -331,7 +348,7 @@ specfile:
 		sed -i 's;@40_PSM_RULES@;'${UDEV_40_PSM_RULES}';g' ${RPM_NAME}.spec; \
 	fi
 
-dist: distclean
+dist:
 	mkdir -p ${DIST}
 	for x in $$(/usr/bin/find .						\
 			-name ".git"                           -prune -o	\
@@ -373,6 +390,7 @@ ${TARGLIB}-objs := ptl_am/am_reqrep_shmem.o	\
 		   ptl_am/am_reqrep.o		\
 		   ptl_am/ptl.o			\
 		   ptl_am/cmarwu.o		\
+		   ptl_am/am_cuda_memhandle_cache.o  \
 		   psm_context.o		\
 		   psm_ep.o			\
 		   psm_ep_connect.o		\
@@ -389,6 +407,10 @@ ${TARGLIB}-objs := ptl_am/am_reqrep_shmem.o	\
 		   psm_memcpy.o			\
 		   psm.o			\
 		   libuuid/psm_uuid.o		\
+		   libuuid/parse.o		\
+		   libuuid/pack.o		\
+		   libuuid/unpack.o		\
+		   libuuid/unparse.o		\
 		   ptl_ips/ptl.o		\
 		   ptl_ips/ptl_rcvthread.o	\
 		   ptl_ips/ipserror.o		\

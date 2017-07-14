@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 /*
  * Control and state structure for one instance of the expected protocol.  The
@@ -119,6 +119,16 @@ struct ips_protoexp {
 
 	 STAILQ_HEAD(ips_tid_get_pend, ips_tid_get_request) pend_getreqsq;	/* pending tid reqs */
 	struct psmi_timer timer_getreqs;
+
+#ifdef PSM_CUDA
+	STAILQ_HEAD(ips_tid_get_cudapend, /* pending cuda transfers */
+		    ips_tid_get_request) cudapend_getreqsq;
+	struct ips_cuda_hostbuf_mpool_cb_context cuda_hostbuf_recv_cfg;
+	struct ips_cuda_hostbuf_mpool_cb_context cuda_hostbuf_small_recv_cfg;
+	mpool_t cuda_hostbuf_pool_recv;
+	mpool_t cuda_hostbuf_pool_small_recv;
+	cudaStream_t cudastream_recv;
+#endif
 };
 
 /*
@@ -199,6 +209,15 @@ struct ips_tid_send_desc {
 	/* bitmap of queued control messages for flow */
 	uint16_t ctrl_msg_queued;
 
+#ifdef PSM_CUDA
+	/* As size of cuda_hostbuf is less than equal to window size,
+	 * there is a guarantee that the maximum number of host bufs we
+	 * would need to attach to a tidsendc would be 2
+	 */
+	struct ips_cuda_hostbuf *cuda_hostbuf[2];
+	/* Number of hostbufs attached */
+	uint8_t cuda_num_buf;
+#endif
 	/*
 	 * tid_session_list is 24 bytes, plus 512 tidpair for 2048 bytes,
 	 * so the max possible tid window size mq->hfi_window_rv is 4M.
@@ -244,6 +263,11 @@ struct ips_tid_recv_desc {
 	uint32_t tidflow_active_gen;
 	uint32_t tidflow_nswap_gen;
 	psmi_seqnum_t tidflow_genseq;
+
+#ifdef PSM_CUDA
+	struct ips_cuda_hostbuf *cuda_hostbuf;
+	uint8_t is_ptr_gpu_backed;
+#endif
 
 	void *buffer;
 	uint32_t recv_msglen;
@@ -294,6 +318,13 @@ struct ips_tid_get_request {
 	uint32_t tidgr_offset;	/* offset in bytes */
 	uint32_t tidgr_bytesdone;
 	uint32_t tidgr_flags;
+
+#ifdef PSM_CUDA
+	int cuda_hostbuf_used;
+	uint32_t tidgr_cuda_bytesdone;
+	STAILQ_HEAD(ips_tid_getreq_cuda_hostbuf_pend,	/* pending exp. sends */
+		    ips_cuda_hostbuf) pend_cudabuf;
+#endif
 };
 
 /*
@@ -319,11 +350,13 @@ struct ips_tid_get_request {
  * echoed on the wire throughout various phases of the expected send protocol
  * to identify a particular send.
  */
-psm2_error_t ips_protoexp_init(const psmi_context_t *context,
+psm2_error_t
+MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 			      const struct ips_proto *proto,
 			      uint32_t protoexp_flags, int num_of_send_bufs,
 			      int num_of_send_desc,
 			      struct ips_protoexp **protoexp_o);
+MOCK_DCL_EPILOGUE(ips_protoexp_init);
 
 psm2_error_t ips_protoexp_fini(struct ips_protoexp *protoexp);
 void ips_protoexp_handle_tiderr(const struct ips_recvhdrq_event *rcv_ev);

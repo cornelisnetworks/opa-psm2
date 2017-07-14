@@ -160,12 +160,53 @@ psmi_get_uuid_hash(psm2_uuid_t const uuid)
 	return hashed_uuid;
 }
 
+#ifdef PSM_CUDA
+int psmi_get_current_proc_location()
+{
+        int core_id, node_id = -1;
+	syscall(SYS_getcpu, &core_id, &node_id, NULL);
+
+	return node_id;
+}
+#endif
+
+static void
+psmi_spread_hfi_selection(psm2_uuid_t const job_key, long *unit_start,
+			     long *unit_end, int nunits)
+{
+	/* if the number of ranks on the host is 1 and ... */
+	if ((psmi_get_envvar("MPI_LOCALNRANKS") == 1) &&
+		/*
+		 * All of the active units have free contexts equal the
+		 * number of contexts.
+		 */
+	    psmi_all_active_units_have_max_freecontexts(nunits)) {
+		/* we start looking at unit 0, and end at nunits-1: */
+		*unit_start = 0;
+		*unit_end = nunits - 1;
+	} else {
+		/* else, we are going to look at:
+		   (a hash of the job key plus the local rank id) mod nunits. */
+
+		*unit_start = (psmi_get_envvar("MPI_LOCALRANKID") +
+			psmi_get_uuid_hash(job_key)) % nunits;
+		if (*unit_start > 0)
+			*unit_end = *unit_start - 1;
+		else
+			*unit_end = nunits-1;
+	}
+}
+
 static
 psm2_error_t
 psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
 				int nunitsactive,int nunits,psm2_uuid_t const job_key,
 				long *unit_start,long *unit_end)
 {
+#ifdef PSM_CUDA
+	int node_id, unit_id, found = 0;
+	int saved_hfis[nunits];
+#endif
 	context->user_info.hfi1_alg = HFI1_ALG_ACROSS;
 	/* if the user did not set HFI_UNIT then ... */
 	if (unit_param == HFI_UNIT_ID_ANY)
@@ -177,47 +218,69 @@ psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
 		    /* there are more than 1 active units then ... */
 		    (nunitsactive > 1))
 		{
-			/* if the number of ranks on the host is 1 and ... */
-			if ((psmi_get_envvar("MPI_LOCALNRANKS") == 1) &&
-			    /* all of the active units have free contexts equal the 
-			       number of contexts. */
-			    psmi_all_active_units_have_max_freecontexts(nunits))
-			{
-				/* we start looking at unit 0, and end at nunits-1: */
-				*unit_start = 0;
-				*unit_end = nunits - 1;
-			}
-			else
-			{
-				/* else, we are going to look at:
-				   (a hash of the job key plus the local rank id) mod nunits. */
+#ifdef PSM_CUDA
+			/*
+			 * Pick first HFI we find on same root complex
+			 * as current task. If none found, fall back to
+			 * load-balancing algorithm.
+			 */
+			node_id = psmi_get_current_proc_location();
+			if (PSMI_IS_CUDA_ENABLED && node_id >= 0) {
+				for (unit_id = 0; unit_id < nunits; unit_id++) {
+					if (hfi_get_unit_active(unit_id) <= 0)
+						continue;
 
-				*unit_start = (psmi_get_envvar("MPI_LOCALRANKID") +
-					psmi_get_uuid_hash(job_key)) % nunits;
-				if (*unit_start > 0)
-					*unit_end = *unit_start - 1;
-				else
-					*unit_end = nunits-1;
+					if (hfi_sysfs_unit_read_node_s64(unit_id) == node_id) {
+						saved_hfis[found] = unit_id;
+						found++;
+						_HFI_VDBG("Picking unit: %d for current task"
+							  " which is on node:%d\n", unit_id, node_id);
+					}
+				}
+
+				/*
+				 * Spread HFI selection between units if
+				 * we find more than one within a socket.
+				 */
+				if (found > 1) {
+					*unit_start = (psmi_get_envvar("MPI_LOCALRANKID") +
+						psmi_get_uuid_hash(job_key)) % found;
+
+					*unit_start = *unit_end = saved_hfis[*unit_start];
+				} else if (found == 1) {
+					*unit_start = *unit_end = saved_hfis[0];
+				}
 			}
+
+			if (node_id < 0 || !found) {
+#endif
+				psmi_spread_hfi_selection(job_key, unit_start,
+							  unit_end, nunits);
+#ifdef PSM_CUDA
+			}
+#endif
 		}
-		else
-		{
+#ifdef PSM_CUDA
+		else if ((context->user_info.hfi1_alg == HFI1_ALG_ACROSS_ALL) &&
+			   (nunitsactive > 1)) {
+				psmi_spread_hfi_selection(job_key, unit_start,
+							  unit_end, nunits);
+		}
+#endif
+		else {
 			*unit_start = 0;
 			*unit_end = nunits - 1;
 		}
-	}
+	} else if (unit_param >= 0) {
 	/* the user specified HFI_UNIT, we use it. */
-	else if (unit_param >= 0)
-	{
 		*unit_start = *unit_end = unit_param;
-	}
-	else
-	{
+	} else {
 		psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
 					"PSM2 can't open unit: %ld for reading and writing",
 					unit_param);
 		return PSM2_EP_DEVICE_FAILURE;
 	}
+
 	return PSM2_OK;
 }
 
@@ -264,6 +327,7 @@ psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 		open_timeout = (long)(timeout_ns / MSEC_ULL);
 
 
+	unit_start = 0; unit_end = nunits - 1;
 	err = psmi_compute_start_and_end_unit(context, unit_param,
 					      nunitsactive, nunits,
 					      job_key,
@@ -287,16 +351,22 @@ psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 		}
 
 		/* if the unit_id is not active, go to next one. */
-		if (hfi_get_unit_active(unit_id) <= 0)
+		if (hfi_get_unit_active(unit_id) <= 0) {
+			unit_id_prev = unit_id;
+			unit_id = (unit_id + 1) % nunits;
 			continue;
+		}
 
 		/* open this unit. */
 		context->fd = hfi_context_open_ex(unit_id, port, open_timeout,
 				       dev_name, sizeof(dev_name));
 
 		/* go to next unit if failed to open. */
-		if (context->fd == -1)
+		if (context->fd == -1) {
+			unit_id_prev = unit_id;
+			unit_id = (unit_id + 1) % nunits;
 			continue;
+		}
 
 		/* collect the userinfo params. */
 		if ((err = psmi_init_userinfo_params(ep,
@@ -340,6 +410,12 @@ psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 
 	context->ep = (psm2_ep_t) ep;
 	context->runtime_flags = context->ctrl->ctxt_info.runtime_flags;
+
+#ifdef PSM_CUDA
+	/* Check backward compatibility bits here and save the info */
+	if (context->ctrl->ctxt_info.runtime_flags & HFI1_CAP_GPUDIRECT_OT)
+		is_driver_gpudirect_enabled = 1;
+#endif
 
 	/* Get type of hfi assigned to context */
 	hfi_type = psmi_get_hfi_type(context);
@@ -446,7 +522,8 @@ psm2_error_t psmi_context_check_status(const psmi_context_t *contexti)
 				else
 					errmsg = "Hardware not found";
 
-				psmi_handle_error(context->ep, err, errmsg);
+				psmi_handle_error(context->ep, err,
+						  "%s", errmsg);
 			}
 		}
 	}
@@ -694,7 +771,11 @@ int psmi_get_hfi_selection_algorithm(void)
 	/* If a specific unit is set in the environment, use that one. */
 	psmi_getenv("HFI_SELECTION_ALG",
 		    "HFI Device Selection Algorithm to use. Round Robin (Default) "
+#ifdef PSM_CUDA
+		    ", Packed or Round Robin All.",
+#else
 		    "or Packed",
+#endif
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_STR,
 		    (union psmi_envvar_val)"Round Robin", &env_hfi1_alg);
 
@@ -702,6 +783,10 @@ int psmi_get_hfi_selection_algorithm(void)
 		hfi1_alg = HFI1_ALG_ACROSS;
 	else if (!strcasecmp(env_hfi1_alg.e_str, "Packed"))
 		hfi1_alg = HFI1_ALG_WITHIN;
+#ifdef PSM_CUDA
+	else if (!strcasecmp(env_hfi1_alg.e_str, "Round Robin All"))
+		hfi1_alg = HFI1_ALG_ACROSS_ALL;
+#endif
 	else {
 		_HFI_ERROR
 		    ("Unknown HFI selection algorithm %s. Defaulting to Round Robin "

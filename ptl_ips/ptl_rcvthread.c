@@ -95,6 +95,14 @@ struct ptl_rcvthread {
 	uint32_t last_timeout;
 };
 
+#ifdef PSM_CUDA
+	/* This is a global cuda context (extern declaration in psm_user.h)
+         * stored to provide hints during a cuda failure
+         * due to a null cuda context.
+         */
+	CUcontext ctxt;
+#endif
+
 /*
  * The receive thread knows about the ptl interface, so it can muck with it
  * directly.
@@ -116,6 +124,10 @@ psm2_error_t ips_ptl_rcvthread_init(ptl_t *ptl, struct ips_recvhdrq *recvq)
 	rcvc->ptl = ptl;
 	rcvc->context = ptl->context;
 	rcvc->t_start_cyc = get_cycles();
+
+#ifdef PSM_CUDA
+	PSMI_CUDA_DRIVER_API_CALL(cuCtxGetCurrent, &ctxt);
+#endif
 
 	if (ptl->runtime_flags & PSMI_RUNTIME_RCVTHREAD) {
 
@@ -318,6 +330,10 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 	uint64_t t_cyc;
 	psm2_error_t err;
 
+#ifdef PSM_CUDA
+	if (ctxt != NULL)
+		PSMI_CUDA_DRIVER_API_CALL(cuCtxSetCurrent, ctxt);
+#endif
 
 	PSM2_LOG_MSG("entering");
 	/* No reason to have many of these, keep this as a backup in case the

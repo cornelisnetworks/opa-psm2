@@ -57,6 +57,8 @@
 /* This file contains all the lowest level routines calling into sysfs */
 /* and qib driver. All other calls are based on these routines. */
 
+#include <libgen.h>
+
 #include "opa_intf.h"
 #include "opa_common.h"
 #include "opa_udebug.h"
@@ -91,6 +93,9 @@ enum PSMI_HFI_CMD {
     PSMI_HFI_CMD_TID_INVAL_READ,    /* read TID cache invalidations */
     PSMI_HFI_CMD_GET_VERS,          /* get the version of the user cdev */
 
+#ifdef PSM_CUDA
+    PSMI_HFI_CMD_TID_UPDATE_V2 = 28,
+#endif
     PSMI_HFI_CMD_LAST,
 };
 
@@ -109,7 +114,7 @@ enum LEGACY_HFI1_CMD {
     LEGACY_HFI1_CMD_SET_PKEY        = 11,    /* set context's pkey */
     LEGACY_HFI1_CMD_CTXT_RESET      = 12,    /* reset context's HW send context */
     LEGACY_HFI1_CMD_TID_INVAL_READ  = 13,    /* read TID cache invalidations */
-    LEGACY_HFI1_CMD_GET_VERS        = 14     /* get the version of the user cdev */
+    LEGACY_HFI1_CMD_GET_VERS        = 14    /* get the version of the user cdev */
 };
 
 /* Given a unit number and port number, returns 1 if the unit and port are active.
@@ -247,6 +252,7 @@ int hfi_sysfs_unit_read_s64(uint32_t unit, const char *attr,
 			    int64_t *valp, int base);
 int hfi_sysfs_port_read_s64(uint32_t unit, uint32_t port, const char *attr,
 			    int64_t *valp, int base);
+int64_t hfi_sysfs_unit_read_node_s64(uint32_t unit);
 /* these read directly into supplied buffer and take a count */
 int hfi_hfifs_rd(const char *, void *, int);
 int hfi_hfifs_unit_rd(uint32_t unit, const char *, void *, int);

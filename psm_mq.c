@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #include <sched.h>
 
@@ -283,6 +283,15 @@ void MOCKABLE(psmi_mq_mtucpy)(void *vdest, const void *vsrc, uint32_t nchars)
 {
 	unsigned char *dest = (unsigned char *)vdest;
 	const unsigned char *src = (const unsigned char *)vsrc;
+
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED && (PSMI_IS_CUDA_MEM(vdest) || PSMI_IS_CUDA_MEM((void *) vsrc))) {
+		PSMI_CUDA_CALL(cudaMemcpy,
+			       vdest, vsrc, nchars, cudaMemcpyDefault);
+		return;
+	}
+#endif
+
 	if (nchars >> 2)
 		hfi_dwordcpy((uint32_t *) dest, (uint32_t *) src, nchars >> 2);
 	dest += (nchars >> 2) << 2;
@@ -898,6 +907,24 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 	psm2_error_t err = PSM2_OK;
 	psm2_mq_req_t req;
 
+#ifdef PSM_CUDA
+	int gpu_mem;
+	/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
+	 * when the buffer pointer received into PSM has been allocated
+	 * by the application. This guarantees the all memory operations
+	 * to this region of memory (used by multiple layers of the stack)
+	 * always synchronize
+	 */
+	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)buf)) {
+		int trueflag = 1;
+		PSMI_CUDA_CALL(cuPointerSetAttribute, &trueflag,
+			       CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
+			      (CUdeviceptr)buf);
+		gpu_mem = 1;
+	} else
+		gpu_mem = 0;
+#endif
+
 	PSM2_LOG_MSG("entering");
 	PSMI_ASSERT_INITIALIZED();
 
@@ -924,6 +951,10 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 		req->recv_msgoff = 0;
 		req->context = context;
 
+#ifdef PSM_CUDA
+		req->is_buf_gpu_mem = gpu_mem;
+#endif
+
 		/* Nobody should touch the buffer after it's posted */
 		VALGRIND_MAKE_MEM_NOACCESS(buf, len);
 
@@ -937,6 +968,9 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 			  " tagsel=%08x.%08x.%08x req=%p\n", buf, len,
 			  tag->tag[0], tag->tag[1], tag->tag[2],
 			  tagsel->tag[0], tagsel->tag[1], tagsel->tag[2], req);
+#ifdef PSM_CUDA
+		req->is_buf_gpu_mem = gpu_mem;
+#endif
 
 		req->context = context;
 
@@ -998,6 +1032,23 @@ __psm2_mq_imrecv(psm2_mq_t mq, uint32_t flags, void *buf, uint32_t len,
 		/* Message is already matched -- begin delivering message data to the
 		   user's buffer. */
 		req->context = context;
+
+#ifdef PSM_CUDA
+	/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
+	 * when the buffer pointer received into PSM has been allocated
+	 * by the application. This guarantees the all memory operations
+	 * to this region of memory (used by multiple layers of the stack)
+	 * always synchronize
+	 */
+	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)buf)) {
+		int trueflag = 1;
+		PSMI_CUDA_CALL(cuPointerSetAttribute, &trueflag,
+			       CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
+			      (CUdeviceptr)buf);
+		req->is_buf_gpu_mem = 1;
+	} else
+		req->is_buf_gpu_mem = 0;
+#endif
 
 		PSMI_PLOCK();
 		psm2_mq_irecv_inner(mq, req, buf, len);
@@ -1262,6 +1313,11 @@ psm2_error_t psmi_mq_malloc(psm2_mq_t *mqo)
 		mq->hfi_thresh_rv = 64000;
 		mq->hfi_window_rv = 131072;
 	}
+	mq->hfi_thresh_tiny = 8;
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED)
+		mq->hfi_window_rv = 2097152;
+#endif
 	mq->shm_thresh_rv = 16000;
 
 	memset(&mq->stats, 0, sizeof(psm2_mq_stats_t));
@@ -1280,7 +1336,14 @@ fail:
 
 psm2_error_t psmi_mq_initialize_defaults(psm2_mq_t mq)
 {
-	union psmi_envvar_val env_rvwin, env_hfirv, env_shmrv, env_stats;
+	union psmi_envvar_val env_hfitiny, env_rvwin, env_hfirv,
+		env_shmrv, env_stats;
+
+	psmi_getenv("PSM2_MQ_TINY_HFI_THRESH",
+		    "hfi tiny packet switchover (max 8, default 8)",
+		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
+		    (union psmi_envvar_val)mq->hfi_thresh_tiny, &env_hfitiny);
+	mq->hfi_thresh_tiny = min(env_hfitiny.e_uint, 8);
 
 	psmi_getenv("PSM2_MQ_RNDV_HFI_THRESH",
 		    "hfi eager-to-rendezvous switchover",

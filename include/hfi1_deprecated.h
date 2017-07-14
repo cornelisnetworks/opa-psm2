@@ -88,7 +88,11 @@
 
 /*
  * round robin contexts across HFIs, then
- * ports; this is the default
+ * ports; this is the default.
+ * For CUDA builds, this option spreads the
+ * HFI selection within the local socket. If
+ * it is preferred to spread job over over entire set of
+ * HFIs within the system, see ALG_ACROSS_ALL below.
  */
 #define HFI1_ALG_ACROSS_DEP 0
 
@@ -98,6 +102,11 @@
  */
 #define HFI1_ALG_WITHIN_DEP 1
 
+#ifdef PSM_CUDA
+#define HFI1_ALG_ACROSS_ALL_DEP 2
+#endif /* PSM_CUDA */
+
+
 struct hfi1_cmd_deprecated {
 	__u32 type;        /* command type */
 	__u32 len;         /* length of struct pointed to by add */
@@ -106,9 +115,11 @@ struct hfi1_cmd_deprecated {
 
 #define hfi1_cmd hfi1_cmd_deprecated
 
-#define HFI1_ALG_ACROSS HFI1_ALG_ACROSS_DEP
-
-#define HFI1_ALG_WITHIN HFI1_ALG_WITHIN_DEP
+#define HFI1_ALG_ACROSS		HFI1_ALG_ACROSS_DEP
+#define HFI1_ALG_WITHIN		HFI1_ALG_WITHIN_DEP
+#ifdef PSM_CUDA
+#define HFI1_ALG_ACROSS_ALL	HFI1_ALG_ACROSS_ALL_DEP
+#endif /* PSM_CUDA */
 
 #else
 
@@ -139,5 +150,38 @@ struct hfi1_user_info_dep {
 	/* 128bit UUID passed in by PSM. */
 	__u8 uuid[16];
 };
+
+/*
+ * We assume here that we have the hfi1_user.h file installed in the system path
+ * with the 'flags' field defined in struct sdma_req_info. (At least, when the
+ * user needs to run GPU workloads, this _should_ be the version of hfi1_user.h
+ * file installed by the IFS.)
+ */
+struct sdma_req_info_v6_3 {
+	/*
+	 * bits 0-3 - version (currently unused)
+	 * bits 4-7 - opcode (enum sdma_req_opcode)
+	 * bits 8-15 - io vector count
+	 */
+	__u16 ctrl;
+	/*
+	 * Number of fragments contained in this request.
+	 * User-space has already computed how many
+	 * fragment-sized packet the user buffer will be
+	 * split into.
+	 */
+	__u16 npkts;
+	/*
+	 * Size of each fragment the user buffer will be
+	 * split into.
+	 */
+	__u16 fragsize;
+	/*
+	 * Index of the slot in the SDMA completion ring
+	 * this request should be using. User-space is
+	 * in charge of managing its own ring.
+	 */
+	__u16 comp_idx;
+} __attribute__((packed));
 
 #endif /* #ifndef __HFI1_DEPRECATED_H__ */

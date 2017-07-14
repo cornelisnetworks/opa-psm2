@@ -103,10 +103,10 @@
 
   At runtime, setting environment variables can squelch the log file from getting too big:
 
-  PSM_LOG_INC_FUNCTION_NAMES is a list of function name lists (abbreviated FNL) (see below),
+  PSM2_LOG_INC_FUNCTION_NAMES is a list of function name lists (abbreviated FNL) (see below),
   that will INClude the FNL's into the colleciton of functions to spill log data for.
 
-  PSM_LOG_EXC_FUNCTION_NAMES is a list of FNL's (see below), that will EXClude the FNL's from the
+  PSM2_LOG_EXC_FUNCTION_NAMES is a list of FNL's (see below), that will EXClude the FNL's from the
   collection of functions to spill log data for.
 
   An FNL is a 'Function Name List' that is defined by the following grammar:
@@ -132,8 +132,8 @@
   foo;1-10   lines 1 to 10 of function foo.
   bar;1,3,5  lines 1, 3 and 5 of function bar
 
-  PSM_LOG_SRCH_FORMAT_STRING If set, overrides the PSM_LOG_INC_FUNCTION_NAMES
-  and PSM_LOG_EXC_FUNCTION_NAMES settings.  Causes the psmi_log_message() facility
+  PSM2_LOG_SRCH_FORMAT_STRING If set, overrides the PSM2_LOG_INC_FUNCTION_NAMES
+  and PSM2_LOG_EXC_FUNCTION_NAMES settings.  Causes the psmi_log_message() facility
   to only emit the log messages that match (using fnmatch()) the message in FORMAT.
 
  */

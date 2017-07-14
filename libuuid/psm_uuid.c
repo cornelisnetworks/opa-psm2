@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,26 +51,54 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
-#include <uuid/uuid.h>
+#include <sys/stat.h>
+#include <limits.h>
+#include <fcntl.h>
 #include "psm_user.h"
+#include "psm_uuid.h"
 
+static void psmi_make_drand_uuid(psm2_uuid_t uuid_out)
+{
+	struct drand48_data drand48_data;
+	int i;
+	long int rnum;
+	srand48_r((get_cycles() + getpid()) % LONG_MAX, &drand48_data);
+	for(i=0; i < 16; i++) {
+		lrand48_r(&drand48_data, &rnum);
+		uuid_out[i] = rnum % UCHAR_MAX;
+	}
+}
+
+/* Since libuuid can call srand, we will generate our own uuids */
 void
 __psm2_uuid_generate(psm2_uuid_t uuid_out)
 {
 	PSM2_LOG_MSG("entering");
-	uuid_generate(uuid_out);
+	/* Prefer using urandom, fallback to drand48_r */
+	struct stat urandom_stat;
+	size_t nbytes;
+	int fd;
+	if(stat("/dev/urandom", &urandom_stat) != 0) {
+		psmi_make_drand_uuid(uuid_out);
+		return;
+	}
+
+	fd = open("/dev/urandom", O_RDONLY);
+	if(fd == -1) {
+		psmi_make_drand_uuid(uuid_out);
+	} else {
+		nbytes = read(fd, (char *) uuid_out, 16);
+		if(nbytes != 16) {
+			psmi_make_drand_uuid(uuid_out);
+		}
+		close(fd);
+	}
 	PSM2_LOG_MSG("leaving");
 	return;
 }
 PSMI_API_DECL(psm2_uuid_generate)
-
-int
-psmi_uuid_compare(const psm2_uuid_t uuA, const psm2_uuid_t uuB)
-{
-	return uuid_compare(uuA, uuB);
-}
 
 void
 psmi_uuid_unparse(const uuid_t uu, char *out)

@@ -147,6 +147,23 @@ self_mq_isend(psm2_mq_t mq, psm2_epaddr_t epaddr, uint32_t flags,
 	if_pf(send_req == NULL)
 	    return PSM2_NO_MEMORY;
 
+#ifdef PSM_CUDA
+	/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
+	 * when the buffer pointer received into PSM has been allocated
+	 * by the application. This guarantees the all memory operations
+	 * to this region of memory (used by multiple layers of the stack)
+	 * always synchronize
+	 */
+	if (PSMI_IS_CUDA_MEM((void*)ubuf)) {
+		int trueflag = 1;
+		PSMI_CUDA_CALL(cuPointerSetAttribute, &trueflag,
+			       CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
+			      (CUdeviceptr)ubuf);
+		send_req->is_buf_gpu_mem = 1;
+	} else
+		send_req->is_buf_gpu_mem = 0;
+#endif
+
 	rc = psmi_mq_handle_rts(mq, epaddr, tag,
 				len, NULL, 0, 1,
 				ptl_handle_rtsmatch, &recv_req);
@@ -286,26 +303,25 @@ fail:
 	return err;
 }
 
-#if 0
 static
 psm2_error_t
-self_disconnect(ptl_t *ptl, int numep,
-		psm2_epaddr_t array_of_epaddr[],
-		int array_of_epaddr_mask[], int force, uint64_t timeout_ns)
+self_disconnect(ptl_t *ptl, int force, int numep,
+		   psm2_epaddr_t array_of_epaddr[],
+		   const int array_of_epaddr_mask[],
+		   psm2_error_t array_of_errors[], uint64_t timeout_in)
 {
 	int i;
 	for (i = 0; i < numep; i++) {
 		if (array_of_epaddr_mask[i] == 0)
 			continue;
 
-		if (array_of_epaddr[i] == ptl->epaddr)
-			array_of_epaddr_mask[i] = 1;
-		else
-			array_of_epaddr_mask[i] = 0;
+		if (array_of_epaddr[i] == ptl->epaddr) {
+			psmi_epid_remove(ptl->ep, ptl->epid);
+			array_of_errors[i] = PSM2_OK;
+		}
 	}
 	return PSM2_OK;
 }
-#endif
 
 static
 size_t self_ptl_sizeof(void)
@@ -330,7 +346,7 @@ psm2_error_t self_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 	ctl->ptl = ptl;
 	ctl->ep_poll = NULL;
 	ctl->ep_connect = self_connect;
-	ctl->ep_disconnect = NULL;
+	ctl->ep_disconnect = self_disconnect;
 
 	ctl->mq_send = self_mq_send;
 	ctl->mq_isend = self_mq_isend;

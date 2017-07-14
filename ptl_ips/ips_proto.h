@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #ifndef _IPS_PROTO_H
 #define _IPS_PROTO_H
@@ -91,9 +91,9 @@ struct ips_epinfo {
 	uint16_t ep_sl;		/* HFI_SL only when path record not used */
 	uint16_t ep_mtu;
 	uint16_t ep_piosize;
-	uint16_t ep_pkey;	/* PSM_PKEY only when path record not used */
+	uint16_t ep_pkey;	/* PSM2_PKEY only when path record not used */
 	uint16_t ep_jkey;
-	uint64_t ep_timeout_ack;	/* PSM_ERRCHK_TIMEOUT if no path record */
+	uint64_t ep_timeout_ack;	/* PSM2_ERRCHK_TIMEOUT if no path record */
 	uint64_t ep_timeout_ack_max;
 	uint32_t ep_timeout_ack_factor;
 };
@@ -381,6 +381,15 @@ struct ips_proto {
 	void *opp_ctxt;
 	struct opp_api opp_fn;
 
+#ifdef PSM_CUDA
+	struct ips_cuda_hostbuf_mpool_cb_context cuda_hostbuf_send_cfg;
+	struct ips_cuda_hostbuf_mpool_cb_context cuda_hostbuf_small_send_cfg;
+	mpool_t cuda_hostbuf_pool_send;
+	mpool_t cuda_hostbuf_pool_small_send;
+	cudaStream_t cudastream_send;
+	unsigned cuda_prefetch_limit;
+#endif
+	int ips_extra_sdmahdr_size;
 /*
  * Control message queue for pending messages.
  *
@@ -628,7 +637,35 @@ extern ips_packet_service_fn_t
 /* IBTA feature related functions (path record, sl2sc2vl etc.) */
 psm2_error_t ips_ibta_init_sl2sc2vl_table(struct ips_proto *proto);
 psm2_error_t ips_ibta_link_updown_event(struct ips_proto *proto);
-psm2_error_t ips_ibta_init(struct ips_proto *proto);
+
+psm2_error_t
+MOCKABLE(ips_ibta_init)(struct ips_proto *proto);
+MOCK_DCL_EPILOGUE(ips_ibta_init);
+
 psm2_error_t ips_ibta_fini(struct ips_proto *proto);
+
+PSMI_ALWAYS_INLINE(
+void* psmi_get_sdma_req_info(struct ips_scb *scb, int sdmahdr_extra_bytes))
+{
+#ifdef PSM_CUDA
+	if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
+		return (void *)(((char*)&scb->pbc) - sizeof(struct sdma_req_info_v6_3) -
+				  sdmahdr_extra_bytes);
+#endif
+	return (void *)(((char*)&scb->pbc) - sizeof(struct sdma_req_info_v6_3));
+}
+
+#ifdef PSM_CUDA
+PSMI_ALWAYS_INLINE(
+uint32_t ips_cuda_next_window(uint32_t max_window, uint32_t offset,
+			      uint32_t len))
+{
+	uint32_t window_len;
+	window_len = len - offset;
+	if (window_len >= max_window)
+		window_len = max_window;
+	return window_len;
+}
+#endif
 
 #endif /* _IPS_PROTO_H */

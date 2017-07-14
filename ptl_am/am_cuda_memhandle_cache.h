@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,28 +51,74 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+#ifdef PSM_CUDA
 
-#ifndef _PSM_UUID_H
-#define _PSM_UUID_H
-struct uuid {
-	uint32_t	time_low;
-	uint16_t	time_mid;
-	uint16_t	time_hi_and_version;
-	uint16_t	clock_seq;
-	uint8_t	node[6];
-};
+#ifndef _AM_CUDA_MEMHANDLE_CACHE_H
+#define _AM_CUDA_MEMHANDLE_CACHE_H
 
-typedef unsigned char uuid_t[16];
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <unistd.h>
 
-int	    psmi_uuid_parse(const char *in, psm2_uuid_t uu);
-void	    psmi_uuid_unparse(const psm2_uuid_t uuid, char *out);
-int	    psmi_uuid_compare(const psm2_uuid_t uuA, const psm2_uuid_t uuB);
-int uuid_compare(const uuid_t uu1, const uuid_t uu2);
-void uuid_pack(const struct uuid *uu, uuid_t ptr);
-void uuid_unparse(const uuid_t uu, char *out);
-void uuid_unparse_upper(const uuid_t uu, char *out);
-void uuid_unparse_lower(const uuid_t uu, char *out);
-void uuid_unpack(const uuid_t in, struct uuid *uu);
-int uuid_parse(const char *in, uuid_t uu);
+struct _cl_map_item;
+
+typedef struct
+{
+	unsigned long		start;		 /* start virtual address */
+	cudaIpcMemHandle_t      cuda_ipc_handle; /* cuda ipc mem handle */
+	void*			cuda_ipc_dev_ptr;/* Cuda device pointer */
+	uint16_t		length;	 /* length*/
+	psm2_epid_t             epid;
+	struct _cl_map_item*	i_prev;	 /* idle queue previous */
+	struct _cl_map_item*	i_next;	 /* idle queue next */
+}__attribute__ ((aligned (128))) rbtree_cuda_memhandle_cache_mapitem_pl_t;
+
+typedef struct {
+	uint32_t		nelems;	/* number of elements in the cache */
+} rbtree_cuda_memhandle_cache_map_pl_t;
+
+#define RBTREE_MI_PL  rbtree_cuda_memhandle_cache_mapitem_pl_t
+#define RBTREE_MAP_PL rbtree_cuda_memhandle_cache_map_pl_t
+
+#include "rbtree.h"
+
+cl_qmap_t cuda_memhandle_cachemap; /* Global cache */
+uint8_t cuda_memhandle_cache_enabled;
+mpool_t cuda_memhandle_mpool;
+uint32_t cuda_memhandle_cache_size;
+#define CUDA_MEMHANDLE_CACHE_SIZE 64
+
+/*
+ * Macro definition for easy programming.
+ */
+
+#define NELEMS			cuda_memhandle_cachemap.payload.nelems
+
+/*
+ * Macro for idle queue management.
+ */
+#define IHEAD			cuda_memhandle_cachemap.root
+#define LAST			IHEAD->payload.i_prev
+#define FIRST			IHEAD->payload.i_next
+#define INEXT(x)		x->payload.i_next
+#define IPREV(x)		x->payload.i_prev
+
+
+psm2_error_t am_cuda_memhandle_mpool_init(uint32_t memcache_size);
+
+psm2_error_t am_cuda_memhandle_cache_map_init();
+
+void*
+am_cuda_memhandle_acquire(uintptr_t sbuf, cudaIpcMemHandle_t* handle,
+				uint32_t length, psm2_epid_t epid);
+void
+am_cuda_memhandle_release(void* cuda_ipc_dev_ptr);
+
+void psmi_cuda_memhandle_cache_alloc_func(int is_alloc, void* context, void* obj);
+
+void am_cuda_memhandle_cache_map_fini();
+
+#endif
+
 #endif

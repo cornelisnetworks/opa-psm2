@@ -264,10 +264,11 @@ union psmi_envvar_val {
 #define PSMI_ENVVAR_VAL_YES ((union psmi_envvar_val) 1)
 #define PSMI_ENVVAR_VAL_NO  ((union psmi_envvar_val) 0)
 
-int psmi_getenv(const char *name, const char *descr, int level,
+int
+MOCKABLE(psmi_getenv)(const char *name, const char *descr, int level,
 		int type, union psmi_envvar_val defval,
 		union psmi_envvar_val *newval);
-
+MOCK_DCL_EPILOGUE(psmi_getenv);
 /*
  * Misc functionality
  */

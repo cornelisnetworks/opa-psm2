@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #ifndef MQ_INT_H
 #define MQ_INT_H
@@ -104,6 +104,7 @@ struct psm2_mq {
 	struct mqq outoforder_q;	/**> OutofOrder queue */
 	STAILQ_HEAD(, psm2_mq_req) eager_q; /**> eager request queue */
 
+	uint32_t hfi_thresh_tiny;
 	uint32_t hfi_thresh_rv;
 	uint32_t shm_thresh_rv;
 	uint32_t hfi_window_rv;
@@ -237,6 +238,22 @@ struct psm2_mq_req {
 	psm2_epaddr_t rts_peer;
 	uintptr_t rts_sbuf;
 
+#ifdef PSM_CUDA
+	/* is_buf_gpu_mem - used to indicate if the send or receive is issued
+	 * on a device/host buffer.
+	 * is_sendbuf_gpu_mem - Used to always select TID path on the receiver
+	 * when send is on a device buffer
+	 */
+	uint8_t is_buf_gpu_mem;
+	uint8_t is_sendbuf_gpu_mem;
+	STAILQ_HEAD(sendreq_spec_, ips_cuda_hostbuf) sendreq_prefetch;
+	uint32_t prefetch_send_msgoff;
+	int cuda_hostbuf_used;
+	cudaIpcMemHandle_t cuda_ipc_handle;
+	cudaEvent_t cuda_ipc_event;
+	uint8_t cuda_ipc_handle_attached;
+#endif
+
 	/* PTLs get to store their own per-request data.  MQ manages the allocation
 	 * by allocating psm2_mq_req so that ptl_req_data has enough space for all
 	 * possible PTLs.
@@ -276,6 +293,17 @@ PSMI_ALWAYS_INLINE(
 void
 mq_copy_tiny(uint32_t *dest, uint32_t *src, uint8_t len))
 {
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED && (PSMI_IS_CUDA_MEM(dest) || PSMI_IS_CUDA_MEM(src))) {
+		if (!PSMI_IS_CUDA_ENABLED) {
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+				 "Please enable PSM CUDA support when using GPU buffer \n");
+			return;
+		}
+		PSMI_CUDA_CALL(cudaMemcpy, dest, src, len, cudaMemcpyDefault);
+		return;
+	}
+#endif
 	switch (len) {
 	case 8:
 		*dest++ = *src++;

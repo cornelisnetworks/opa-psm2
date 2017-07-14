@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -135,12 +135,37 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
 	char *env;
 	psm2_error_t err = PSM2_OK;
 	uint64_t gidh[HFI_MAX_RAILS][3];
+	union psmi_envvar_val env_multirail;
+#ifdef PSM_CUDA
+	int multirail_within_socket_used = 0;
+	int node_id = -1, found = 0;
+#endif
 
-	env = getenv("PSM2_MULTIRAIL");
-	if (!env || atoi(env) == 0) {
+	psmi_getenv("PSM2_MULTIRAIL",
+			"Use all available HFIs in the system for communication.\n"
+			 "0: Disabled (default),\n"
+			 "1: Enable multirail across all available HFIs,\n"
+			 "2: Enable multirail within socket.\n"
+			 "\t For multirail within a socket, we try to find at\n"
+			 "\t least one HFI on the same socket as current task.\n"
+			 "\t If none found, we continue to use other HFIs within\n"
+			 "\t the system.",
+			PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
+			(union psmi_envvar_val)0,
+			&env_multirail);
+	if (!env_multirail.e_int) {
 		*num_rails = 0;
 		return err;
 	}
+
+#ifdef PSM_CUDA
+	if (env_multirail.e_int == 2)
+		multirail_within_socket_used = 1;
+
+	if (!PSMI_IS_CUDA_ENABLED && multirail_within_socket_used)
+		_HFI_INFO("Multirail within socket usage is only supported for CUDA workloads."
+			  " For non-CUDA runs, PSM2_MULTIRAIL=2 behaves same as PSM2_MULTIRAIL=1.\n");
+#endif
 
 /*
  * map is in format: unit:port,unit:port,...
@@ -213,10 +238,37 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
 		num_units = HFI_MAX_RAILS;
 	}
 
+#ifdef PSM_CUDA
+	/*
+	 * PSM2_MULTIRAIL=2 functionality-
+	 *   - Try to find at least find one HFI in the same root
+	 *     complex. If none found, continue to run and
+	 *     use remaining HFIs in the system.
+	 *   - If we do find at least one HFI in same root complex, we
+	 *     go ahead and add to list.
+	 */
+	if (PSMI_IS_CUDA_ENABLED && multirail_within_socket_used) {
+		node_id = psmi_get_current_proc_location();
+		for (i = 0; i < num_units; i++) {
+			if (hfi_get_unit_active(i) <= 0)
+				continue;
+
+			if (hfi_sysfs_unit_read_node_s64(i) == node_id) {
+				found = 1;
+				break;
+			}
+		}
+	}
+#endif
 /*
  * Get all the ports with a valid lid and gid, one per unit.
  */
 	for (i = 0; i < num_units; i++) {
+#ifdef PSM_CUDA
+		if (PSMI_IS_CUDA_ENABLED && multirail_within_socket_used &&
+			found && (hfi_sysfs_unit_read_node_s64(i) != node_id))
+			continue;
+#endif
 		for (j = HFI_MIN_PORT; j <= HFI_MAX_PORT; j++) {
 			ret = hfi_get_port_lid(i, j);
 			if (ret <= 0)
@@ -343,7 +395,7 @@ psmi_ep_verify_pkey(psm2_ep_t ep, uint16_t pkey, uint16_t *opkey)
 	/* if pkey does not match */
 	if (i == 16) {
 		err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
-					"Wrong pkey 0x%x, please use PSM_PKEY to specify a valid pkey\n",
+					"Wrong pkey 0x%x, please use PSM2_PKEY to specify a valid pkey\n",
 					pkey);
 		return err;
 	}
@@ -947,6 +999,13 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 	if (err != PSM2_OK)
 		goto fail;
 
+	/* Set some of the MQ thresholds from the environment.
+	   Do this before ptl initialization - the ptl may have other
+	   constraints that will limit the MQ's settings. */
+	err = psmi_mq_initialize_defaults(mq);
+	if (err != PSM2_OK)
+		goto fail;
+
 	/* See which ptl devices we want to use for this ep to be opened */
 	psmi_getenv("PSM2_DEVICES",
 		    "Ordered list of PSM-level devices",
@@ -1018,11 +1077,6 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 			PSM_MCTXT_APPEND(ep, tmp);
 		}
 	}
-
-	/* Once we've initialized all devices, we can update the MQ with its
-	 * default values */
-	if (err == PSM2_OK)
-		err = psmi_mq_initialize_defaults(mq);
 
 	_HFI_VDBG("psm2_ep_open() OK....\n");
 

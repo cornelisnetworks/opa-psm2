@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,13 +51,21 @@
 
 */
 
-/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
 #include "psm_mq_internal.h"
 #include "psm_am_internal.h"
 #include "cmarw.h"
 
+#ifdef PSM_CUDA
+#include "am_cuda_memhandle_cache.h"
+#endif
+
+/**
+ * Callback function when a receive request is matched with the
+ * tag obtained from the RTS packet.
+ */
 static
 psm2_error_t
 ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
@@ -66,8 +74,8 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 	psm2_amarg_t args[5];
 	psm2_epaddr_t epaddr = req->rts_peer;
 	ptl_t *ptl = epaddr->ptlctl->ptl;
-	int pid = 0;
 	int cma_succeed = 0;
+	int pid = 0, cuda_ipc_send_completion = 0;
 
 	PSM2_LOG_MSG("entering.");
 	psmi_assert((tok != NULL && was_posted)
@@ -75,10 +83,61 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 
 	_HFI_VDBG("[shm][rndv][recv] req=%p dest=%p len=%d tok=%p\n",
 		  req, req->buf, req->recv_msglen, tok);
+#ifdef PSM_CUDA
+	if (req->cuda_ipc_handle_attached) {
+
+	      void* cuda_ipc_dev_ptr = am_cuda_memhandle_acquire(req->rts_sbuf,
+						  (cudaIpcMemHandle_t*)&req->cuda_ipc_handle,
+								 req->recv_msglen,
+								 req->rts_peer->epid);
+		/* cudaMemcpy into the receive side buffer
+		 * based on its location */
+		if (req->is_buf_gpu_mem) {
+			PSMI_CUDA_CALL(cudaMemcpy, req->buf, cuda_ipc_dev_ptr,
+				       req->recv_msglen, cudaMemcpyDeviceToDevice);
+			PSMI_CUDA_CALL(cudaEventRecord, req->cuda_ipc_event, 0);
+			PSMI_CUDA_CALL(cudaEventSynchronize, req->cuda_ipc_event);
+		} else
+			PSMI_CUDA_CALL(cudaMemcpy, req->buf, cuda_ipc_dev_ptr,
+				       req->recv_msglen, cudaMemcpyDeviceToHost);
+		cuda_ipc_send_completion = 1;
+		am_cuda_memhandle_release(cuda_ipc_dev_ptr);
+		req->cuda_ipc_handle_attached = 0;
+		goto send_cts;
+	}
+#endif
 
 	if ((ptl->psmi_kassist_mode & PSMI_KASSIST_GET)
 	    && req->recv_msglen > 0
 	    && (pid = psmi_epaddr_pid(epaddr))) {
+#ifdef PSM_CUDA
+		/* If the buffer on the send side is on the host,
+		 * we alloc a bounce buffer, use kassist and then
+		 * do a cudaMemcpy if the buffer on the recv side
+		 * resides on the GPU
+		 */
+		if (req->is_buf_gpu_mem) {
+			void* cuda_ipc_bounce_buf = psmi_malloc(PSMI_EP_NONE, UNDEFINED, req->recv_msglen);
+			size_t nbytes = cma_get(pid, (void *)req->rts_sbuf,
+					cuda_ipc_bounce_buf, req->recv_msglen);
+			psmi_assert_always(nbytes == req->recv_msglen);
+			PSMI_CUDA_CALL(cudaMemcpy, req->buf, cuda_ipc_bounce_buf,
+				       req->recv_msglen, cudaMemcpyHostToDevice);
+			/* Cuda library has recent optimizations where they do
+			 * not guarantee synchronus nature for Host to Device
+			 * copies for msg sizes less than 64k. The event record
+			 * and synchronize calls are to guarentee completion.
+			 */
+			PSMI_CUDA_CALL(cudaEventRecord, req->cuda_ipc_event, 0);
+			PSMI_CUDA_CALL(cudaEventSynchronize, req->cuda_ipc_event);
+			psmi_free(cuda_ipc_bounce_buf);
+		} else {
+			/* cma can be done in handler context or not. */
+			size_t nbytes = cma_get(pid, (void *)req->rts_sbuf,
+						req->buf, req->recv_msglen);
+			psmi_assert_always(nbytes == req->recv_msglen);
+		}
+#else
 		/* cma can be done in handler context or not. */
 		size_t nbytes = cma_get(pid, (void *)req->rts_sbuf,
 					req->buf, req->recv_msglen);
@@ -90,8 +149,13 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 			psmi_assert_always(nbytes == req->recv_msglen);
 			cma_succeed = 1;
 		}
+		psmi_assert_always(nbytes == req->recv_msglen);
+#endif
 	}
 
+#ifdef PSM_CUDA
+send_cts:
+#endif
 	args[0].u64w0 = (uint64_t) (uintptr_t) req->ptl_req_ptr;
 	args[1].u64w0 = (uint64_t) (uintptr_t) req;
 	args[2].u64w0 = (uint64_t) (uintptr_t) req->buf;
@@ -108,7 +172,8 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 					args, 5, NULL, 0, 0);
 
 	/* 0-byte completion or we used kassist */
-	if (cma_succeed || req->recv_msglen == 0) {
+	if (pid || cma_succeed ||
+		req->recv_msglen == 0 || cuda_ipc_send_completion == 1) {
 		psmi_mq_handle_rts_complete(req);
 	}
 	PSM2_LOG_MSG("leaving.");
@@ -167,6 +232,16 @@ psmi_am_mq_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			req->rts_peer = tok->tok.epaddr_incoming;
 			req->ptl_req_ptr = sreq;
 			req->rts_sbuf = sbuf;
+#ifdef PSM_CUDA
+			/* Payload in RTS would mean an IPC handle has been
+			 * sent. This would also mean the sender has to
+			 * send from a GPU buffer
+			 */
+			if (buf && len > 0) {
+				req->cuda_ipc_handle = *((cudaIpcMemHandle_t*)buf);
+				req->cuda_ipc_handle_attached = 1;
+			}
+#endif
 
 			if (rc == MQ_RET_MATCH_OK)	/* we are in handler context, issue a reply */
 				ptl_handle_rtsmatch_request(req, 1, tok);
@@ -193,6 +268,9 @@ psmi_am_mq_handler_data(void *toki, psm2_amarg_t *args, int narg, void *buf,
 	return;
 }
 
+/**
+ * Function to handle CTS on the sender.
+ */
 void
 psmi_am_mq_handler_rtsmatch(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			    size_t len)
@@ -203,6 +281,16 @@ psmi_am_mq_handler_rtsmatch(void *toki, psm2_amarg_t *args, int narg, void *buf,
 
 	ptl_t *ptl = tok->ptl;
 	psm2_mq_req_t sreq = (psm2_mq_req_t) (uintptr_t) args[0].u64w0;
+#ifdef PSM_CUDA
+	/* If send side req has a cuda ipc handle attached then we can
+	 * assume the data has been copied as soon as we get a CTS
+	 */
+	if (sreq->cuda_ipc_handle_attached) {
+		sreq->cuda_ipc_handle_attached = 0;
+		psmi_mq_handle_rts_complete(sreq);
+		return;
+	}
+#endif
 	void *dest = (void *)(uintptr_t) args[2].u64w0;
 	uint32_t msglen = args[3].u32w0;
 	psm2_amarg_t rarg[1];

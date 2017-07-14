@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #ifndef _IPS_TIDFLOW_H
 #define _IPS_TIDFLOW_H
@@ -92,6 +92,10 @@ struct ips_tf {
 	uint64_t tf_num_total;
 	uint32_t tf_num_inuse;
 	uint32_t tf_gen_mask;
+
+#ifdef PSM_CUDA
+	void *host_to_gpu_bounce_buf_pool;
+#endif
 
 	/* Pointer to array of size HFI_TF_NFLOWS */
 	struct ips_tid_recv_desc *tidrecvc;
