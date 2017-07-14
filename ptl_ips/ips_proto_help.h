@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2017 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2017 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -175,9 +175,19 @@ ips_proto_pbc_static_rate(struct ips_proto *proto, struct ips_flow *flow,
 	return (uint16_t) rate;
 }
 
+/* This is a helper function to convert Per Buffer Control to little-endian */
+PSMI_ALWAYS_INLINE(
+void ips_proto_pbc_to_le(struct hfi_pbc *pbc))
+{
+	pbc->pbc0 = __cpu_to_le32(pbc->pbc0);
+	pbc->PbcStaticRateControlCnt = __cpu_to_le16(pbc->PbcStaticRateControlCnt);
+	pbc->fill1 = __cpu_to_le16(pbc->fill1);
+}
+
 /* This is only used for SDMA cases; pbc is really a pointer to
  * struct ips_pbc_header * or the equivalent un-named structure
- * in ips_scb */
+ * in ips_scb. Please note pcb will be in little-endian byte
+ * order on return */
 PSMI_ALWAYS_INLINE(
 void
 ips_proto_pbc_update(struct ips_proto *proto, struct ips_flow *flow,
@@ -199,6 +209,9 @@ ips_proto_pbc_update(struct ips_proto *proto, struct ips_flow *flow,
 	      HFI_PBC_SC4_MASK) << HFI_PBC_DCINFO_SHIFT);
 
 	pbc->PbcStaticRateControlCnt = static_rate & HFI_PBC_STATICRCC_MASK;
+
+	/* Per Buffer Control must be in little-endian */
+	ips_proto_pbc_to_le(pbc);
 
 	return;
 }

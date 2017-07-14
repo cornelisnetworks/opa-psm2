@@ -122,7 +122,9 @@ psm2_error_t psmi_epid_set_hostname(uint64_t nid, const char *hostname,
  * In all calls, ep can be a specific endpoint (valid psm2_ep_t) or PSMI_EP_NONE
  * if no endpoint is available.
  *
+ *   psmi_malloc_usable_size(void *ptr)
  *   psmi_malloc(ep, memtype, size)
+ *   psmi_realloc(ep, memtype, ptr, newsize)
  *   psmi_memalign(ep, memtype, alignment, size)
  *   psmi_calloc(ep, memtype, elemsz, numelems)
  *   psmi_strdup(ep, memtype, ptr)
@@ -163,12 +165,18 @@ extern struct psmi_stats_malloc psmi_stats_memory;
 
 void *psmi_malloc_internal(psm2_ep_t ep, psmi_memtype_t mt, size_t sz,
 			   const char *curloc);
+void *psmi_realloc_internal(psm2_ep_t ep, psmi_memtype_t mt, void *ptr,
+			    size_t newSz, const char *curloc);
 void *psmi_memalign_internal(psm2_ep_t ep, psmi_memtype_t mt, size_t alignment,
 			     size_t sz, const char *curloc);
 void *psmi_calloc_internal(psm2_ep_t ep, psmi_memtype_t mt, size_t num,
 			   size_t sz, const char *curloc);
 void *psmi_strdup_internal(psm2_ep_t ep, const char *string, const char *curloc);
-void psmi_free_internal(void *ptr, const char *curLoc);
+
+void MOCKABLE(psmi_free_internal)(void *ptr, const char *curLoc);
+MOCK_DCL_EPILOGUE(psmi_free_internal);
+
+size_t psmi_malloc_usable_size_internal(void *ptr, const char *curLoc);
 
 #ifdef PSM_HEAP_DEBUG
 /* During heap debug code, we can sprinkle function calls:
@@ -188,19 +196,22 @@ void _HD_validate_heap_allocations(const char *curloc);
 #define psmi_calloc(ep, mt, nelem, elemsz) \
 	psmi_calloc_internal(ep, mt, nelem, elemsz, PSMI_CURLOC)
 #define psmi_malloc(ep, mt, sz) psmi_malloc_internal(ep, mt, sz, PSMI_CURLOC)
+#define psmi_realloc(ep, mt, ptr, nsz) psmi_realloc_internal(ep, mt, ptr, nsz, PSMI_CURLOC)
 #define psmi_memalign(ep, mt, al, sz) \
 	psmi_memalign_internal(ep, mt, al, sz, PSMI_CURLOC)
-#define psmi_free(sz)	psmi_free_internal(sz, PSMI_CURLOC)
-
+#define psmi_free(ptr)	psmi_free_internal(ptr, PSMI_CURLOC)
+#define psmi_malloc_usable_size(ptr) psmi_malloc_usable_size_internal(ptr, PSMI_CURLOC)
 #ifndef PSM_IS_TEST
-#define malloc(sz)       _use_psmi_malloc_instead_of_plain_malloc
-#define memalign(sz)     _use_psmi_memalign_instead_of_plain_memalign
-#define calloc(sz, nelm) _use_psmi_calloc_instead_of_plain_calloc
+#define malloc(sz)        _use_psmi_malloc_instead_of_plain_malloc
+#define realloc(ptr,nsz)  _use_psmi_realloc_instead_of_plain_realloc
+#define memalign(sz)      _use_psmi_memalign_instead_of_plain_memalign
+#define calloc(sz, nelm)  _use_psmi_calloc_instead_of_plain_calloc
 #ifdef strdup
 #undef strdup
 #endif
-#define strdup(ptr)  _use_psmi_strdup_instead_of_plain_strdup
-#define free(ptr)    _use_psmi_free_instead_of_plain_free
+#define strdup(ptr)             _use_psmi_strdup_instead_of_plain_strdup
+#define free(ptr)               _use_psmi_free_instead_of_plain_free
+#define malloc_usable_size(ptr) _use_psmi_malloc_usable_size_instead_of_plain_malloc_usable_size
 #endif /* PSM_IS_TEST */
 
 void psmi_log_memstats(psmi_memtype_t type, int64_t nbytes);
@@ -295,6 +306,7 @@ uint32_t psmi_get_hfi_type(psmi_context_t *context);
  */
 #define CPUID_FAMILY_XEON       0x00000600
 #define CPUID_MODEL_PHI_GEN2    87
+#define CPUID_MODEL_PHI_GEN2M   133
 /*
  * cpuid function 0, returns "GeniuneIntel" in EBX,ECX,EDX
  * due to Little Endian and Hex it is not so obvious
@@ -318,6 +330,12 @@ uint32_t psmi_cpu_model;
  * Diagnostics, all in psm_diags.c
  */
 int psmi_diags(void);
+
+/*
+ * Multiple Endpoints
+ */
+extern int psmi_multi_ep_enabled;
+void psmi_multi_ep_init();
 
 /*
  * Fault injection

@@ -135,15 +135,28 @@ void ips_report_strays(struct ips_proto *proto)
 	struct ips_stray_epid *sepid;
 	struct psmi_eptab_iterator itor;
 	psmi_epid_itor_init(&itor, PSMI_EP_CROSSTALK);
-	double t_runtime = cycles_to_sec_f(proto->t_fini - proto->t_init);
+
+#if _HFI_DEBUGGING
+	double t_first = 0;
+	double t_last = 0;
+	double t_runtime = 0;
+	if (_HFI_INFO_ON) {
+		t_runtime = cycles_to_sec_f(proto->t_fini - proto->t_init);
+	}
+#endif
 
 	while ((sepid = psmi_epid_itor_next(&itor))) {
 		char ipbuf[INET_ADDRSTRLEN], *ip = NULL;
 		char bufpid[32];
 		uint32_t lid = psm2_epid_nid(sepid->epid);
-		double t_first =
-		    cycles_to_sec_f(sepid->t_first - proto->t_init);
-		double t_last = cycles_to_sec_f(sepid->t_last - proto->t_init);
+#if _HFI_DEBUGGING
+		if (_HFI_INFO_ON) {
+			t_first =
+				cycles_to_sec_f(sepid->t_first - proto->t_init);
+			t_last =
+				cycles_to_sec_f(sepid->t_last - proto->t_init);
+		}
+#endif
 		if (sepid->ipv4_addr)
 			ip = (char *)
 			    inet_ntop(AF_INET, &sepid->ipv4_addr, ipbuf,
@@ -156,14 +169,16 @@ void ips_report_strays(struct ips_proto *proto)
 		else
 			snprintf(bufpid, sizeof(bufpid), "PID unknown");
 
-		_HFI_INFO
-		    ("Process %s on host %s=%s sent %d stray message(s) and "
-		     "was told so %d time(s) (first stray message at %.1fs "
-		     "(%d%%), last at %.1fs (%d%%) into application run)\n",
-		     bufpid, ip ? "IP" : "LID", ipbuf, sepid->num_messages,
-		     sepid->err_check_bad_sent, t_first,
-		     (int)(t_first * 100.0 / t_runtime), t_last,
-		     (int)(t_last * 100.0 / t_runtime));
+		if (_HFI_INFO_ON) {
+			_HFI_INFO_ALWAYS
+				("Process %s on host %s=%s sent %d stray message(s) and "
+				"was told so %d time(s) (first stray message at %.1fs "
+				"(%d%%), last at %.1fs (%d%%) into application run)\n",
+				bufpid, ip ? "IP" : "LID", ipbuf, sepid->num_messages,
+				sepid->err_check_bad_sent, t_first,
+				(int)(t_first * 100.0 / t_runtime), t_last,
+				(int)(t_last * 100.0 / t_runtime));
+		}
 
 		psmi_epid_remove(PSMI_EP_CROSSTALK, sepid->epid);
 		psmi_free(sepid);
@@ -466,10 +481,12 @@ void ips_dmaflow_nak_post_process(struct ips_proto *proto,
 {
 	ips_scb_t *scb;
 	uint32_t first_num, ack_num;
+	uint16_t padding = 0;
 
 	scb = STAILQ_FIRST(&flow->scb_unacked);
 	first_num = __be32_to_cpu(scb->ips_lrh.bth[2]) & proto->psn_mask;
 	ack_num = (flow->xmit_ack_num.psn_num - 1) & proto->psn_mask;
+
 
 	/* If the ack PSN falls into a multi-packets scb,
 	 * don't re-send the packets already acked. */
@@ -480,9 +497,9 @@ void ips_dmaflow_nak_post_process(struct ips_proto *proto,
 		/* how many packets acked in this scb */
 		npkt = ((ack_num - first_num) & proto->psn_mask) + 1;
 
-		/* how many bytes acked in this scb, for eager receive
-		 * packets, all payload size is frag_size except the
-		 * last packet which is not acked yet */
+		/* how many bytes already acked in this scb, for eager receive
+		 * packets, all payload size is frag_size except the last packet
+		 * which is not acked yet */
 		pktlen = scb->frag_size;
 		nbytes = (((ack_num - first_num) &
 			proto->psn_mask) + 1) * pktlen;
@@ -494,12 +511,21 @@ void ips_dmaflow_nak_post_process(struct ips_proto *proto,
 		scb->chunk_size_remaining -= nbytes;
 		ips_scb_buffer(scb) = (void *)((char *)ips_scb_buffer(scb) + nbytes);
 
-		/* 1. if last packet in sequence, set ACK */
+		/* 1. if last packet in sequence, set IPS_SEND_FLAG_ACKREQ */
 		if (scb->chunk_size_remaining <= scb->frag_size) {
 			psmi_assert(scb->nfrag_remaining == 1);
 			scb->flags |= IPS_SEND_FLAG_ACKREQ;
 
 			/* last packet is what remaining */
+			/* check if padding is required*/
+			padding = scb->chunk_size_remaining & 0x3;
+			if_pf(padding) {
+				/* how much to pad with also equals how many bytes we need
+				 * to rewind the source buffer offset by to keep it dw aligned */
+				padding = 4 - padding;
+				ips_scb_buffer(scb) = (void *)((char*)ips_scb_buffer(scb) - padding);
+				scb->chunk_size_remaining += padding;
+			}
 			pktlen = scb->chunk_size_remaining;
 		}
 
@@ -508,8 +534,8 @@ void ips_dmaflow_nak_post_process(struct ips_proto *proto,
 			((ack_num + 1) & proto->psn_mask) |
 			(scb->flags & IPS_SEND_FLAG_ACKREQ));
 
-		/* 3. set new packet offset */
-		ips_scb_hdrdata(scb).u32w0 += nbytes;
+		/* 3. set new packet offset adjusted with padding */
+		ips_scb_hdrdata(scb).u32w0 += nbytes - padding;
 
 		/* 4. if packet length is changed, set new length */
 		if (scb->payload_size != pktlen) {
@@ -1369,37 +1395,46 @@ int ips_proto_process_packet_error(struct ips_recvhdrq_event *rcv_ev)
 
 		ips_protoexp_handle_tiderr(rcv_ev);
 	} else if (data_err) {
-		uint8_t op_code = _get_proto_hfi_opcode(rcv_ev->p_hdr);
+#if _HFI_DEBUGGING
+		if (_HFI_DBG_ON) {
+			uint8_t op_code
+				= _get_proto_hfi_opcode(rcv_ev->p_hdr);
 
-		if (!pkt_verbose_err) {
-			rhf_errnum_string(pktmsg, sizeof(pktmsg),
-					  rcv_ev->error_flags);
-			_HFI_DBG
-			    ("Error %s pkt type opcode 0x%x at hd=0x%x %s\n",
-			     (rcv_ev->ptype ==
-			      RCVHQ_RCV_TYPE_EAGER) ? "eager" : (rcv_ev->
-								 ptype ==
-								 RCVHQ_RCV_TYPE_EXPECTED)
-			     ? "expected" : (rcv_ev->ptype ==
-					     RCVHQ_RCV_TYPE_NON_KD) ? "non-kd" :
-			     "<error>", op_code,
-			     rcv_ev->recvq->state->hdrq_head, pktmsg);
+			if (!pkt_verbose_err) {
+				rhf_errnum_string(pktmsg, sizeof(pktmsg),
+						  rcv_ev->error_flags);
+				_HFI_DBG_ALWAYS
+					("Error %s pkt type opcode 0x%x at hd=0x%x %s\n",
+					(rcv_ev->ptype == RCVHQ_RCV_TYPE_EAGER)
+					? "eager" : (rcv_ev-> ptype ==
+							RCVHQ_RCV_TYPE_EXPECTED)
+					? "expected" : (rcv_ev->ptype ==
+							RCVHQ_RCV_TYPE_NON_KD) ? "non-kd" :
+					"<error>", op_code,
+							rcv_ev->recvq->state->hdrq_head, pktmsg);
+			}
 		}
+#endif
 
 		if (rcv_ev->ptype == RCVHQ_RCV_TYPE_EXPECTED)
 			ips_protoexp_handle_data_err(rcv_ev);
 	} else {		/* not a tid or data error -- some other error */
-		uint8_t op_code =
-		    __be32_to_cpu(rcv_ev->p_hdr->bth[0]) >> 24 & 0xFF;
+#if _HFI_DEBUGGING
+		if (_HFI_DBG_ON) {
+			uint8_t op_code =
+				__be32_to_cpu(rcv_ev->p_hdr->bth[0]) >> 24 & 0xFF;
 
-		if (!pkt_verbose_err)
-			rhf_errnum_string(pktmsg, sizeof(pktmsg),
-					  rcv_ev->error_flags);
+			if (!pkt_verbose_err)
+				rhf_errnum_string(pktmsg, sizeof(pktmsg),
+					rcv_ev->error_flags);
 
-		/* else RHFerr decode printed below */
-		_HFI_DBG("Error pkt type 0x%x opcode 0x%x at hd=0x%x %s\n",
-			 rcv_ev->ptype, op_code,
-			 rcv_ev->recvq->state->hdrq_head, pktmsg);
+			/* else RHFerr decode printed below */
+			_HFI_DBG_ALWAYS
+				("Error pkt type 0x%x opcode 0x%x at hd=0x%x %s\n",
+				rcv_ev->ptype, op_code,
+				rcv_ev->recvq->state->hdrq_head, pktmsg);
+		}
+#endif
 	}
 	if (pkt_verbose_err) {
 		if (!*pktmsg)

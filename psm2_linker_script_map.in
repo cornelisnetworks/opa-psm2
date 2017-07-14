@@ -48,34 +48,48 @@
   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* See http://sourceware.org/binutils/docs/ld/VERSION.html#VERSION for more info.
+   C++ // Comments don't work in this file. */
 
-#ifndef SYSBUF_INT_H
-#define SYSBUF_INT_H
+PSM2_1.0
+{
+    /* Expose only those symbols we choose to. This way we do not
+       pollute users namespace more than absolutely necessary. */
+    global:
+        psm2_*;
 
-#include "psm_user.h"
+        /* Below symbols are used for hfidiags hfi1_pkt_test */
+        /* opa_udebug.h - global */
+        hfi_debug;
+        hfi_get_unit_name;
+        __progname;
 
-#define MM_NUM_OF_POOLS 7
+        /* opa_udebug.h - _HFI_DEBUGGING */
+        __hfi_mylabel;
+        hfi_set_mylabel;
+        hfi_get_mylabel;
+        __hfi_dbgout;
 
-typedef struct psmi_mem_ctrl {
-    struct psmi_mem_block_ctrl *free_list;
-    uint32_t total_alloc;
-    uint32_t current_available;
-    uint32_t block_size;
-    uint32_t flags;
-    uint32_t replenishing_rate;
-} psmi_mem_ctrl_t;
+        /* opa_service.h */
+        hfi_context_open;
+        hfi_get_port_vl2mtu;
+        hfi_get_port_lid;
+        hfi_context_close;
+        hfi_cmd_write;
+        hfi_mmap64;
 
-/*
- * MQ unexpected buffer management
- */
-void  psmi_mq_sysbuf_init(psm2_mq_t mq);
-void  psmi_mq_sysbuf_fini(psm2_mq_t mq);
-void* psmi_mq_sysbuf_alloc(psm2_mq_t mq, uint32_t nbytes);
-void  psmi_mq_sysbuf_free(psm2_mq_t mq, void *);
-void  psmi_mq_sysbuf_getinfo(psm2_mq_t mq, char *buf, size_t len);
+        /* opa_user.h */
+        hfi_userinit;
+        hfi_poll_type;
+        hfi_wait_for_packet;
+        __hfi_pico_per_cycle;
 
-#endif /* SYSBUF_INT_H */
+	/* Additional globals */
+	_psm2_additional_globals_;
+    /* Make all other symbols local */
+    local:
+        *;
+};
+

@@ -248,14 +248,8 @@ _psmi_is_driver_gpudirect_enabled()
 /* this portion only defines what we currently use */
 struct hfi_pbc {
 	__u32 pbc0;
-
-	union {
-		struct {
-			__u16 PbcStaticRateControlCnt;
-			__u16 fill1;
-		};
-		__u32 pbc1;
-	};
+	__u16 PbcStaticRateControlCnt;
+	__u16 fill1;
 };
 
 /* hfi kdeth header format */

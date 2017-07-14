@@ -59,7 +59,8 @@
 #include <inttypes.h>
 #include <pthread.h>
 
-#include <syscall.h>
+#include <sched.h>
+#include <numa.h>
 
 #include "psm2.h"
 #include "psm2_mq.h"
@@ -101,13 +102,22 @@
 #define PSM_VALGRIND_MEM_DEFINED     1
 #define PSM_VALGRIND_MEM_UNDEFINED   0
 
+#define PSMI_LOCK_NO_OWNER	((pthread_t)(-1))
+
+#ifdef PSM_DEBUG
+#define PSMI_LOCK_IS_MUTEXLOCK_DEBUG
+#else
+#define PSMI_LOCK_IS_SPINLOCK
+/* #define PSMI_LOCK_IS_MUTEXLOCK */
+/* #define PSMI_LOCK_IS_MUTEXLOCK_DEBUG */
+/* #define PSMI_PLOCK_IS_NOLOCK */
+#endif
 
 #define _PSMI_IN_USER_H
 #include "psm_help.h"
 #include "psm_error.h"
 #include "psm_context.h"
 #include "psm_utils.h"
-#include "psm_sysbuf.h"
 #include "psm_timer.h"
 #include "psm_mpool.h"
 #include "psm_ep.h"
@@ -129,9 +139,12 @@ MOCK_DCL_EPILOGUE(psmi_isinitialized);
 psm2_error_t psmi_poll_internal(psm2_ep_t ep, int poll_amsh);
 psm2_error_t psmi_mq_wait_internal(psm2_mq_req_t *ireq);
 
-#ifdef PSM_CUDA
 int psmi_get_current_proc_location();
-#endif
+
+extern uint32_t non_dw_mul_sdma;
+extern psmi_lock_t psmi_creation_lock;
+
+extern psm2_ep_t psmi_opened_endpoint;
 
 /*
  * Default setting for Receive thread
@@ -152,103 +165,130 @@ int psmi_get_current_proc_location();
  * mutexlock-debug should be enabled during development to catch potential
  * errors.
  */
-#ifdef PSM_DEBUG
-#define PSMI_PLOCK_IS_MUTEXLOCK_DEBUG
-#else
-#define PSMI_PLOCK_IS_SPINLOCK
-/* #define PSMI_PLOCK_IS_MUTEXLOCK */
-/* #define PSMI_PLOCK_IS_MUTEXLOCK_DEBUG */
-/* #define PSMI_PLOCK_IS_NOLOCK */
-#endif
+#ifdef PSMI_LOCK_IS_SPINLOCK
+#define _PSMI_LOCK_INIT(pl)	psmi_spin_init(&((pl).lock))
+#define _PSMI_LOCK_TRY(pl)	psmi_spin_trylock(&((pl).lock))
+#define _PSMI_LOCK(pl)		psmi_spin_lock(&((pl).lock))
+#define _PSMI_UNLOCK(pl)	psmi_spin_unlock(&((pl).lock))
+#define _PSMI_LOCK_ASSERT(pl)
+#define _PSMI_UNLOCK_ASSERT(pl)
+#define PSMI_LOCK_DISABLED	0
 
-#ifdef PSMI_PLOCK_IS_SPINLOCK
-psmi_spinlock_t psmi_progress_lock;
-#define PSMI_PLOCK_INIT()   psmi_spin_init(&psmi_progress_lock)
-#define PSMI_PLOCK_TRY()    psmi_spin_trylock(&psmi_progress_lock)
-#define PSMI_PLOCK()	    psmi_spin_lock(&psmi_progress_lock)
-#define PSMI_PUNLOCK()      psmi_spin_unlock(&psmi_progress_lock)
-#define PSMI_PLOCK_ASSERT()
-#define PSMI_PUNLOCK_ASSERT()
-#define PSMI_PLOCK_DISABLED  0
-#elif defined(PSMI_PLOCK_IS_MUTEXLOCK_DEBUG)
-pthread_mutex_t psmi_progress_lock;
-pthread_t psmi_progress_lock_owner;
-#define PSMI_PLOCK_NO_OWNER	((pthread_t)(-1))
+#elif defined(PSMI_LOCK_IS_MUTEXLOCK_DEBUG)
 
 PSMI_ALWAYS_INLINE(
 int
 _psmi_mutex_trylock_inner(pthread_mutex_t *mutex,
-			  const char *curloc))
+			  const char *curloc, pthread_t *lock_owner))
 {
-	psmi_assert_always_loc(psmi_progress_lock_owner != pthread_self(),
+	psmi_assert_always_loc(*lock_owner != pthread_self(),
 			       curloc);
-	int ret = pthread_mutex_trylock(&psmi_progress_lock);
+	int ret = pthread_mutex_trylock(mutex);
 	if (ret == 0)
-		psmi_progress_lock_owner = pthread_self();
+		*lock_owner = pthread_self();
 	return ret;
 }
 
 PSMI_ALWAYS_INLINE(
 int
 _psmi_mutex_lock_inner(pthread_mutex_t *mutex,
-		       const char *curloc))
+		       const char *curloc, pthread_t *lock_owner))
 {
-	psmi_assert_always_loc(psmi_progress_lock_owner != pthread_self(),
+	psmi_assert_always_loc(*lock_owner != pthread_self(),
 			       curloc);
-	int ret = pthread_mutex_lock(&psmi_progress_lock);
+	int ret = pthread_mutex_lock(mutex);
 	psmi_assert_always_loc(ret != EDEADLK, curloc);
-	psmi_progress_lock_owner = pthread_self();
+	*lock_owner = pthread_self();
 	return ret;
 }
 
 PSMI_ALWAYS_INLINE(
 void
 _psmi_mutex_unlock_inner(pthread_mutex_t *mutex,
-			 const char *curloc))
+			 const char *curloc, pthread_t *lock_owner))
 {
-	psmi_assert_always_loc(psmi_progress_lock_owner == pthread_self(),
+	psmi_assert_always_loc(*lock_owner == pthread_self(),
 			       curloc);
-	psmi_progress_lock_owner = PSMI_PLOCK_NO_OWNER;
-	psmi_assert_always_loc(pthread_mutex_unlock(&psmi_progress_lock) !=
+	*lock_owner = PSMI_LOCK_NO_OWNER;
+	psmi_assert_always_loc(pthread_mutex_unlock(mutex) !=
 			       EPERM, curloc);
 	return;
 }
 
-#define PSMI_PLOCK_INIT()	/* static initialization */
-#define PSMI_PLOCK_TRY()						\
-	    _psmi_mutex_trylock_inner(&psmi_progress_lock, PSMI_CURLOC)
-#define PSMI_PLOCK()							\
-	    _psmi_mutex_lock_inner(&psmi_progress_lock, PSMI_CURLOC)
-#define PSMI_PUNLOCK()						\
-	    _psmi_mutex_unlock_inner(&psmi_progress_lock, PSMI_CURLOC)
-#define PSMI_PLOCK_ASSERT()						\
-	    psmi_assert_always(psmi_progress_lock_owner == pthread_self());
-#define PSMI_PUNLOCK_ASSERT()						\
-	    psmi_assert_always(psmi_progress_lock_owner != pthread_self());
+#define _PSMI_LOCK_INIT(pl)	/* static initialization */
+#define _PSMI_LOCK_TRY(pl)							\
+	    _psmi_mutex_trylock_inner(&((pl).lock), PSMI_CURLOC,	\
+					&((pl).lock_owner))
+#define _PSMI_LOCK(pl)								\
+	    _psmi_mutex_lock_inner(&((pl).lock), PSMI_CURLOC,	\
+                                        &((pl).lock_owner))
+#define _PSMI_UNLOCK(pl)							\
+	    _psmi_mutex_unlock_inner(&((pl).lock), PSMI_CURLOC,	\
+                                        &((pl).lock_owner))
+#define _PSMI_LOCK_ASSERT(pl)							\
+	    psmi_assert_always(pl.lock_owner == pthread_self());
+#define _PSMI_UNLOCK_ASSERT(pl)						\
+	    psmi_assert_always(pl.lock_owner != pthread_self());
+#define PSMI_LOCK_DISABLED	0
 
-#define PSMI_PLOCK_DISABLED  0
-#elif defined(PSMI_PLOCK_IS_MUTEXLOCK)
-pthread_mutex_t psmi_progress_lock;
-#define PSMI_PLOCK_INIT()	/* static initialization */
-#define PSMI_PLOCK_TRY()    pthread_mutex_trylock(&psmi_progress_lock)
-#define PSMI_PLOCK()	      pthread_mutex_lock(&psmi_progress_lock)
-#define PSMI_PUNLOCK()      pthread_mutex_unlock(&psmi_progress_lock)
-#define PSMI_PLOCK_DISABLED  0
-#define PSMI_PLOCK_ASSERT()
-#define PSMI_PUNLOCK_ASSERT()
+#elif defined(PSMI_LOCK_IS_MUTEXLOCK)
+#define _PSMI_LOCK_INIT(pl)	/* static initialization */
+#define _PSMI_LOCK_TRY(pl)	pthread_mutex_trylock(&((pl).lock))
+#define _PSMI_LOCK(pl)		pthread_mutex_lock(&((pl).lock))
+#define _PSMI_UNLOCK(pl)	pthread_mutex_unlock(&((pl).lock))
+#define PSMI_LOCK_DISABLED	0
+#define _PSMI_LOCK_ASSERT(pl)
+#define _PSMI_UNLOCK_ASSERT(pl)
+
 #elif defined(PSMI_PLOCK_IS_NOLOCK)
-#define PSMI_PLOCK_TRY()    0	/* 0 *only* so progress thread never succeeds */
-#define PSMI_PLOCK()
-#define PSMI_PUNLOCK()
-#define PSMI_PLOCK_DISABLED  1
-#define PSMI_PLOCK_ASSERT()
-#define PSMI_PUNLOCK_ASSERT()
+#define _PSMI_LOCK_TRY(pl)	0	/* 0 *only* so progress thread never succeeds */
+#define _PSMI_LOCK(pl)
+#define _PSMI_UNLOCK(pl)
+#define PSMI_LOCK_DISABLED	1
+#define _PSMI_LOCK_ASSERT(pl)
+#define _PSMI_UNLOCK_ASSERT(pl)
 #else
-#error No PLOCK lock type declared
+#error No LOCK lock type declared
 #endif
 
-#define PSMI_PYIELD()							\
-	  do { PSMI_PUNLOCK(); sched_yield(); PSMI_PLOCK(); } while (0)
+#define PSMI_YIELD(pl)							\
+	do { _PSMI_UNLOCK((pl)); sched_yield(); _PSMI_LOCK((pl)); } while (0)
+
+#ifdef PSM2_MOCK_TESTING
+/* If this is a mocking tests build, all the operations on the locks
+ * are routed through functions which may be mocked, if necessary.  */
+void MOCKABLE(psmi_mockable_lock_init)(psmi_lock_t *pl);
+MOCK_DCL_EPILOGUE(psmi_mockable_lock_init);
+
+int MOCKABLE(psmi_mockable_lock_try)(psmi_lock_t *pl);
+MOCK_DCL_EPILOGUE(psmi_mockable_lock_try);
+
+void MOCKABLE(psmi_mockable_lock)(psmi_lock_t *pl);
+MOCK_DCL_EPILOGUE(psmi_mockable_lock);
+
+void MOCKABLE(psmi_mockable_unlock)(psmi_lock_t *pl);
+MOCK_DCL_EPILOGUE(psmi_mockable_unlock);
+
+void MOCKABLE(psmi_mockable_lock_assert)(psmi_lock_t *pl);
+MOCK_DCL_EPILOGUE(psmi_mockable_lock_assert);
+
+void MOCKABLE(psmi_mockable_unlock_assert)(psmi_lock_t *pl);
+MOCK_DCL_EPILOGUE(psmi_mockable_unlock_assert);
+
+#define PSMI_LOCK_INIT(pl)	psmi_mockable_lock_init(&(pl))
+#define PSMI_LOCK_TRY(pl)	psmi_mockable_lock_try(&(pl))
+#define PSMI_LOCK(pl)		psmi_mockable_lock(&(pl))
+#define PSMI_UNLOCK(pl)		psmi_mockable_unlock(&(pl))
+#define PSMI_LOCK_ASSERT(pl)	psmi_mockable_lock_assert(&(pl))
+#define PSMI_UNLOCK_ASSERT(pl)	psmi_mockable_unlock_assert(&(pl))
+#else
+#define PSMI_LOCK_INIT(pl)	_PSMI_LOCK_INIT(pl)
+#define PSMI_LOCK_TRY(pl)	_PSMI_LOCK_TRY(pl)
+#define PSMI_LOCK(pl)		_PSMI_LOCK(pl)
+#define PSMI_UNLOCK(pl)		_PSMI_UNLOCK(pl)
+#define PSMI_LOCK_ASSERT(pl)	_PSMI_LOCK_ASSERT(pl)
+#define PSMI_UNLOCK_ASSERT(pl)	_PSMI_UNLOCK_ASSERT(pl)
+#endif
 
 #ifdef PSM_PROFILE
 void psmi_profile_block() __attribute__ ((weak));
@@ -256,7 +296,7 @@ void psmi_profile_unblock() __attribute__ ((weak));
 void psmi_profile_reblock(int did_no_progress) __attribute__ ((weak));
 
 #define PSMI_PROFILE_BLOCK()		psmi_profile_block()
-#define PSMI_PROFILE_UNBLOCK()	psmi_profile_unblock()
+#define PSMI_PROFILE_UNBLOCK()		psmi_profile_unblock()
 #define PSMI_PROFILE_REBLOCK(noprog)	psmi_profile_reblock(noprog)
 #else
 #define PSMI_PROFILE_BLOCK()

@@ -64,6 +64,7 @@
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
 #include "ips_proto_help.h"
+#include "psmi_wrappers.h"
 
 /*
  * Control message types have their own flag to determine whether a message of
@@ -693,10 +694,10 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 
 		/* the maxsz is the amount in MB, not the number of entries,
 		 * since the element size depends on the window size */
-		max_elements = (maxsz*1024*1024) / proto->mq->hfi_window_rv;
+		max_elements = (maxsz*1024*1024) / proto->mq->hfi_base_window_rv;
 		/* mpool requires max_elements to be power of 2. round down. */
 		max_elements = 1 << (31 - __builtin_clz(max_elements));
-		proto->cuda_hostbuf_send_cfg.bufsz = proto->mq->hfi_window_rv;
+		proto->cuda_hostbuf_send_cfg.bufsz = proto->mq->hfi_base_window_rv;
 		proto->cuda_hostbuf_pool_send =
 			psmi_mpool_create_for_cuda(sizeof(struct ips_cuda_hostbuf),
 						   chunksz, max_elements, 0,
@@ -747,7 +748,7 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 {
 	struct psmi_eptab_iterator itor;
 	uint64_t t_start;
-	uint64_t t_grace_start, t_grace_time, t_grace_finish, t_grace_interval;
+	uint64_t t_grace_start, t_grace_time, t_grace_interval;
 	psm2_epaddr_t epaddr;
 	psm2_error_t err = PSM2_OK;
 	int i;
@@ -797,7 +798,7 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 	if (t_grace_interval > PSMI_MAX_EP_CLOSE_GRACE_INTERVAL)
 		t_grace_interval = PSMI_MAX_EP_CLOSE_GRACE_INTERVAL;
 
-	PSMI_PLOCK_ASSERT();
+	PSMI_LOCK_ASSERT(proto->mq->progress_lock);
 
 	t_start = proto->t_fini = get_cycles();
 
@@ -837,7 +838,16 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 		psmi_epid_itor_init(&itor, proto->ep);
 		i = 0;
 		while ((epaddr = psmi_epid_itor_next(&itor))) {
-			if (epaddr->ptlctl->ptl == proto->ptl) {
+			/*
+			 * if cstate_outgoing is CSTATE_NONE, then we know it
+			 * is an uni-directional connect, in that the peer
+			 * sent a connect request to us, but we never sent one
+			 * out to the peer epid. Ignore handling those in
+			 * ips_proto_disconnect() as we will do the right thing
+			 * when a disconnect request for the epaddr comes in from the peer.
+			 */
+			if (epaddr->ptlctl->ptl == proto->ptl &&
+				((ips_epaddr_t *) epaddr)->cstate_outgoing != CSTATE_NONE) {
 				mask[i] = 1;
 				epaddr_array[i] = epaddr;
 				i++;
@@ -870,13 +880,17 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 		}
 	}
 
-	t_grace_finish = get_cycles();
+#if _HFI_DEBUGGING
+	if (_HFI_PRDBG_ON) {
+		uint64_t t_grace_finish = get_cycles();
 
-	_HFI_PRDBG
-	    ("Closing endpoint disconnect left to=%d,from=%d after %d millisec of grace (out of %d)\n",
-	     proto->num_connected_outgoing, proto->num_connected_incoming,
-	     (int)(cycles_to_nanosecs(t_grace_finish - t_grace_start) /
-		   MSEC_ULL), (int)(t_grace_time / MSEC_ULL));
+		_HFI_PRDBG_ALWAYS(
+			"Closing endpoint disconnect left to=%d,from=%d after %d millisec of grace (out of %d)\n",
+			proto->num_connected_outgoing, proto->num_connected_incoming,
+			(int)(cycles_to_nanosecs(t_grace_finish - t_grace_start) /
+			MSEC_ULL), (int)(t_grace_time / MSEC_ULL));
+	}
+#endif
 
 	if ((err = ips_ibta_fini(proto)))
 		goto fail;
@@ -931,7 +945,7 @@ proto_sdma_init(struct ips_proto *proto, const psmi_context_t *context)
 
 	if (!(proto->flags & (IPS_PROTO_FLAG_SDMA | IPS_PROTO_FLAG_SPIO))) {
 		/* use both spio and sdma */
-		if(psmi_cpu_model == CPUID_MODEL_PHI_GEN2)
+		if(psmi_cpu_model == CPUID_MODEL_PHI_GEN2 || psmi_cpu_model == CPUID_MODEL_PHI_GEN2M)
 		{
 			proto->iovec_thresh_eager = MQ_HFI_THRESH_EGR_SDMA_SQ_PHI2;
 			proto->iovec_thresh_eager_blocking = MQ_HFI_THRESH_EGR_SDMA_PHI2;
@@ -1116,6 +1130,19 @@ ips_proto_timer_ctrlq_callback(struct psmi_timer *timer, uint64_t t_cyc_expire)
 	return PSM2_OK;
 }
 
+/* Update cqe struct which is a single element from pending control message queue */
+PSMI_ALWAYS_INLINE(
+void ips_proto_update_cqe(struct ips_ctrlq_elem *cqe, uint16_t *msg_queue_mask,
+			  struct ips_flow *flow, ips_scb_t *ctrlscb, uint8_t message_type)){
+
+	cqe->message_type = message_type;
+	cqe->msg_queue_mask = msg_queue_mask;
+	psmi_mq_mtucpy(&cqe->msg_scb.ips_lrh,
+		       &ctrlscb->ips_lrh, sizeof(ctrlscb->ips_lrh));
+	cqe->msg_scb.flow = flow;
+	cqe->msg_scb.cksum[0] = ctrlscb->cksum[0];
+}
+
 psm2_error_t
 ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 			uint16_t *msg_queue_mask, ips_scb_t *ctrlscb,
@@ -1199,19 +1226,27 @@ ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 
 		if ((*msg_queue_mask) & proto->
 		    message_type_to_index[message_type]) {
-			/* This type of control message is already queued, skip it */
+
+			if (message_type == OPCODE_ACK) {
+				/* Pending queue should contain latest ACK type message,
+				 * overwrite the previous one. */
+				ips_proto_update_cqe(&cqe[flow->ack_index], msg_queue_mask,
+						     flow, ctrlscb, message_type);
+			}
+
 			err = PSM2_OK;
 		} else if (cqe[ctrlq->ctrlq_head].msg_queue_mask == NULL) {
 			/* entry is free */
+			if (message_type == OPCODE_ACK) {
+				/* Track the index of last ACK type message in queue*/
+				flow->ack_index = ctrlq->ctrlq_head;
+			}
+
 			*msg_queue_mask |=
 			    message_type2index(proto, message_type);
 
-			cqe[ctrlq->ctrlq_head].message_type = message_type;
-			cqe[ctrlq->ctrlq_head].msg_queue_mask = msg_queue_mask;
-			psmi_mq_mtucpy(&cqe[ctrlq->ctrlq_head].msg_scb.ips_lrh,
-					&ctrlscb->ips_lrh, sizeof(ctrlscb->ips_lrh));
-			cqe[ctrlq->ctrlq_head].msg_scb.flow = flow;
-			cqe[ctrlq->ctrlq_head].msg_scb.cksum[0] = ctrlscb->cksum[0];
+			ips_proto_update_cqe(&cqe[ctrlq->ctrlq_head], msg_queue_mask,
+					     flow, ctrlscb, message_type);
 
 			ctrlq->ctrlq_head =
 			    (ctrlq->ctrlq_head + 1) % CTRL_MSG_QEUEUE_SIZE;
@@ -1542,7 +1577,7 @@ psm2_error_t ips_proto_dma_completion_update(struct ips_proto *proto)
 	while (proto->sdma_done_index != proto->sdma_fill_index) {
 		comp = &proto->sdma_comp_queue[proto->sdma_done_index];
 		status = comp->status;
-		ips_rmb();
+		psmi_rmb();
 
 		if (status == QUEUED)
 			return PSM2_OK;
@@ -1866,7 +1901,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 			break;
 
 		psmi_assert(vec_idx < max_elem);
-		psmi_assert_always((scb->payload_size & 0x3) == 0);
+		psmi_assert_always(((scb->payload_size & 0x3) == 0) || (IPS_NON_DW_MUL_ALLOWED == non_dw_mul_sdma));
 
 		/* Checksum all eager packets */
 		have_cksum = scb->ips_lrh.flags & IPS_SEND_FLAG_PKTCKSUM;
@@ -2230,7 +2265,6 @@ ips_proto_timer_send_callback(struct psmi_timer *current_timer,
 psm2_error_t ips_cca_adjust_rate(ips_path_rec_t *path_rec, int cct_increment)
 {
 	struct ips_proto *proto = path_rec->proto;
-	uint16_t prev_ipd, prev_divisor;
 
 	/* Increment/decrement ccti for path */
 	psmi_assert_always(path_rec->pr_ccti >=
@@ -2238,8 +2272,14 @@ psm2_error_t ips_cca_adjust_rate(ips_path_rec_t *path_rec, int cct_increment)
 	path_rec->pr_ccti += cct_increment;
 
 	/* Determine new active IPD.  */
-	prev_ipd = path_rec->pr_active_ipd;
-	prev_divisor = path_rec->pr_cca_divisor;
+#if _HFI_DEBUGGING
+	uint16_t prev_ipd = 0;
+	uint16_t prev_divisor = 0;
+	if (_HFI_CCADBG_ON) {
+		prev_ipd = path_rec->pr_active_ipd;
+		prev_divisor = path_rec->pr_cca_divisor;
+	}
+#endif
 	if ((path_rec->pr_static_ipd) &&
 	    ((path_rec->pr_static_ipd + 1) >
 	     (proto->cct[path_rec->pr_ccti] & CCA_IPD_MASK))) {
@@ -2252,10 +2292,14 @@ psm2_error_t ips_cca_adjust_rate(ips_path_rec_t *path_rec, int cct_increment)
 		    proto->cct[path_rec->pr_ccti] >> CCA_DIVISOR_SHIFT;
 	}
 
-	_HFI_CCADBG("CCA: %s injection rate to <%x.%x> from <%x.%x>\n",
-		    (cct_increment > 0) ? "Decreasing" : "Increasing",
-		    path_rec->pr_cca_divisor, path_rec->pr_active_ipd,
-		    prev_divisor, prev_ipd);
+#if _HFI_DEBUGGING
+	if (_HFI_CCADBG_ON) {
+		_HFI_CCADBG_ALWAYS("CCA: %s injection rate to <%x.%x> from <%x.%x>\n",
+			(cct_increment > 0) ? "Decreasing" : "Increasing",
+			path_rec->pr_cca_divisor, path_rec->pr_active_ipd,
+			prev_divisor, prev_ipd);
+	}
+#endif
 
 	/* Reschedule CCA timer if this path is still marked as congested */
 	if (path_rec->pr_ccti > proto->cace[path_rec->pr_sl].ccti_min) {

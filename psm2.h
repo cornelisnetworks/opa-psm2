@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2017 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2017 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -50,8 +50,6 @@
   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
-
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
 #ifndef PSM2_H
 #define PSM2_H
@@ -86,15 +84,6 @@ extern "C" {
  * PSM-based and non PSM-based applications on a single node without changing
  * any system-level configuration.  However, PSM2 does not support running
  * PSM-based and non PSM-based communication within the same user process.
- *
- * While there are future plans to extend PSM2 to support multi-threaded
- * applications, PSM2
- * is currently a single-threaded library. This means that the user cannot make
- * @e any concurrent PSM2 library calls.  While threads may
- * be a valid execution model for the wider set of potential PSM2 clients,
- * applications should currently expect better effective use
- * of OPA resources (and hence better performance) by dedicating a
- * single PSM2 communication endpoint to every CPU core.
  *
  * Except where noted, PSM2 does not assume an SPMD (single program, multiple
  * data) parallel model and extends to MPMD (multiple program, multiple data)
@@ -250,6 +239,16 @@ extern "C" {
  * minimum).  At @c 0x101, startup and finalization messages are added to the
  * output.  At @c 0x1c3, every communication event is logged and should hence
  * be used for extreme debugging only.
+ *
+ * @li @b PSM2_MULTI_EP. By default, only one PSM2 endpoint may be opened in
+ * a process. With the correct setting of this environment variable, a process
+ * may open more than one PSM2 endpoint. In order to enable multiple endpoint
+ * per process support, the value of this environment variable should be set
+ * to "1" or "yes".
+ *
+ * @section thr_sfty Thread safety and reentrancy
+ * Unless specifically noted otherwise, all PSM2 functions should not be considered
+ * to be thread safe or reentrant.
  */
 
 /** @brief Local endpoint handle (opaque)
@@ -413,13 +412,17 @@ typedef enum psm2_path_res psm2_path_res_t;
  *                                @ref PSM2_VERNO_MAJOR. As output, the pointer
  *                                is updated with the major revision number of
  *                                the loaded library.
- * @param[in,out] api_verno_minor As intput, a pointer to an integer that holds
+ * @param[in,out] api_verno_minor As input, a pointer to an integer that holds
  *                                @ref PSM2_VERNO_MINOR.  As output, the pointer
  *                                is updated with the minor revision number of
  *                                the loaded library.
  *
  * @pre The user has not called any other PSM2 library call except @ref
  *      psm2_error_register_handler to register a global error handler.
+ *
+ * @post Depending on the environment variable @ref PSM2_MULTI_EP being set and
+ * 	 its contents, support for opening multiple endpoints is either enabled
+ * 	 or disabled.
  *
  * @warning PSM2 initialization is a precondition for all functions used in the
  *          PSM2 library.
@@ -432,7 +435,8 @@ typedef enum psm2_path_res psm2_path_res_t;
  * @code{.c}
    	// In this example, we want to handle our own errors before doing init,
    	// since we don't want a fatal error if OPA is not found.
-   	// Note that @ref psm2_error_register_handler (and @ref psm2_uuid_generate)
+   	// Note that @ref psm2_error_register_handler
+   	// (and @ref psm2_uuid_generate and @ref psm2_get_capability_mask)
    	// are the only function that can be called before @ref psm2_init
    	
    	int try_to_initialize_psm() {
@@ -472,6 +476,21 @@ typedef enum psm2_path_res psm2_path_res_t;
    @endcode
  */
 psm2_error_t psm2_init(int *api_verno_major, int *api_verno_minor);
+
+/*! @brief PSM2 capabilities definitions
+ *
+ * Each capability is defined as a separate bit,
+ * i.e. next capabilities must be defined as
+ * consecutive bits : 0x2, 0x4 ... and so on.
+ */
+#define PSM2_MULTI_EP_CAP 0x1	/* Multiple Endpoints capability */
+
+/** @brief PSM2 capabilities provider
+ *
+ * @param[in] req_cap_mask Requested capabilities are given as bit field.
+ *
+ * @returns internal capabilities bit field ANDed with a requested bit mask */
+uint64_t psm2_get_capability_mask(uint64_t req_cap_mask);
 
 /** @brief Finalize PSM2 interface
  *
@@ -754,9 +773,10 @@ struct psm2_ep_open_opts {
  *                       this parameter should be set to
  *                       PSM2_EP_OPEN_PKEY_DEFAULT.
  *
- * @warning Currently, PSM2 limits the user to calling @ref psm2_ep_open only
- * once per process and subsequent calls will fail.  Multiple endpoints per
- * process will be enabled in a future release.
+ * @warning By default, PSM2 limits the user to calling @ref psm2_ep_open only
+ * once per process and subsequent calls will fail. In order to enable creation
+ * of multiple endoints per process, one must properly set the environment variable
+ * @ref PSM2_MULTI_EP before calling @ref psm2_init.
  *
  * @code{.c}
     	// In order to open an endpoint and participate in a job, each endpoint has
@@ -1331,8 +1351,9 @@ typedef struct psm2_epconn {
  *
  * Function to query PSM2 for end-point information. This allows retrieval of
  * end-point information in cases where the caller does not have access to the
- * results of psm2_ep_open().  In single-rail mode PSM2 will use a single
- * end-point. In multi-rail mode, PSM2 will use an end-point per rail.
+ * results of psm2_ep_open().  In the default single-rail mode PSM2 will use
+ * a single endpoint. If either multi-rail mode or multi-endpoint mode is
+ * enabled, PSM2 will use multiple endpoints.
  *
  * @param[in,out] num_of_epinfo On input, sizes the available number of entries
  *                              in array_of_epinfo.  On output, specifies the
@@ -1366,6 +1387,30 @@ psm2_error_t psm2_ep_query(int *num_of_epinfo, psm2_epinfo_t *array_of_epinfo);
  * @returns PSM2_EPID_UNKNOWN if the epid value is not known to PSM.
  */
 psm2_error_t psm2_ep_epid_lookup(psm2_epid_t epid, psm2_epconn_t *epconn);
+
+/** @brief Query given PSM2 end-point for its connections.
+ *
+ * The need for this function comes with 'multi-ep' feature.
+ * Function is similar to (@ref psm2_ep_epid_lookup).
+ * It differs in that an extra parameter which identifies
+ * the end-point [ep] must be provided which limits the lookup to that single ep.
+ *
+ * @returns PSM2_OK indicates success.
+ * @returns PSM2_EP_WAS_CLOSED if PSM2 end-point [ep] is closed or does not exist.
+ * @returns PSM2_EPID_UNKNOWN if the [epid] value is not known to PSM.
+ * @returns PSM2_PARAM_ERR if output [epconn] is NULL.
+ */
+psm2_error_t psm2_ep_epid_lookup2(psm2_ep_t ep, psm2_epid_t epid, psm2_epconn_t *epconn);
+
+/** @brief Get PSM2 epid for given epaddr.
+ *
+ * @param[in] epaddr The endpoint address.
+ * @param[out] epid The epid of a PSM2 process.
+ *
+ * @returns PSM2_OK indicates success.
+ * @returns PSM2_PARAM_ERR if input [epaddr] or output [epid] is NULL.
+ */
+psm2_error_t psm2_epaddr_to_epid(psm2_epaddr_t epaddr, psm2_epid_t *epid);
 
 /*! @} */
 

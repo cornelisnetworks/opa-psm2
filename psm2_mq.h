@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2017 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2017 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -50,8 +50,6 @@
   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
-
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
 #ifndef PSM2_MQ_H
 #define PSM2_MQ_H
@@ -518,6 +516,9 @@ psm2_error_t psm2_mq_setopt(psm2_mq_t mq, int option, const void *value);
  *       messages unless it is cancelled via @ref psm2_mq_cancel @e before any
  *       match occurs.
  *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as different MQ arguments are used in each of the calls.
+ *
  * The following error code is returned.  Other errors are handled by the PSM
  * error handler (@ref psm2_error_register_handler).
  *
@@ -552,6 +553,9 @@ psm2_mq_irecv(psm2_mq_t mq, uint64_t rtag, uint64_t rtagsel, uint32_t flags,
  *       messages unless it is cancelled via @ref psm2_mq_cancel @e before any
  *       match occurs.
  *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as different MQ arguments are used in each of the calls.
+ *
  * The following error code is returned.  Other errors are handled by the PSM
  * error handler (@ref psm2_error_register_handler).
  *
@@ -583,6 +587,9 @@ psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *rtag,
  * @post The supplied receive buffer is given to MQ to deliver the matched
  *       message.
  *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as different MQ arguments are used in each of the calls.
+ *
  * The following error code is returned.  Other errors are handled by the PSM
  * error handler (@ref psm2_error_register_handler).
  *
@@ -609,6 +616,9 @@ psm2_mq_imrecv(psm2_mq_t mq, uint32_t flags, void *buf, uint32_t len,
  * @param[in] len Length of message starting at @c buf.
  *
  * @post The source buffer is reusable and the send is locally complete.
+ *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as different MQ arguments are used in each of the calls.
  *
  * @note This send function has been implemented to best suit MPI_Send.
  *
@@ -638,6 +648,9 @@ psm2_mq_send(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags, uint64_t stag,
  * @param[in] len Length of message starting at @c buf.
  *
  * @post The source buffer is reusable and the send is locally complete.
+ *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as different MQ arguments are used in each of the calls.
  *
  * @note This send function has been implemented to best suit MPI_Send.
  *
@@ -675,6 +688,9 @@ psm2_mq_send2(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags,
  * @post The source buffer is not reusable and the send is not locally complete
  *       until its request is completed by either @ref psm2_mq_test or @ref
  *       psm2_mq_wait.
+ *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as different MQ arguments are used in each of the calls.
  *
  * @note This send function has been implemented to suit MPI_Isend.
  *
@@ -738,6 +754,9 @@ psm2_mq_isend(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags, uint64_t stag,
  *       until its request is completed by either @ref psm2_mq_test or @ref
  *       psm2_mq_wait.
  *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as different MQ arguments are used in each of the calls.
+ *
  * @note This send function has been implemented to suit MPI_Isend.
  *
  * The following error code is returned.  Other errors are handled by the PSM
@@ -787,11 +806,17 @@ psm2_mq_isend2(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags,
  * message to be received is unknown, in which case its size will be
  * available in the @c msg_length member of the returned @c status.
  *
+ * Function ensures progress if matching request wasn’t found
+ * after the first attempt.
+ *
  * @param[in] mq Matched Queue Handle
  * @param[in] rtag Message receive tag
  * @param[in] rtagsel Message receive tag selector
  * @param[out] status Upon return, @c status is filled with information
  *                    regarding the matching send.
+ *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as different MQ arguments are used in each of the calls.
  *
  * The following error codes are returned.  Other errors are handled by the PSM
  * error handler (@ref psm2_error_register_handler).
@@ -814,12 +839,18 @@ psm2_mq_iprobe(psm2_mq_t mq, uint64_t rtag, uint64_t rtagsel,
  * of the message to be received is unknown, in which case its size will be
  * available in the @c msg_length member of the returned @c status.
  *
+ * Function ensures progress if matching request wasn’t found
+ * after the first attempt.
+ *
  * @param[in] mq Matched Queue Handle
  * @param[in] src Source (sender's) epaddr (may be PSM2_MQ_ANY_ADDR)
  * @param[in] rtag Message receive tag
  * @param[in] rtagsel Message receive tag selector
  * @param[out] status Upon return, @c status is filled with information
  *                    regarding the matching send.
+ *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as different MQ arguments are used in each of the calls.
  *
  * The following error codes are returned.  Other errors are handled by the PSM
  * error handler (@ref psm2_error_register_handler).
@@ -844,6 +875,9 @@ psm2_mq_iprobe2(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *rtag,
  * the size of the message to be received is unknown, in which case its size
  * will be available in the @c msg_length member of the returned @c status.
  *
+ * Function ensures progress if matching request wasn’t found
+ * after the first attempt.
+ *
  * @param[in] mq Matched Queue Handle
  * @param[in] rtag Message receive tag
  * @param[in] rtagsel Message receive tag selector
@@ -851,6 +885,9 @@ psm2_mq_iprobe2(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *rtag,
  *                 message.
  * @param[out] status Upon return, @c status is filled with information
  *                    regarding the matching send.
+ *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as different MQ arguments are used in each of the calls.
  *
  * The following error codes are returned.  Other errors are handled by the PSM
  * error handler (@ref psm2_error_register_handler).
@@ -874,6 +911,9 @@ psm2_mq_improbe(psm2_mq_t mq, uint64_t rtag, uint64_t rtagsel, psm2_mq_req_t *re
  * message to be received is unknown, in which case its size will be available
  * in the @c msg_length member of the returned @c status.
  *
+ * Function ensures progress if matching request wasn’t found
+ * after the first attempt.
+ *
  * @param[in] mq Matched Queue Handle
  * @param[in] src Source (sender's) epaddr (may be PSM2_MQ_ANY_ADDR)
  * @param[in] rtag Message receive tag
@@ -882,6 +922,9 @@ psm2_mq_improbe(psm2_mq_t mq, uint64_t rtag, uint64_t rtagsel, psm2_mq_req_t *re
  *                  message.
  * @param[out] status Upon return, @c status is filled with information
  *                    regarding the matching send.
+ *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as different MQ arguments are used in each of the calls.
  *
  * The following error codes are returned.  Other errors are handled by the PSM
  * error handler (@ref psm2_error_register_handler).
@@ -914,6 +957,9 @@ psm2_mq_improbe2(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *rtag,
  *
  * @post The user has ensured progress if the function returns @ref
  *       PSM2_MQ_NO_COMPLETIONS
+ *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as different MQ arguments are used in each of the calls.
  *
  * The following error codes are returned.  Other errors are handled by the PSM
  * error handler (@ref psm2_error_register_handler).
@@ -983,6 +1029,9 @@ psm2_mq_ipeek(psm2_mq_t mq, psm2_mq_req_t *req, psm2_mq_status_t *status);
  *
  * @post The user has ensured progress if the function returns @ref
  *       PSM2_MQ_NO_COMPLETIONS
+ *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as different MQ arguments are used in each of the calls.
  *
  * The following error codes are returned.  Other errors are handled by the PSM
  * error handler (@ref psm2_error_register_handler).
@@ -1054,6 +1103,10 @@ psm2_mq_ipeek2(psm2_mq_t mq, psm2_mq_req_t *req, psm2_mq_status2_t *status);
  * @post The request is assigned the value @ref PSM2_MQ_REQINVALID and all
  *       associated MQ request storage is released back to the MQ library.
  *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as the requests that are used in each of the calls are
+ * 	   associated with different MQs.
+ *
  * @remarks
  *  @li This function ensures progress on the endpoint as long as the request
  *      is incomplete.
@@ -1093,6 +1146,10 @@ psm2_mq_wait(psm2_mq_req_t *request, psm2_mq_status_t *status);
  *
  * @post The request is assigned the value @ref PSM2_MQ_REQINVALID and all
  *       associated MQ request storage is released back to the MQ library.
+ *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as the requests that are used in each of the calls are
+ * 	   associated with different MQs.
  *
  * @remarks
  *  @li This function ensures progress on the endpoint as long as the request
@@ -1146,6 +1203,10 @@ psm2_mq_wait2(psm2_mq_req_t *request, psm2_mq_status2_t *status);
  *
  * @post The user will ensure progress on the Matched Queue if @ref
  *       psm2_mq_test is exclusively used for guaranteeing request completions.
+ *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as the requests that are used in each of the calls are
+ * 	   associated with different MQs.
  *
  * The following two errors are always returned.  Other errors are handled by
  * the PSM error handler (@ref psm2_error_register_handler).
@@ -1218,6 +1279,10 @@ psm2_mq_test(psm2_mq_req_t *request, psm2_mq_status_t *status);
  * @post The user will ensure progress on the Matched Queue if @ref
  *       psm2_mq_test is exclusively used for guaranteeing request completions.
  *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as the requests that are used in each of the calls are
+ * 	   associated with different MQs.
+ *
  * The following two errors are always returned.  Other errors are handled by
  * the PSM error handler (@ref psm2_error_register_handler).
  *
@@ -1265,6 +1330,10 @@ psm2_mq_test2(psm2_mq_req_t *request, psm2_mq_status2_t *status);
  * @post Whether the cancel is successful or not, the user returns the
  *       request to the library by way of @ref psm2_mq_test or @ref
  *       psm2_mq_wait.
+ *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as the requests that are used in each of the calls are
+ * 	   associated with different MQs.
  *
  * Only the two following errors can be returned directly, without being
  * handled by the error handler (@ref psm2_error_register_handler):

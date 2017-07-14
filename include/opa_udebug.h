@@ -64,12 +64,12 @@ const char *hfi_get_unit_name(int unit);
 extern char *__progname;
 
 static const char hfi_ident_tag[] = "PSM2_IDENTIFY";
+char *hfi_get_mylabel();
 
 #if _HFI_DEBUGGING
 
 extern char *__hfi_mylabel;
 void hfi_set_mylabel(char *);
-char *hfi_get_mylabel();
 extern FILE *__hfi_dbgout;
 
 #define _HFI_UNIT_ERROR(unit, fmt, ...) \
@@ -125,6 +125,34 @@ extern FILE *__hfi_dbgout;
 #define _HFI_MMDBG(fmt, ...) __HFI_DBG_WHICH(__HFI_MMDBG, fmt, ##__VA_ARGS__)
 #define _HFI_CCADBG(fmt, ...) __HFI_DBG_WHICH(__HFI_CCADBG, fmt, ##__VA_ARGS__)
 
+/*
+ * Use these macros (_HFI_DBG_ON and _HFI_DBG_ALWAYS) together
+ * for a scope of code preparing debug info for printing; e.g.
+ * if (_HFI_DBG_ON) {
+ *     // put your code here
+ *     _HFI_DBG_ALWAYS(print your results here);
+ * }
+ */
+#define _HFI_DBG_ON unlikely(hfi_debug & __HFI_DBG)
+#define _HFI_DBG_ALWAYS(fmt, ...) \
+	do { \
+		_Pragma_unlikely \
+		fprintf(__hfi_dbgout, "%s" fmt, __hfi_mylabel, \
+			##__VA_ARGS__); \
+	} while (0)
+
+#define _HFI_VDBG_ON unlikely(hfi_debug & __HFI_VERBDBG)
+#define _HFI_VDBG_ALWAYS(fmt, ...) _HFI_DBG_ALWAYS(fmt, ##__VA_ARGS__)
+
+#define _HFI_PRDBG_ON unlikely(hfi_debug & __HFI_PROCDBG)
+#define _HFI_PRDBG_ALWAYS(fmt, ...) _HFI_DBG_ALWAYS(fmt, ##__VA_ARGS__)
+
+#define _HFI_CCADBG_ON unlikely(hfi_debug & __HFI_CCADBG)
+#define _HFI_CCADBG_ALWAYS(fmt, ...) _HFI_DBG_ALWAYS(fmt, ##__VA_ARGS__)
+
+#define _HFI_INFO_ON unlikely(hfi_debug & __HFI_INFO)
+#define _HFI_INFO_ALWAYS(fmt, ...) _HFI_DBG_ALWAYS(fmt, ##__VA_ARGS__)
+
 #else /* ! _HFI_DEBUGGING */
 
 #define _HFI_UNIT_ERROR(unit, fmt, ...) \
@@ -145,9 +173,21 @@ extern FILE *__hfi_dbgout;
 #define _HFI_PDBG(fmt, ...)
 #define _HFI_EPDBG(fmt, ...)
 #define _HFI_PRDBG(fmt, ...)
+#define _HFI_ENVDBG(lev, fmt, ...)
 #define _HFI_VDBG(fmt, ...)
 #define _HFI_MMDBG(fmt, ...)
 #define _HFI_CCADBG(fmt, ...)
+
+#define _HFI_DBG_ON 0
+#define _HFI_DBG_ALWAYS(fmt, ...)
+#define _HFI_VDBG_ON 0
+#define _HFI_VDBG_ALWAYS(fmt, ...)
+#define _HFI_PRDBG_ON 0
+#define _HFI_PRDBG_ALWAYS(fmt, ...)
+#define _HFI_CCADBG_ON 0
+#define _HFI_CCADBG_ALWAYS(fmt, ...)
+#define _HFI_INFO_ON 0
+#define _HFI_INFO_ALWAYS(fmt, ...)
 
 #endif /* _HFI_DEBUGGING */
 

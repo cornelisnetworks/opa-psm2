@@ -65,9 +65,17 @@ Source0: %{name}-%{version}.tar.gz
 # The OPA product is supported on x86 64 only:
 ExclusiveArch: x86_64
 
+%if 0%{?suse_version}
+BuildRequires: libnuma-devel
+Requires: libnuma1
+%else
 %if 0%{?rhel}==0 || 0%{?rhel} > 6
 BuildRequires: systemd
+BuildRequires: numactl-devel
+Requires: numactl-libs
 %endif
+%endif
+
 BuildRequires: gcc
 Provides: hfi1-psm
 Obsoletes: hfi1-psm < 1.0.0

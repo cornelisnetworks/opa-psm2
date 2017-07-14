@@ -59,7 +59,7 @@
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
 
-static uint32_t non_dw_mul_sdma = 0;
+uint32_t non_dw_mul_sdma = 0;
 
 void
 ips_proto_mq_set_non_dw_mul_sdma(uint32_t mode)
@@ -265,7 +265,7 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 	if (flow->transfer == PSM_TRANSFER_DMA) {
 		psmi_assert((proto->flags & IPS_PROTO_FLAG_SPIO) == 0);
 		/* max chunk size is the rv window size */
-		chunk_size = proto->mq->hfi_window_rv;
+		chunk_size = ipsaddr->window_rv;
 		is_non_dw_mul_allowed = non_dw_mul_sdma;
 	} else {
 		psmi_assert((proto->flags & IPS_PROTO_FLAG_SDMA) == 0);
@@ -437,7 +437,7 @@ ips_ptl_mq_rndv(struct ips_proto *proto, psm2_mq_req_t req,
 		       (prefetch_lookahead < proto->cuda_prefetch_limit)) {
 			chb = NULL;
 			window_len =
-				ips_cuda_next_window(proto->mq->hfi_window_rv,
+				ips_cuda_next_window(ipsaddr->window_rv,
 						     offset, len);
 
 			if (window_len <= CUDA_SMALLHOSTBUF_SZ)
@@ -980,7 +980,7 @@ ips_proto_mq_push_rts_data(struct ips_proto *proto, psm2_mq_req_t req)
 		flow = &ipsaddr->flows[EP_FLOW_GO_BACK_N_DMA];
 		frag_size = flow->path->pr_mtu;
 		/* max chunk size is the rv window size */
-		chunk_size = proto->mq->hfi_window_rv;
+		chunk_size = ipsaddr->window_rv;
 	} else {
 		/* use PIO transfer */
 		psmi_assert((proto->flags & IPS_PROTO_FLAG_SDMA) == 0);
@@ -1137,8 +1137,18 @@ ips_proto_mq_handle_cts(struct ips_recvhdrq_event *rcv_ev)
 
 		if (ips_tid_send_handle_tidreq(proto->protoexp,
 					       rcv_ev->ipsaddr, req, p_hdr->data[0],
-					       p_hdr->mdata, payload, paylen) == 0)
+					       p_hdr->mdata, payload, paylen) == 0) {
 			proto->psmi_logevent_tid_send_reqs.next_warning = 0;
+		} else {
+			flow = &rcv_ev->ipsaddr->flows[ips_proto_flowid(p_hdr)];
+			flow->recv_seq_num.psn_num -= 1;                            /* Decrement seq number to NAK proper CTS */
+			ips_proto_send_nak((struct ips_recvhdrq *)rcv_ev->recvq, flow);
+			static unsigned int msg_cnt = 0;
+			if (msg_cnt++ == 0) {                                       /* Report the message only once */
+				_HFI_INFO("PSM2 memory shortage detected. Please consider modifying PSM2_MEMORY setting\n");
+			}
+			return PSM2_EP_NO_RESOURCES;
+		}
 	} else {
 		req->rts_reqidx_peer = p_hdr->data[0].u32w0; /* eager receive only */
 		req->send_msglen = p_hdr->data[1].u32w1;

@@ -59,10 +59,12 @@
 
 #include "psm_user.h"
 
+#define HFI_USERINIT_RETRY_MAX 3
 #define PSMI_SHARED_CONTEXTS_ENABLED_BY_DEFAULT   1
-static int psmi_sharedcontext_params(int *nranks, int *rankid);
+ustatic int MOCKABLE(psmi_sharedcontext_params)(int *nranks, int *rankid);
+MOCK_DCL_EPILOGUE(psmi_sharedcontext_params);
 static int psmi_get_hfi_selection_algorithm(void);
-static psm2_error_t psmi_init_userinfo_params(psm2_ep_t ep,
+ustatic psm2_error_t psmi_init_userinfo_params(psm2_ep_t ep,
 					     int unit_id,
 					     psm2_uuid_t const unique_job_key,
 					     struct hfi1_user_info_dep *user_info);
@@ -160,15 +162,20 @@ psmi_get_uuid_hash(psm2_uuid_t const uuid)
 	return hashed_uuid;
 }
 
-#ifdef PSM_CUDA
 int psmi_get_current_proc_location()
 {
-        int core_id, node_id = -1;
-	syscall(SYS_getcpu, &core_id, &node_id, NULL);
+        int core_id, node_id;
+
+	core_id = sched_getcpu();
+	if (core_id < 0)
+		return -EINVAL;
+
+	node_id = numa_node_of_cpu(core_id);
+	if (node_id < 0)
+		return -EINVAL;
 
 	return node_id;
 }
-#endif
 
 static void
 psmi_spread_hfi_selection(psm2_uuid_t const job_key, long *unit_start,
@@ -203,10 +210,8 @@ psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
 				int nunitsactive,int nunits,psm2_uuid_t const job_key,
 				long *unit_start,long *unit_end)
 {
-#ifdef PSM_CUDA
 	int node_id, unit_id, found = 0;
 	int saved_hfis[nunits];
-#endif
 	context->user_info.hfi1_alg = HFI1_ALG_ACROSS;
 	/* if the user did not set HFI_UNIT then ... */
 	if (unit_param == HFI_UNIT_ID_ANY)
@@ -218,14 +223,13 @@ psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
 		    /* there are more than 1 active units then ... */
 		    (nunitsactive > 1))
 		{
-#ifdef PSM_CUDA
 			/*
 			 * Pick first HFI we find on same root complex
 			 * as current task. If none found, fall back to
 			 * load-balancing algorithm.
 			 */
 			node_id = psmi_get_current_proc_location();
-			if (PSMI_IS_CUDA_ENABLED && node_id >= 0) {
+			if (node_id >= 0) {
 				for (unit_id = 0; unit_id < nunits; unit_id++) {
 					if (hfi_get_unit_active(unit_id) <= 0)
 						continue;
@@ -253,20 +257,14 @@ psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
 			}
 
 			if (node_id < 0 || !found) {
-#endif
 				psmi_spread_hfi_selection(job_key, unit_start,
 							  unit_end, nunits);
-#ifdef PSM_CUDA
 			}
-#endif
-		}
-#ifdef PSM_CUDA
-		else if ((context->user_info.hfi1_alg == HFI1_ALG_ACROSS_ALL) &&
-			   (nunitsactive > 1)) {
+		} else if ((context->user_info.hfi1_alg == HFI1_ALG_ACROSS_ALL) &&
+			 (nunitsactive > 1)) {
 				psmi_spread_hfi_selection(job_key, unit_start,
 							  unit_end, nunits);
 		}
-#endif
 		else {
 			*unit_start = 0;
 			*unit_end = nunits - 1;
@@ -375,7 +373,13 @@ psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 			goto bail;
 
 		/* attempt to assign the context via hfi_userinit() */
-		context->ctrl = hfi_userinit(context->fd, &context->user_info);
+		int retry = 0;
+		do {
+			if (retry > 0)
+				_HFI_INFO("hfi_userinit: failed, trying again (%d/%d)\n",
+					  retry, HFI_USERINIT_RETRY_MAX);
+			context->ctrl = hfi_userinit(context->fd, &context->user_info);
+		} while (context->ctrl == NULL && ++retry <= HFI_USERINIT_RETRY_MAX);
 		unit_id_prev = unit_id;
 		unit_id = (unit_id + 1) % nunits;
 	} while (unit_id_prev != unit_end && context->ctrl == NULL);
@@ -567,7 +571,7 @@ psm2_error_t psmi_context_check_status(const psmi_context_t *contexti)
 /*
  * Prepare user_info params for driver open, used only in psmi_context_open
  */
-static
+ustatic
 psm2_error_t
 psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
 			  psm2_uuid_t const unique_job_key,
@@ -706,8 +710,8 @@ fail:
 	return err;
 }
 
-static
-int psmi_sharedcontext_params(int *nranks, int *rankid)
+ustatic
+int MOCKABLE(psmi_sharedcontext_params)(int *nranks, int *rankid)
 {
 	union psmi_envvar_val enable_shcontexts;
 	char *ppn_env = NULL, *lrank_env = NULL, *c;
@@ -723,6 +727,11 @@ int psmi_sharedcontext_params(int *nranks, int *rankid)
 	unsetenv("MPI_LOCALRANKID");
 	unsetenv("MPI_LOCALRANKS");
 #endif
+
+	/* We do not support context sharing for multiple endpoints */
+	if (psmi_multi_ep_enabled) {
+		return 0;
+	}
 
 	/* New name in 2.0.1, keep observing old name */
 	psmi_getenv("PSM2_SHAREDCONTEXTS", "Enable shared contexts",
@@ -761,6 +770,7 @@ int psmi_sharedcontext_params(int *nranks, int *rankid)
 	} else
 		return 0;
 }
+MOCK_DEF_EPILOGUE(psmi_sharedcontext_params);
 
 static
 int psmi_get_hfi_selection_algorithm(void)
@@ -771,11 +781,7 @@ int psmi_get_hfi_selection_algorithm(void)
 	/* If a specific unit is set in the environment, use that one. */
 	psmi_getenv("HFI_SELECTION_ALG",
 		    "HFI Device Selection Algorithm to use. Round Robin (Default) "
-#ifdef PSM_CUDA
 		    ", Packed or Round Robin All.",
-#else
-		    "or Packed",
-#endif
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_STR,
 		    (union psmi_envvar_val)"Round Robin", &env_hfi1_alg);
 
@@ -783,10 +789,8 @@ int psmi_get_hfi_selection_algorithm(void)
 		hfi1_alg = HFI1_ALG_ACROSS;
 	else if (!strcasecmp(env_hfi1_alg.e_str, "Packed"))
 		hfi1_alg = HFI1_ALG_WITHIN;
-#ifdef PSM_CUDA
 	else if (!strcasecmp(env_hfi1_alg.e_str, "Round Robin All"))
 		hfi1_alg = HFI1_ALG_ACROSS_ALL;
-#endif
 	else {
 		_HFI_ERROR
 		    ("Unknown HFI selection algorithm %s. Defaulting to Round Robin "

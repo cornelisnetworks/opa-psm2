@@ -49,9 +49,6 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-OUTDIR = .
-MOCK_OUTDIR = mock_build
-DEBUG_OUTDIR = debug_build
 
 OPTIONS =
 HISTORY = .outdirs
@@ -60,14 +57,39 @@ HISTORIC_TARGETS = $(patsubst %, %_clean, $(shell cat $(HISTORY) 2> /dev/null))
 RPM_NAME := libpsm2
 
 SUBDIRS:= ptl_self ptl_ips ptl_am libuuid opa
-export build_dir := .
+top_srcdir := $(shell readlink -m .)
 
-LINKER_SCRIPT_FILE := psm2_linker_script.map
+# Default locations
+OUTDIR := $(top_srcdir)/build_release
+MOCK_OUTDIR := $(top_srcdir)/build_mock
+DEBUG_OUTDIR := $(top_srcdir)/build_debug
 
-PSM2_VERNO_MAJOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_MAJOR.*0x0\?\([1-9a-f]\?[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h)
-PSM2_VERNO_MINOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_MINOR.*0x\([0-9]\?[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h)
+# We need a temporary test variable, as the OUTDIR macro
+# can be overriden by the shell and thus not run.
+TESTOUTDIR= $(shell readlink -m $(OUTDIR))
+ifeq ($(top_srcdir), $(TESTOUTDIR))
+$(error OUTDIR cannot be the same as your source folder ${top_srcdir}))
+endif
+
+ifeq (/,$(TESTOUTDIR))
+$(error OUTDIR cannot be the / folder ))
+endif
+
+# Forces any value to be full path.
+# We don't need to override MOCK_OUTDIR or DEBUG_OUTDIR
+# as they are recursive make invocations and use OUTDIR
+ifneq ($(MAKECMDGOALS), mock)
+ifneq ($(MAKECMDGOALS), debug)
+override OUTDIR := $(shell readlink -m $(OUTDIR))
+endif
+endif
+
+LINKER_SCRIPT_FILE := ${OUTDIR}/psm2_linker_script.map
+
+PSM2_VERNO_MAJOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_MAJOR.*0x0\?\([1-9a-f]\?[0-9a-f]\+\).*/\1/p' $(top_srcdir)/psm2.h)
+PSM2_VERNO_MINOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_MINOR.*0x\([0-9]\?[0-9a-f]\+\).*/\1/p' $(top_srcdir)/psm2.h)
 PSM2_LIB_MAJOR   := $(shell printf "%d" ${PSM2_VERNO_MAJOR})
-PSM2_LIB_MINOR   := $(shell printf "%d" `sed -n 's/^\#define.*PSM2_VERNO_MINOR.*\(0x[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h`)
+PSM2_LIB_MINOR   := $(shell printf "%d" `sed -n 's/^\#define.*PSM2_VERNO_MINOR.*\(0x[0-9a-f]\+\).*/\1/p' $(top_srcdir)/psm2.h`)
 SOURCES_CHKSUM_FILES = Makefile buildflags.mak $(LINKER_SCRIPT_FILE) \
 		`find . -regex '\(.*\.h\|.*\.c\)' -not -path "./test/*" -not -path "./tools/*" -not -path "_revision.c" | sort`
 SOURCES_CHKSUM_VALUE = $(shell cat ${SOURCES_CHKSUM_FILES} | sha1sum | cut -d' ' -f 1)
@@ -84,9 +106,7 @@ export OPA_LIB_MINOR
 export CCARCH ?= gcc
 export FCARCH ?= gfortran
 
-top_srcdir := $(shell readlink -m .)
 include $(top_srcdir)/buildflags.mak
-lib_build_dir := $(build_dir)
 INCLUDES += -I$(top_srcdir)
 
 ifneq (x86_64,$(arch))
@@ -108,7 +128,8 @@ export DESTDIR
 export INSTALL_LIB_TARG
 
 TARGLIB := libpsm2
-COMPATMAJOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_COMPAT_MAJOR.*0x0\?\([1-9a-f]\?[0-9a-f]\+\).*/\1/p' $(build_dir)/psm2.h)
+COMPATMAJOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_COMPAT_MAJOR.*0x0\?\([1-9a-f]\?[0-9a-f]\+\).*/\1/p' \
+             	 $(top_srcdir)/psm2.h)
 COMPATLIB := libpsm_infinipath
 
 MAJOR := $(PSM2_LIB_MAJOR)
@@ -130,10 +151,10 @@ DISTRO := $(shell . /etc/os-release; echo $$ID)
 # By default the following two variables have the following values:
 LIBPSM2_COMPAT_CONF_DIR := /etc
 LIBPSM2_COMPAT_SYM_CONF_DIR := /etc
-#We can't set SPEC_FILE_RELEASE_DIST to an empty value, a space will result.
-#It then messes up sed operations for PSM_CUDA=1.
-#So leaving the commented out line here as documentation to NOT set it.
-#SPEC_FILE_RELEASE_DIST :=
+# We can't set SPEC_FILE_RELEASE_DIST to an empty value, a space will result.
+# It then messes up sed operations for PSM_CUDA=1.
+# So leaving the commented out line here as documentation to NOT set it.
+# SPEC_FILE_RELEASE_DIST :=
 UDEV_40_PSM_RULES := %{_udevrulesdir}/40-psm.rules
 
 ifeq (fedora,$(DISTRO))
@@ -197,7 +218,7 @@ else
 VERSION_RELEASE := ${VERSION_RELEASE_OVERRIDE}
 endif
 
-LDLIBS := -lrt -lpthread -ldl ${EXTRA_LIBS}
+LDLIBS := -lrt -lpthread -ldl -lnuma ${EXTRA_LIBS}
 
 PKG_CONFIG ?= pkg-config
 
@@ -215,9 +236,8 @@ export UDEVDIR
 #    target.
 DIST := ${RPM_NAME}-${VERSION_RELEASE}
 
-all: symlinks outdir
-	@mkdir -p $(OUTDIR) && \
-	if [ ! -e $(HISTORY) ] || [ -z "`grep -E '^$(OUTDIR)$$' $(HISTORY)`" ]; then \
+all: outdir symlinks
+	@if [ ! -e $(HISTORY) ] || [ -z "`grep -E '^$(OUTDIR)$$' $(HISTORY)`" ]; then \
 		echo $(OUTDIR) >> $(HISTORY); \
 	fi
 	@for subdir in $(SUBDIRS); do \
@@ -231,26 +251,8 @@ all: symlinks outdir
 %_clean:
 	make OUTDIR=$* clean
 
-clean: outdir
-	@rm -f _revision.c
-	@for subdir in $(SUBDIRS) compat; do \
-		$(MAKE) -C $$subdir OUTDIR=$(OUTDIR)/$$subdir clean; \
-		if [ -d $(OUTDIR)/$$subdir ] && [ -n "`find $(OUTDIR)/$$subdir -maxdepth 0 -empty`" ]; then \
-			rmdir --ignore-fail-on-non-empty $(OUTDIR)/$$subdir; \
-		fi; \
-	done
-	@if [ -d $(OUTDIR) ]; then \
-		cd $(OUTDIR); \
-		rm -f *.o *.d *.gcda *.gcno ${TARGLIB}.so*; \
-		cd -; \
-	fi
-	@if [ -e $(HISTORY) ] && [ -n "`grep -E '^$(OUTDIR)$$' $(HISTORY)`" ]; then \
-		DELETEME=$(OUTDIR); \
-		while [ -d $$DELETEME ] && [ -n "`find $$DELETEME -maxdepth 0 -empty`" ]; do \
-			rmdir --ignore-fail-on-non-empty $$DELETEME; \
-			DELETEME=`echo $$DELETEME | rev | cut -d "/" -f 2- | rev`; \
-		done; \
-	fi
+clean: linker_script_file_clean cleanlinks
+	rm -rf ${OUTDIR}
 	@if [ -e $(HISTORY) ]; then \
 		grep -v -E "^$(OUTDIR)$$" $(HISTORY) > $(HISTORY)_tmp; \
 		mv $(HISTORY)_tmp $(HISTORY); \
@@ -259,37 +261,38 @@ clean: outdir
 		fi; \
 	fi
 
-mock: OUTDIR = $(top_srcdir)/$(MOCK_OUTDIR)
+mock: OUTDIR := $(MOCK_OUTDIR)
 mock: OPTIONS = PSM2_MOCK_TESTING=1
 mock:
 	$(MAKE) OUTDIR=$(OUTDIR) OPTIONS=$(OPTIONS)
 
-debug: OUTDIR = $(top_srcdir)/$(DEBUG_OUTDIR)
+debug: OUTDIR := $(DEBUG_OUTDIR)
 debug: OPTIONS = PSM_DEBUG=1
 debug:
 	$(MAKE) OUTDIR=$(OUTDIR) OPTIONS=$(OPTIONS)
 
 test_clean:
-	$(MAKE) -C test clean
+	if [ -d ./test ]; then \
+		$(MAKE) -C test clean; \
+	fi
 
 specfile_clean:
-	rm -f ${RPM_NAME}.spec
+	rm -f ${OUTDIR}/${RPM_NAME}.spec
 
 distclean: specfile_clean cleanlinks $(HISTORIC_TARGETS) test_clean
-	rm -f ${DIST}.tar.gz
+	rm -rf ${OUTDIR}/${DIST}
+	rm -f ${OUTDIR}/${DIST}.tar.gz
 	rm -fr temp.*
 
 outdir:
-ifneq ("$(shell echo $(OUTDIR) | cut -c 1)", "/")
-	$(eval override OUTDIR := $(shell readlink -m $(OUTDIR)))
-endif
+	mkdir -p ${OUTDIR}
 
 symlinks:
-	@test -L $(build_dir)/include/linux-x86_64 || \
-		ln -sf linux-i386 $(build_dir)/include/linux-x86_64
+	@test -L $(top_srcdir)/include/linux-x86_64 || \
+		ln -sf linux-i386 $(top_srcdir)/include/linux-x86_64
 
 cleanlinks:
-	rm -rf $(build_dir)/include/linux-x86_64
+	rm -rf $(top_srcdir)/include/linux-x86_64
 
 install: all
 	for subdir in $(SUBDIRS) ; do \
@@ -297,7 +300,7 @@ install: all
 		$(MAKE) -j $(nthreads) -C $$subdir OUTDIR=$(OUTDIR)/$$subdir install ; \
 	done
 	$(MAKE) -j $(nthreads) $(OUTDIR)/${TARGLIB}.so OUTDIR=$(OUTDIR)
-	$(MAKE) -j $(nthreads) -C compat install
+	$(MAKE) -j $(nthreads) -C compat OUTDIR=$(OUTDIR)/compat install
 	install -D $(OUTDIR)/${TARGLIB}.so.${MAJOR}.${MINOR} \
 		${DESTDIR}${INSTALL_LIB_TARG}/${TARGLIB}.so.${MAJOR}.${MINOR}
 	(cd ${DESTDIR}${INSTALL_LIB_TARG} ; \
@@ -341,19 +344,23 @@ specfile: specfile_clean
 			-e 's:@LIBPSM2_COMPAT_SYM_CONF_DIR@:'${LIBPSM2_COMPAT_SYM_CONF_DIR}':g' \
 			-e 's;@SPEC_FILE_RELEASE_DIST@;'${SPEC_FILE_RELEASE_DIST}';g'  \
 			-e 's/@DIST_SHA@/'${DIST_SHA}'/g' > \
-		${RPM_NAME}.spec
+		${OUTDIR}/${RPM_NAME}.spec
 	if [ -f /etc/redhat-release ] && [ `grep -o "[0-9.]*" /etc/redhat-release | cut -d"." -f1` -lt 7 ]; then \
-		sed -i 's;@40_PSM_RULES@;'${UDEVDIR}'/rules.d/40-psm.rules;g' ${RPM_NAME}.spec; \
+		sed -i 's;@40_PSM_RULES@;'${UDEVDIR}'/rules.d/40-psm.rules;g' ${OUTDIR}/${RPM_NAME}.spec; \
 	else \
-		sed -i 's;@40_PSM_RULES@;'${UDEV_40_PSM_RULES}';g' ${RPM_NAME}.spec; \
+		sed -i 's;@40_PSM_RULES@;'${UDEV_40_PSM_RULES}';g' ${OUTDIR}/${RPM_NAME}.spec; \
 	fi
 
-dist:
-	mkdir -p ${DIST}
-	for x in $$(/usr/bin/find .						\
+# We can't totally prevent two make dist calls in a row from packaging
+# the previous make dist, unless we switch to using a dedicated ./src folder
+# That will come in the next major revision of the Makefile for now we can
+# prevent the easy and default cases
+dist: distclean
+	mkdir -p ${OUTDIR}/${DIST}
+	for x in $$(/usr/bin/find . 								\
 			-name ".git"                           -prune -o	\
 			-name "cscope*"                        -prune -o	\
-			-name "${DIST}"                        -prune -o	\
+			-name "$(shell realpath --relative-to=${top_srcdir} ${OUTDIR})" -prune -o	\
 			-name "*.orig"                         -prune -o	\
 			-name "*~"                             -prune -o	\
 			-name "#*"                             -prune -o	\
@@ -366,13 +373,13 @@ dist:
 			-name "artifacts"                      -prune -o	\
 			-print); do \
 		dir=$$(dirname $$x); \
-		mkdir -p ${DIST}/$$dir; \
-		[ ! -d $$x ] && cp $$x ${DIST}/$$dir; \
+		mkdir -p ${OUTDIR}/${DIST}/$$dir; \
+		[ ! -d $$x ] && cp $$x ${OUTDIR}/${DIST}/$$dir; \
 	done
-	if [ -e .git ] ; then git log -n1 --pretty=format:%H > ${DIST}/COMMIT ; fi
-	echo ${RELEASE} > ${DIST}/rpm_release_extension
-	tar czvf ${DIST}.tar.gz ${DIST}
-	rm -rf ${DIST}
+	if [ -e .git ] ; then git log -n1 --pretty=format:%H > ${OUTDIR}/${DIST}/COMMIT ; fi
+	echo ${RELEASE} > ${OUTDIR}/${DIST}/rpm_release_extension
+	cd ${OUTDIR}; tar czvf ${DIST}.tar.gz ${DIST}
+	@echo "${DIST}.tar.gz is located in ${OUTDIR}/${DIST}.tar.gz"
 
 ofeddist:
 	$(MAKE) -j $(nthreads) dist
@@ -405,6 +412,7 @@ ${TARGLIB}-objs := ptl_am/am_reqrep_shmem.o	\
 		   psm_mpool.o			\
 		   psm_stats.o			\
 		   psm_memcpy.o			\
+		   psm_mock.o			\
 		   psm.o			\
 		   libuuid/psm_uuid.o		\
 		   libuuid/parse.o		\
@@ -439,29 +447,36 @@ ${TARGLIB}-objs := ptl_am/am_reqrep_shmem.o	\
 		   psm_diags.o 			\
 		   psmi_wrappers.o
 
-${TARGLIB}-objs := $(patsubst %.o, $(OUTDIR)/%.o, ${${TARGLIB}-objs})
+${TARGLIB}-objs := $(patsubst %.o, ${OUTDIR}/%.o, ${${TARGLIB}-objs})
 
 DEPS:= $(${TARGLIB}-objs:.o=.d)
 -include $(DEPS)
 
-$(OUTDIR)/${TARGLIB}.so: $(OUTDIR)/${TARGLIB}.so.${MAJOR}
+${OUTDIR}/${TARGLIB}.so: ${OUTDIR}/${TARGLIB}.so.${MAJOR}
 	ln -fs ${TARGLIB}.so.${MAJOR}.${MINOR} $@
 
-$(OUTDIR)/${TARGLIB}.so.${MAJOR}: $(OUTDIR)/${TARGLIB}.so.${MAJOR}.${MINOR}
+${OUTDIR}/${TARGLIB}.so.${MAJOR}: ${OUTDIR}/${TARGLIB}.so.${MAJOR}.${MINOR}
 	ln -fs ${TARGLIB}.so.${MAJOR}.${MINOR} $@
 
 # when we build the shared library, generate a revision and date
 # string in it, for easier id'ing when people may have copied the
 # file around.  Generate it such that the ident command can find it
 # and strings -a | grep OPA does a reasonable job as well.
-$(OUTDIR)/${TARGLIB}.so.${MAJOR}.${MINOR}: ${${TARGLIB}-objs}
-	echo "char psmi_hfi_IFS_version[]=\"`printenv RELEASE_TAG`\";" > ${lib_build_dir}/_revision.c
-	date +'char psmi_hfi_build_timestamp[] ="%F %T%:z";' >> ${lib_build_dir}/_revision.c
-	echo "char psmi_hfi_sources_checksum[] =\"${SOURCES_CHKSUM_VALUE}\";" >> ${lib_build_dir}/_revision.c
-	echo "char psmi_hfi_git_checksum[] =\"`git rev-parse HEAD`\";" >> ${lib_build_dir}/_revision.c
-	$(CC) -c $(BASECFLAGS) $(INCLUDES) _revision.c -o $(OUTDIR)/_revision.o
+$(OUTDIR)/${TARGLIB}.so.${MAJOR}.${MINOR}: ${${TARGLIB}-objs} $(LINKER_SCRIPT_FILE)
+	echo "char psmi_hfi_IFS_version[]=\"`printenv RELEASE_TAG`\";" > ${OUTDIR}/_revision.c
+	date +'char psmi_hfi_build_timestamp[] ="%F %T%:z";' >> ${OUTDIR}/_revision.c
+	echo "char psmi_hfi_sources_checksum[] =\"${SOURCES_CHKSUM_VALUE}\";" >> ${OUTDIR}/_revision.c
+	echo "char psmi_hfi_git_checksum[] =\"`git rev-parse HEAD`\";" >> ${OUTDIR}/_revision.c
+	$(CC) -c $(BASECFLAGS) $(INCLUDES) ${OUTDIR}/_revision.c -o $(OUTDIR)/_revision.o
 	$(CC) $(LINKER_SCRIPT) $(LDFLAGS) -o $@ -Wl,-soname=${TARGLIB}.so.${MAJOR} -shared \
 		${${TARGLIB}-objs} $(OUTDIR)/_revision.o -Lopa $(LDLIBS)
 
-$(OUTDIR)/%.o: $(top_srcdir)/%.c
+${OUTDIR}/%.o: ${top_srcdir}/%.c
 	$(CC) $(CFLAGS) $(INCLUDES) -MMD -c $< -o $@
+
+$(LINKER_SCRIPT_FILE): psm2_linker_script_map.in
+	sed "s/_psm2_additional_globals_;/$(PSM2_ADDITIONAL_GLOBALS)/" \
+	     psm2_linker_script_map.in > ${OUTDIR}/psm2_linker_script.map
+
+linker_script_file_clean:
+	rm -f $(LINKER_SCRIPT_FILE)

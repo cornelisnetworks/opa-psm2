@@ -65,6 +65,7 @@
 #endif
 #include <smmintrin.h>
 #include "psm_user.h"
+#include "psm_sysbuf.h"
 
 #include "psm2_mock_testing.h"
 
@@ -96,6 +97,10 @@ struct psm2_mq {
 	struct mqq unexpected_htab[NUM_HASH_CONFIGS][NUM_HASH_BUCKETS];
 	struct mqq expected_htab[NUM_HASH_CONFIGS][NUM_HASH_BUCKETS];
 
+	/* in case the compiler can't figure out how to preserve the hashed values
+	between mq_req_match() and mq_add_to_unexpected_hashes() ... */
+	unsigned hashvals[NUM_HASH_CONFIGS];
+
 	/*psm_mq_unexpected_callback_fn_t unexpected_callback; */
 	struct mqq expected_q;		/**> Preposted (expected) queue */
 	struct mqq unexpected_q;	/**> Unexpected queue */
@@ -107,7 +112,9 @@ struct psm2_mq {
 	uint32_t hfi_thresh_tiny;
 	uint32_t hfi_thresh_rv;
 	uint32_t shm_thresh_rv;
-	uint32_t hfi_window_rv;
+	uint32_t hfi_base_window_rv;	/**> this is a base rndv window size,
+					     will be further trimmed down per-connection based
+					     on the peer's MTU */
 	int memmode;
 
 	uint64_t timestamp;
@@ -118,13 +125,19 @@ struct psm2_mq {
 	unsigned unexpected_list_len;
 	unsigned expected_hash_len;
 	unsigned expected_list_len;
+
+	psmi_mem_ctrl_t handler_index[MM_NUM_OF_POOLS];
+	int mem_ctrl_is_init;
+	uint64_t mem_ctrl_total_bytes;
+
+	psmi_lock_t progress_lock;
 };
 
 #define MQ_HFI_THRESH_TINY	8
-#define MQ_HFI_THRESH_EGR_SDMA_XEON 34000
-#define MQ_HFI_THRESH_EGR_SDMA_PHI2 200000
-#define MQ_HFI_THRESH_EGR_SDMA_SQ_XEON 16000
-#define MQ_HFI_THRESH_EGR_SDMA_SQ_PHI2 65536
+#define MQ_HFI_THRESH_EGR_SDMA_XEON 34000       /* Eager Xeon blocking */
+#define MQ_HFI_THRESH_EGR_SDMA_PHI2 200000      /* Eager Phi2 blocking */
+#define MQ_HFI_THRESH_EGR_SDMA_SQ_XEON 16000    /* Eager Xeon non-blocking */
+#define MQ_HFI_THRESH_EGR_SDMA_SQ_PHI2 65536    /* Eager Phi2 non-blocking */
 
 #define MQE_TYPE_IS_SEND(type)	((type) & MQE_TYPE_SEND)
 #define MQE_TYPE_IS_RECV(type)	((type) & MQE_TYPE_RECV)
@@ -487,7 +500,9 @@ MOCK_DCL_EPILOGUE(psmi_mq_req_alloc);
  */
 psm2_error_t psmi_mq_malloc(psm2_mq_t *mqo);
 psm2_error_t psmi_mq_initialize_defaults(psm2_mq_t mq);
-psm2_error_t psmi_mq_free(psm2_mq_t mq);
+
+psm2_error_t MOCKABLE(psmi_mq_free)(psm2_mq_t mq);
+MOCK_DCL_EPILOGUE(psmi_mq_free);
 
 /* Three functions that handle all MQ stuff */
 #define MQ_RET_MATCH_OK	0

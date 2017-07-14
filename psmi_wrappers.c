@@ -85,4 +85,10 @@ int MOCKABLE(psmi_sigaction)(int signum, const struct sigaction *act, struct sig
 }
 MOCK_DEF_EPILOGUE(psmi_sigaction);
 
+void MOCKABLE(psmi_rmb)(void)
+{
+	return ips_rmb();
+}
+MOCK_DEF_EPILOGUE(psmi_rmb);
+
 #endif /* def PSM2_MOCK_TESTING */

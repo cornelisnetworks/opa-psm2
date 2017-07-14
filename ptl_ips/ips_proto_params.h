@@ -134,6 +134,7 @@
 #define IPS_FLOW_FLAG_PENDING_NAK   0x04
 #define IPS_FLOW_FLAG_GEN_BECN      0x08
 #define IPS_FLOW_FLAG_CONGESTED     0x10
+#define IPS_FLOW_FLAG_SKIP_CTS      0x20
 
 /* tid session expected send flags  */
 #define EXP_SEND_FLAG_CLEAR_ALL 0x00
@@ -227,6 +228,7 @@
 #define IPS_PROTOEXP_FLAG_HDR_SUPP           0x02	/* Header suppression enabled */
 #define IPS_PROTOEXP_FLAG_TID_DEBUG	     0x04	/* *not* default */
 #define IPS_PROTOEXP_FLAG_RTS_CTS_INTERLEAVE 0x08	/* Interleave RTS handling. */
+#define IPS_PROTOEXP_FLAG_CTS_SERIALIZED 0x10	/* CTS serialized */
 #define IPS_PROTOEXP_FLAGS_DEFAULT	     IPS_PROTOEXP_FLAG_ENABLED
 
 

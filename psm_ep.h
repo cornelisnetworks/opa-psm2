@@ -213,7 +213,7 @@ struct psm2_epaddr {
 			PSMI_PROFILE_REBLOCK(1);			\
 			if (++spin_cnt == (ep)->yield_spin_cnt) {	\
 				spin_cnt = 0;				\
-				PSMI_PYIELD();				\
+				PSMI_YIELD((ep)->mq->progress_lock);	\
 			}						\
 		}							\
 		else if (err == PSM2_OK) {				\

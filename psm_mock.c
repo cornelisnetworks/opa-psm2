@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2017 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,31 +51,40 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
-
-#ifndef SYSBUF_INT_H
-#define SYSBUF_INT_H
-
 #include "psm_user.h"
+#include "psm_mq_internal.h"
+#include "psm2_mock_testing.h"
 
-#define MM_NUM_OF_POOLS 7
-
-typedef struct psmi_mem_ctrl {
-    struct psmi_mem_block_ctrl *free_list;
-    uint32_t total_alloc;
-    uint32_t current_available;
-    uint32_t block_size;
-    uint32_t flags;
-    uint32_t replenishing_rate;
-} psmi_mem_ctrl_t;
-
-/*
- * MQ unexpected buffer management
- */
-void  psmi_mq_sysbuf_init(psm2_mq_t mq);
-void  psmi_mq_sysbuf_fini(psm2_mq_t mq);
-void* psmi_mq_sysbuf_alloc(psm2_mq_t mq, uint32_t nbytes);
-void  psmi_mq_sysbuf_free(psm2_mq_t mq, void *);
-void  psmi_mq_sysbuf_getinfo(psm2_mq_t mq, char *buf, size_t len);
-
-#endif /* SYSBUF_INT_H */
+#ifdef PSM2_MOCK_TESTING
+void MOCKABLE(psmi_mockable_lock_init)(psmi_lock_t *pl)
+{
+	_PSMI_LOCK_INIT(*pl);
+}
+MOCK_DEF_EPILOGUE(psmi_mockable_lock_init);
+int MOCKABLE(psmi_mockable_lock_try)(psmi_lock_t *pl)
+{
+	int ret = _PSMI_LOCK_TRY(*pl);
+	return ret;
+}
+MOCK_DEF_EPILOGUE(psmi_mockable_lock_try);
+void MOCKABLE(psmi_mockable_lock)(psmi_lock_t *pl)
+{
+	_PSMI_LOCK(*pl);
+}
+MOCK_DEF_EPILOGUE(psmi_mockable_lock);
+void MOCKABLE(psmi_mockable_unlock)(psmi_lock_t *pl)
+{
+	_PSMI_UNLOCK(*pl);
+}
+MOCK_DEF_EPILOGUE(psmi_mockable_unlock);
+void MOCKABLE(psmi_mockable_lock_assert)(psmi_lock_t *pl)
+{
+	_PSMI_LOCK_ASSERT(*pl);
+}
+MOCK_DEF_EPILOGUE(psmi_mockable_lock_assert);
+void MOCKABLE(psmi_mockable_unlock_assert)(psmi_lock_t *pl)
+{
+	_PSMI_UNLOCK_ASSERT(*pl);
+}
+MOCK_DEF_EPILOGUE(psmi_mockable_unlock_assert);
+#endif

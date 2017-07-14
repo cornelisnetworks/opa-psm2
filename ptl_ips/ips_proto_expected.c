@@ -109,7 +109,7 @@ static psm2_error_t ips_tid_send_exp(struct ips_tid_send_desc *tidsendc);
 #ifdef PSM_CUDA
 static
 void psmi_cuda_run_prefetcher(struct ips_protoexp *protoexp,
-			      psm2_mq_req_t req);
+			      struct ips_tid_send_desc *tidsendc);
 static void psmi_attach_chb_to_tidsendc(struct ips_protoexp *protoexp,
 					psm2_mq_req_t req,
 					struct ips_tid_send_desc *tidsendc,
@@ -160,6 +160,10 @@ MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 			context->ctrl->__hfi_tfvalid = 0;
 	}
 
+	if (context->ep->memmode == PSMI_MEMMODE_MINIMAL) {
+		protoexp->tid_flags |= IPS_PROTOEXP_FLAG_CTS_SERIALIZED;
+	}
+
 	{
 		/*
 		 * Adjust the session window size so that tid-grant message can
@@ -180,8 +184,8 @@ MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 			PSM_TIDLIST_BUFSIZE)
 			/ sizeof(uint32_t);	/* convert to tid-pair */
 
-		if (proto->mq->hfi_window_rv > winsize)
-			proto->mq->hfi_window_rv = winsize;
+		if (proto->mq->hfi_base_window_rv > winsize)
+			proto->mq->hfi_base_window_rv = winsize;
 	}
 
 	/* Must be initialized already */
@@ -247,7 +251,7 @@ MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 
 		union psmi_envvar_val env_exp_hdr;
 		uint32_t defval = min(PSM_DEFAULT_EXPECTED_HEADER,
-				      proto->mq->hfi_window_rv /
+				      proto->mq->hfi_base_window_rv /
 				      protoexp->tid_send_fragsize);
 
 		psmi_getenv("PSM2_EXPECTED_HEADERS",
@@ -382,11 +386,11 @@ MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 
 			/* the maxsz is the amount in MB, not the number of entries,
 			 * since the element size depends on the window size */
-			max_elements = (maxsz*1024*1024) / proto->mq->hfi_window_rv;
+			max_elements = (maxsz*1024*1024) / proto->mq->hfi_base_window_rv;
 			/* mpool requires max_elements to be power of 2. round down. */
 			max_elements = 1 << (31 - __builtin_clz(max_elements));
 			protoexp->cuda_hostbuf_recv_cfg.bufsz =
-				proto->mq->hfi_window_rv;
+				proto->mq->hfi_base_window_rv;
 
 			protoexp->cuda_hostbuf_pool_recv =
 				psmi_mpool_create_for_cuda(sizeof(struct ips_cuda_hostbuf),
@@ -552,7 +556,7 @@ ips_protoexp_tid_get_from_token(struct ips_protoexp *protoexp,
 	int count, nbytes, tids, tidflows;
 
 	PSM2_LOG_MSG("entering");
-	psmi_assert((epaddr->proto->mq->hfi_window_rv % PSMI_PAGESIZE) == 0);
+	psmi_assert((((ips_epaddr_t *) epaddr)->window_rv % PSMI_PAGESIZE) == 0);
 	getreq = (struct ips_tid_get_request *)
 	    psmi_mpool_get(protoexp->tid_getreq_pool);
 
@@ -600,7 +604,7 @@ ips_protoexp_tid_get_from_token(struct ips_protoexp *protoexp,
 #endif
 		nbytes = PSMI_ALIGNUP((length + count - 1) / count, PSMI_PAGESIZE);
 	getreq->tidgr_rndv_winsz =
-	    min(nbytes, epaddr->proto->mq->hfi_window_rv);
+	    min(nbytes, ((ips_epaddr_t *) epaddr)->window_rv);
 	/* must be within the tid window size */
 	if (getreq->tidgr_rndv_winsz > PSM_TID_WINSIZE)
 		getreq->tidgr_rndv_winsz = PSM_TID_WINSIZE;
@@ -731,6 +735,11 @@ ips_protoexp_send_tid_completion(struct ips_tid_recv_desc *tidrecvc,
 
 	ips_proto_flow_enqueue(flow, scb);
 	flow->flush(flow, NULL);
+
+	if (tidrecvc->protoexp->tid_flags & IPS_PROTOEXP_FLAG_CTS_SERIALIZED) {
+		flow->flags &= ~IPS_FLOW_FLAG_SKIP_CTS;                                  /* Let the next CTS be processed */
+		ips_tid_pendtids_timer_callback(&tidrecvc->protoexp->timer_getreqs, 0);  /* and make explicit progress for it. */
+	}
 }
 
 #ifdef PSM_CUDA
@@ -844,7 +853,7 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 					tidsendc->cuda_hostbuf[0]->bytes_read = 0;
 					psmi_mpool_put(tidsendc->cuda_hostbuf[0]);
 				}
-				psmi_cuda_run_prefetcher(protoexp, tidsendc->mqreq);
+				psmi_cuda_run_prefetcher(protoexp, tidsendc);
 			}
 		} else
 			psmi_free(tidsendc->userbuf);
@@ -1174,10 +1183,11 @@ struct ips_cuda_hostbuf* psmi_allocate_chb(uint32_t window_len)
 
 static
 void psmi_cuda_run_prefetcher(struct ips_protoexp *protoexp,
-			      psm2_mq_req_t req)
+			      struct ips_tid_send_desc *tidsendc)
 {
 	struct ips_proto *proto = protoexp->proto;
 	struct ips_cuda_hostbuf *chb = NULL;
+	psm2_mq_req_t req = tidsendc->mqreq;
 	uint32_t offset, window_len;
 
 	/* try to push the prefetcher forward */
@@ -1185,7 +1195,7 @@ void psmi_cuda_run_prefetcher(struct ips_protoexp *protoexp,
 		/* some data remains to be sent */
 		offset = req->prefetch_send_msgoff;
 		window_len =
-			ips_cuda_next_window(proto->mq->hfi_window_rv,
+			ips_cuda_next_window(tidsendc->ipsaddr->window_rv,
 					     offset, req->buf_len);
 		if (window_len <= CUDA_SMALLHOSTBUF_SZ)
 			chb = (struct ips_cuda_hostbuf *) psmi_mpool_get(
@@ -1235,7 +1245,7 @@ void psmi_attach_chb_to_tidsendc(struct ips_protoexp *protoexp,
 		/* some data remains to be sent */
 		offset = req->prefetch_send_msgoff;
 		window_len =
-			ips_cuda_next_window(proto->mq->hfi_window_rv,
+			ips_cuda_next_window(tidsendc->ipsaddr->window_rv,
 					     offset, req->buf_len);
 		if (window_len <= CUDA_SMALLHOSTBUF_SZ)
 			chb = (struct ips_cuda_hostbuf *) psmi_mpool_get(
@@ -1842,7 +1852,7 @@ psm2_error_t ips_tid_send_exp(struct ips_tid_send_desc *tidsendc)
 				chb->bytes_read = 0;
 				psmi_mpool_put(chb);
 			}
-			psmi_cuda_run_prefetcher(protoexp, tidsendc->mqreq);
+			psmi_cuda_run_prefetcher(protoexp, tidsendc);
 		 }
 		if(chb_next->bytes_read == chb_next->size) {
 			STAILQ_REMOVE(&tidsendc->mqreq->sendreq_prefetch, chb_next,
@@ -1855,7 +1865,7 @@ psm2_error_t ips_tid_send_exp(struct ips_tid_send_desc *tidsendc)
 				chb_next->bytes_read = 0;
 				psmi_mpool_put(chb_next);
 			}
-			psmi_cuda_run_prefetcher(protoexp, tidsendc->mqreq);
+			psmi_cuda_run_prefetcher(protoexp, tidsendc);
 		}
 	}
 #endif
@@ -2210,9 +2220,8 @@ ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 
 	tidrecvc->tidflow_nswap_gen = 0;
 	tidrecvc->tidflow_genseq.psn_gen = tidrecvc->tidflow_active_gen;
-	long int rnum;
-	lrand48_r(&protoexp->tidflow_drand48_data, &rnum);
-	tidrecvc->tidflow_genseq.psn_seq = ((int)(rnum % INT_MAX)) & 0x3ff;
+	tidrecvc->tidflow_genseq.psn_seq = 0;	/* Always start sequence number at 0 (zero),
+	 	 	 	 	 	   in order to prevent wraparound sequence numbers */
 	hfi_tidflow_set_entry(tidrecvc->context->ctrl,
 			      tidrecvc->rdescid._desc_idx,
 			      tidrecvc->tidflow_genseq.psn_gen,
@@ -2325,6 +2334,13 @@ ipsaddr_next:
 		ipsaddr->msgctl->ipsaddr_next = ipsaddr->next;
 		protoexp = ((psm2_epaddr_t) ipsaddr)->proto->protoexp;
 
+		if (protoexp->tid_flags & IPS_PROTOEXP_FLAG_CTS_SERIALIZED) {
+			struct ips_flow *flow = &ipsaddr->flows[protoexp->proto->msgflowid];
+			if (flow->flags & IPS_FLOW_FLAG_SKIP_CTS) {
+				break;                                    /* skip sending next CTS */
+			}
+		}
+
 #ifdef PSM_CUDA
 		if (getreq->cuda_hostbuf_used) {
 			/* If this is a large transfer, we may be able to
@@ -2400,6 +2416,16 @@ ipsaddr_next:
 		} else if (ips_tid_recv_alloc(protoexp, ipsaddr,
 			      getreq, nbytes_this, &tidrecvc) == PSM2_OK) {
 			ips_protoexp_send_tid_grant(tidrecvc);
+
+			if (protoexp->tid_flags & IPS_PROTOEXP_FLAG_CTS_SERIALIZED) {
+				/*
+				 * Once the CTS was sent, we mark it per 'flow' object
+				 * not to proceed with next CTSes until that one is done.
+				 */
+				struct ips_proto *proto = tidrecvc->protoexp->proto;
+				struct ips_flow *flow = &ipsaddr->flows[proto->msgflowid];
+				flow->flags |= IPS_FLOW_FLAG_SKIP_CTS;
+			}
 
 			/*
 			 * nbytes_this is the asked length for this session,

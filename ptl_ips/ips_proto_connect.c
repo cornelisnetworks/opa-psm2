@@ -58,21 +58,6 @@
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
 
-/* Connections are not pairwise but we keep a single 'epaddr' for messages from
- * and messages to a remote 'epaddr'.  State transitions for connecting TO and
- * FROM 'epaddrs' are the following:
- * Connect TO:
- *   NONE -> WAITING -> ESTABLISHED -> WAITING_DISC -> DISCONNECTED -> NONE
- *
- * Connect FROM (we receive a connect request)
- *   NONE -> ESTABLISHED -> NONE
- */
-#define CSTATE_ESTABLISHED	1
-#define CSTATE_NONE		2
-#define CSTATE_OUTGOING_DISCONNECTED	3
-#define CSTATE_OUTGOING_WAITING	4
-#define CSTATE_OUTGOING_WAITING_DISC	5
-
 /*
  * define connection version. this is the basic version, optimized
  * version will be added later for scalability.
@@ -209,6 +194,38 @@ ips_ipsaddr_configure_flows(struct ips_epaddr *ipsaddr, struct ips_proto *proto)
 		      IPS_PATH_LOW_PRIORITY, EP_FLOW_GO_BACK_N_DMA);
 }
 
+/*
+ * Teardown any unnecessary timers that could still be active and assign NULL
+ * to pointers in flow structs. We do this mainly for PIO and DMA flows.
+ * TidFlow teardowns are conducted in ips_protoexp_fini()
+ */
+static
+void
+ips_flow_fini(struct ips_epaddr *ipsaddr, struct ips_proto *proto)
+{
+	struct ips_flow *flow;
+	int i;
+
+	for (i = 0; i < EP_FLOW_TIDFLOW; i++) {
+		flow = &ipsaddr->flows[i];
+
+		/* Cancel any stale flow->timers in flight */
+		if (flow->timer_ack) {
+			psmi_timer_cancel(proto->timerq, flow->timer_ack);
+			flow->timer_ack = NULL;
+		}
+
+		if (flow->timer_send) {
+			psmi_timer_cancel(proto->timerq, flow->timer_send);
+			flow->timer_send = NULL;
+		}
+
+		flow->flush = NULL;
+		flow->path = NULL;
+		flow->ipsaddr = NULL;
+	}
+}
+
 static
 psm2_epaddr_t
 ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
@@ -240,6 +257,14 @@ ips_ipsaddr_set_req_params(struct ips_proto *proto,
 	uint16_t common_mtu = min(req->mtu, proto->epinfo.ep_mtu);
 
 	ipsaddr->ep_mtu = req->mtu;
+	/*
+	 * Make RNDV window size being dependent on MTU size;
+	 * This is due to fact that number of send packets
+	 * within a given window must not exceed 2048 (@ref PSM_TID_MAX_PKTS).
+	 * Use smaller of two values:
+	 * unified MTU * PSM_TID_MAX_PKTS vs already configured window size.
+	 */
+	ipsaddr->window_rv = min(common_mtu * PSM_TID_MAX_PKTS, proto->mq->hfi_base_window_rv);
 
 	/*
 	 * For static routes i.e. "none" path resolution update all paths to
@@ -603,7 +628,7 @@ ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
 		epaddr =
 		    (psm2_epaddr_t) psmi_calloc(proto->ep, PER_PEER_ENDPOINT, 1,
 					       sizeof(struct ips_epaddr));
-		psmi_assert(epaddr);
+		psmi_assert_always(epaddr);
 		ipsaddr = (ips_epaddr_t *) epaddr;
 	}
 
@@ -668,9 +693,11 @@ ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
 }
 
 static
-void ips_free_epaddr(psm2_epaddr_t epaddr)
+void ips_free_epaddr(psm2_epaddr_t epaddr, struct ips_proto *proto)
 {
 	ips_epaddr_t *ipsaddr = (ips_epaddr_t *) epaddr;
+	ips_flow_fini(ipsaddr, proto);
+
 	_HFI_VDBG("epaddr=%p,ipsaddr=%p,connidx_incoming=%d\n", epaddr, ipsaddr,
 		  ipsaddr->connidx_incoming);
 	psmi_epid_remove(epaddr->proto->ep, epaddr->epid);
@@ -695,7 +722,7 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 	ips_epaddr_t *ipsaddr;
 	psm2_error_t err = PSM2_OK;
 
-	PSMI_PLOCK_ASSERT();
+	PSMI_LOCK_ASSERT(proto->mq->progress_lock);
 
 	epaddr = psmi_epid_lookup(proto->ep, hdr->epid);
 	ipsaddr = epaddr ? (ips_epaddr_t *) epaddr : NULL;
@@ -812,8 +839,10 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 							  ctrl_msg_queued);
 			/* We can safely free the ipsaddr if required since disconnect
 			 * messages are never enqueued so no reference to ipsaddr is kept */
-			if (epaddr_do_free)
-				ips_free_epaddr(epaddr);
+			if (epaddr_do_free) {
+				ips_free_epaddr(epaddr, proto);
+				epaddr = NULL;
+			}
 		}
 		break;
 
@@ -968,7 +997,7 @@ ips_proto_connect(struct ips_proto *proto, int numep,
 
 	connect_credits = credits_intval.e_uint;
 
-	PSMI_PLOCK_ASSERT();
+	PSMI_LOCK_ASSERT(proto->mq->progress_lock);
 
 	/* All timeout values are in cycles */
 	uint64_t t_start = get_cycles();
@@ -1109,10 +1138,14 @@ ips_proto_connect(struct ips_proto *proto, int numep,
 				}
 				if (to_warning_interval
 				    && get_cycles() >= to_warning_next) {
-					uint64_t waiting_time =
-					    cycles_to_nanosecs(get_cycles() -
-							       t_start) /
-					    SEC_ULL;
+#if _HFI_DEBUGGING
+					uint64_t waiting_time = 0;
+					if (_HFI_INFO_ON) {
+					    waiting_time = cycles_to_nanosecs(
+								get_cycles() -
+								t_start) / SEC_ULL;
+					}
+#endif
 					const char *first_name = NULL;
 					int num_waiting = 0;
 
@@ -1127,8 +1160,9 @@ ips_proto_connect(struct ips_proto *proto, int numep,
 							    (array_of_epid[i]);
 						num_waiting++;
 					}
-					if (first_name) {
-						_HFI_INFO
+					if (_HFI_INFO_ON) {
+						if (first_name) {
+						_HFI_INFO_ALWAYS
 						    ("Couldn't connect to %s (and %d others). "
 						     "Time elapsed %02i:%02i:%02i. Still trying...\n",
 						     first_name, num_waiting,
@@ -1139,6 +1173,7 @@ ips_proto_connect(struct ips_proto *proto, int numep,
 						     (int)(waiting_time -
 							   ((waiting_time /
 							     60) * 60)));
+						}
 					}
 					to_warning_next =
 					    get_cycles() + to_warning_interval;
@@ -1224,7 +1259,7 @@ err_timeout:
 					   CSTATE_ESTABLISHED);
 			if (ipsaddr->cerror_outgoing != PSM2_OK) {
 				err = psmi_error_cmp(err, ipsaddr->cerror_outgoing);
-				ips_free_epaddr(array_of_epaddr[i]);
+				ips_free_epaddr(array_of_epaddr[i], proto);
 				array_of_epaddr[i] = NULL;
 			} else {
 				proto->num_connected_outgoing++;
@@ -1298,7 +1333,7 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 
 	warning_secs = warn_intval.e_uint;
 
-	PSMI_PLOCK_ASSERT();
+	PSMI_LOCK_ASSERT(proto->mq->progress_lock);
 
 	/* First pass: see what to disconnect and what is disconnectable */
 	for (i = 0, numep_todisc = 0; i < numep; i++) {
@@ -1489,7 +1524,7 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 		 * hasn't arrived yet, that's okay, we'll pick it up later and just
 		 * mark our connect-to status as being "none". */
 		if (ipsaddr->cstate_incoming == CSTATE_NONE) {
-			ips_free_epaddr(array_of_epaddr[i]);
+			ips_free_epaddr(array_of_epaddr[i], proto);
 			array_of_epaddr[i] = NULL;
 		} else
 			ipsaddr->cstate_outgoing = CSTATE_NONE;

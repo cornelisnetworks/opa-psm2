@@ -104,7 +104,9 @@ static void amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg,
 			      void *buf, size_t len);
 
 /* Kassist helper functions */
+#if _HFI_DEBUGGING
 static const char *psmi_kassist_getmode(int mode);
+#endif
 static int psmi_get_kassist_mode();
 int psmi_epaddr_pid(psm2_epaddr_t epaddr);
 
@@ -156,7 +158,6 @@ void amsh_atexit()
 	static pthread_mutex_t mutex_once = PTHREAD_MUTEX_INITIALIZER;
 	static int atexit_once;
 	psm2_ep_t ep;
-	extern psm2_ep_t psmi_opened_endpoint;
 	ptl_t *ptl;
 
 	pthread_mutex_lock(&mutex_once);
@@ -239,7 +240,6 @@ void amsh_mmap_fault(int signo, siginfo_t *siginfo, void *context)
 psm2_error_t psmi_shm_create(ptl_t *ptl)
 {
 	psm2_ep_t ep = ptl->ep;
-	int use_kassist;
 	char shmbuf[256];
 	void *mapptr;
 	size_t segsz;
@@ -249,11 +249,14 @@ psm2_error_t psmi_shm_create(ptl_t *ptl)
 	int iterator;
 	/* Get which kassist mode to use. */
 	ptl->psmi_kassist_mode = psmi_get_kassist_mode();
-	use_kassist = (ptl->psmi_kassist_mode != PSMI_KASSIST_OFF);
 
-	_HFI_PRDBG("kassist_mode %d %s use_kassist %d\n",
-		   ptl->psmi_kassist_mode,
-		   psmi_kassist_getmode(ptl->psmi_kassist_mode), use_kassist);
+	if (_HFI_PRDBG_ON) {
+		_HFI_PRDBG_ALWAYS
+			("kassist_mode %d %s use_kassist %d\n",
+			ptl->psmi_kassist_mode,
+			psmi_kassist_getmode(ptl->psmi_kassist_mode),
+			(ptl->psmi_kassist_mode != PSMI_KASSIST_OFF));
+	}
 
 	segsz = am_ctl_sizeof_block();
 	for (iterator = 0; iterator <= INT_MAX; iterator++) {
@@ -1284,7 +1287,7 @@ amsh_ep_connreq_wrap(ptl_t *ptl, int op,
 			   ++num_polls_noprogress ==
 			   CONNREQ_ZERO_POLLS_BEFORE_YIELD) {
 			num_polls_noprogress = 0;
-			PSMI_PYIELD();
+			PSMI_YIELD(ptl->ep->mq->progress_lock);
 		}
 	}
 	while (psmi_cycles_left(t_start, timeout_ns));
@@ -2113,7 +2116,7 @@ int psmi_epaddr_pid(psm2_epaddr_t epaddr)
 	uint16_t shmidx = ((am_epaddr_t *) epaddr)->_shmidx;
 	return epaddr->ptlctl->ptl->am_ep[shmidx].pid;
 }
-
+#if _HFI_DEBUGGING
 static
 const char *psmi_kassist_getmode(int mode)
 {
@@ -2128,6 +2131,7 @@ const char *psmi_kassist_getmode(int mode)
 		return "unknown";
 	}
 }
+#endif
 
 static
 int psmi_get_kassist_mode()

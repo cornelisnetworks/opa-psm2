@@ -56,6 +56,7 @@
 #include "psm_user.h"
 #include "psm2_am.h"
 #include "psm_am_internal.h"
+#include "psm_mq_internal.h"
 
 int psmi_ep_device_is_enabled(const psm2_ep_t ep, int devid);
 
@@ -178,12 +179,12 @@ __psm2_am_request_short(psm2_epaddr_t epaddr, psm2_handler_t handler,
 	psmi_assert(len >= 0 && len <= psmi_am_parameters.max_request_short);
 	psmi_assert(len > 0 ? src != NULL : 1);
 
-	PSMI_PLOCK();
+	PSMI_LOCK(ptlc->ep->mq->progress_lock);
 
 	err = ptlc->am_short_request(epaddr, handler, args,
 				     nargs, src, len, flags, completion_fn,
 				     completion_ctxt);
-	PSMI_PUNLOCK();
+	PSMI_UNLOCK(ptlc->ep->mq->progress_lock);
 	PSM2_LOG_MSG("leaving");
 
 	return err;

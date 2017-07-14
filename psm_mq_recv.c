@@ -162,10 +162,6 @@ psmi_mq_handle_data(psm2_mq_t mq, psm2_mq_req_t req,
 	return rc;
 }
 
-/* in case the compiler can't figure out how to preserve the hashed values
-   between mq_req_match() and mq_add_to_unexpected_hashes() ... */
-static unsigned hashvals[NUM_HASH_CONFIGS];
-
 static
 void mq_add_to_unexpected_hashes(psm2_mq_t mq, psm2_mq_req_t req)
 {
@@ -181,7 +177,7 @@ void mq_add_to_unexpected_hashes(psm2_mq_t mq, psm2_mq_req_t req)
 
 	for (table = PSM2_TAG_SRC; table < PSM2_ANYTAG_ANYSRC; table++)
 		mq_qq_append_which(mq->unexpected_htab,
-				   table, hashvals[table], req);
+				   table, mq->hashvals[table], req);
 	mq->unexpected_hash_len++;
 }
 
@@ -224,13 +220,13 @@ mq_req_match(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag, int remove)
 		return match[table];
 	}
 
-	hashvals[PSM2_TAG_SRC] = hash_64(*(uint64_t *) tag->tag) % NUM_HASH_BUCKETS;
-	hashvals[PSM2_TAG_ANYSRC] = hash_32(tag->tag[0]) % NUM_HASH_BUCKETS;
-	hashvals[PSM2_ANYTAG_SRC] = hash_32(tag->tag[1]) % NUM_HASH_BUCKETS;
+	mq->hashvals[PSM2_TAG_SRC] = hash_64(*(uint64_t *) tag->tag) % NUM_HASH_BUCKETS;
+	mq->hashvals[PSM2_TAG_ANYSRC] = hash_32(tag->tag[0]) % NUM_HASH_BUCKETS;
+	mq->hashvals[PSM2_ANYTAG_SRC] = hash_32(tag->tag[1]) % NUM_HASH_BUCKETS;
 
 	for (table = PSM2_TAG_SRC; table < PSM2_ANYTAG_ANYSRC; table++)
 		match[table] =
-			mq_list_scan(&mq->expected_htab[table][hashvals[table]],
+			mq_list_scan(&mq->expected_htab[table][mq->hashvals[table]],
 				     src, tag, table, &best_ts);
 	table = PSM2_ANYTAG_ANYSRC;
 	match[table] = mq_list_scan(&mq->expected_q, src, tag, table, &best_ts);
@@ -262,7 +258,7 @@ psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 	uint32_t msglen;
 	int rc;
 
-	PSMI_PLOCK_ASSERT();
+	PSMI_LOCK_ASSERT(mq->progress_lock);
 
 	if (msgorder && (req = mq_req_match(mq, src, tag, 1))) {
 		/* we have a match, no need to callback */
@@ -305,7 +301,7 @@ psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		req->rts_callback = cb;
 		if (paylen > send_msglen) paylen = send_msglen;
 		if (paylen) {
-			req->buf = psmi_sysbuf_alloc(paylen);
+			req->buf = psmi_mq_sysbuf_alloc(mq, paylen);
 			mq->stats.rx_sysbuf_num++;
 			mq->stats.rx_sysbuf_bytes += paylen;
 			psmi_mq_mtucpy(req->buf, payload, paylen);
@@ -461,7 +457,7 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 	switch (opcode) {
 	case MQ_MSG_TINY:
 		if (msglen > 0) {
-			req->buf = psmi_sysbuf_alloc(msglen);
+			req->buf = psmi_mq_sysbuf_alloc(mq, msglen);
 			mq->stats.rx_sysbuf_num++;
 			mq->stats.rx_sysbuf_bytes += paylen;
 			mq_copy_tiny((uint32_t *) req->buf,
@@ -472,7 +468,7 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		break;
 
 	case MQ_MSG_SHORT:
-		req->buf = psmi_sysbuf_alloc(msglen);
+		req->buf = psmi_mq_sysbuf_alloc(mq, msglen);
 		mq->stats.rx_sysbuf_num++;
 		mq->stats.rx_sysbuf_bytes += paylen;
 		if (msglen <= paylen) {
@@ -492,7 +488,7 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 
 	case MQ_MSG_EAGER:
 		req->send_msgoff = 0;
-		req->buf = psmi_sysbuf_alloc(msglen);
+		req->buf = psmi_mq_sysbuf_alloc(mq, msglen);
 		mq->stats.rx_sysbuf_num++;
 		mq->stats.rx_sysbuf_bytes += paylen;
 		req->state = MQ_STATE_UNEXP;
@@ -542,7 +538,7 @@ int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t ureq)
 		if (ureq->buf != NULL) {	/* 0-byte don't alloc a sysbuf */
 			psmi_mq_mtucpy(ereq->buf, (const void *)ureq->buf,
 				       msglen);
-			psmi_sysbuf_free(ureq->buf);
+			psmi_mq_sysbuf_free(mq, ureq->buf);
 		}
 		ereq->state = MQ_STATE_COMPLETE;
 		ips_barrier();
@@ -559,7 +555,7 @@ int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t ureq)
 				       (const void *)ureq->buf,
 				       ereq->recv_msgoff);
 		}
-		psmi_sysbuf_free(ureq->buf);
+		psmi_mq_sysbuf_free(mq, ureq->buf);
 		ereq->type = ureq->type;
 		STAILQ_INSERT_AFTER(&mq->eager_q, ureq, ereq, nextq);
 		STAILQ_REMOVE(&mq->eager_q, ureq, psm2_mq_req, nextq);
@@ -576,7 +572,7 @@ int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t ureq)
 				       ereq->recv_msgoff);
 		}
 		if (ereq->send_msgoff) {
-			psmi_sysbuf_free(ureq->buf);
+			psmi_mq_sysbuf_free(mq, ureq->buf);
 		}
 		ereq->rts_callback = ureq->rts_callback;
 		ereq->rts_reqidx_peer = ureq->rts_reqidx_peer;

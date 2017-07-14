@@ -56,6 +56,28 @@
 
 /*
 
+  A note about PSM_LOG and PSM_LOG_FAST_IO:
+
+  By default, the PSM_LOG facility is safe, slow, and is complete.  That is, if the
+  test case you are debugging has an abnormal termiation, no problem.  The logs are
+  saved up to the point of the abnormal termination.  Abnormal termination can be
+  a seg fault, the test case issues a fatal error, or exit()'s or abort()'s.
+
+  However, debugging timing sensitive problems, make the usual SLOW PSM_LOG
+  facility inadequate as the timing overhead that it introduces dominates, and the
+  symptoms of your problem may change or go away.
+
+  For this case, you can use BOTH: PSM_LOG and PSM_LOG_FAST_IO.  To use
+  PSM_LOG_FAST_IO though, caution: for abnormal program termination, you will get
+  no log file.
+
+  To workaround this problem, and allow you to get a log file even after an abnormal
+  program terminiation, we expose psmi_log_fini to the outside world (via the linker
+  script file), and so in your client test code, you can call psmi_log_fini() on a
+  fatal error (e.g. in a signal handler).
+
+  --------------------------------------------------------------------------------
+
   This file (psm_log.h) defines macros for logging messages to assist investigations
   into the psm library.
 
@@ -144,11 +166,19 @@
 
 #ifdef PSM_LOG
 
+extern void psmi_log_initialize(void);
+
 /* defined in psm_utils.c */
 extern void psmi_log_message(const char *fileName,
 			     const char *functionName,
 			     int lineNumber,
 			     const char *format, ...);
+
+#ifdef PSM_LOG_FAST_IO
+extern void psmi_log_fini(void);
+#else
+#define psmi_log_fini() /* nothing */
+#endif
 
 #define PSM2_LOG_MSG(FORMAT , ...) psmi_log_message(__FILE__,__FUNCTION__,__LINE__,FORMAT, ## __VA_ARGS__)
 
@@ -175,7 +205,11 @@ FROMEPID and TOEPID are uint64_t's and the fromepid should be the epid (end poin
 
 #else
 
-#define PSM2_LOG_MSG(FORMAT , ...)                           /* nothing */
+#define psmi_log_initialize()                               /* nothing */
+
+#define PSM2_LOG_MSG(FORMAT , ...)                          /* nothing */
+
+#define psmi_log_fini()                                     /* nothing */
 
 #define PSM_LOG_DECLARE_BT_BUFFER()                         /* nothing */
 

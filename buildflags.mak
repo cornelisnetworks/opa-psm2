@@ -104,39 +104,37 @@ INCLUDES += -I${IFS_HFI_HEADER_PATH}
 BASECFLAGS +=-Wall $(WERROR)
 
 #
-# test if compiler supports 16B(SSE2)/32B(AVX2)/64B(AVX512F) move instruction.
-#
-RET := $(shell echo "int main() {}" | $${CC} -msse2 -E -xc - > /dev/null 2>&1; echo $$?)
-ifneq (1,${RET})
-  BASECFLAGS += -msse2
-endif
-
-ifneq (,${PSM_AVX})
-ifeq (${CC},icc)
-  MAVX2=-march=core-avx2
-else
-  MAVX2=-mavx2
-endif
-RET := $(shell echo "int main() {}" | $${CC} ${MAVX2} -E -xc - > /dev/null 2>&1; echo $$?)
-ifneq (1,${RET})
-  BASECFLAGS += ${MAVX2}
-endif
-ifneq (icc,${CC})
-  RET := $(shell echo "int main() {}" | $${CC} -mavx512f -E -xc - > /dev/null 2>&1; echo $$?)
-  ifneq (1,${RET})
-    BASECFLAGS += -mavx512f
-  endif
-endif
-endif
-
-#
 # test if compiler supports SSE4.2 (needed for crc32 instruction)
 #
-RET := $(shell echo "int main() {}" | $${CC} -msse4.2 -E -xc - > /dev/null 2>&1; echo $$?)
-ifneq (1,${RET})
+RET := $(shell echo "int main() {}" | ${CC} -msse4.2 -E -dM -xc - 2>&1 | grep -q SSE4_2 ; echo $$?)
+ifeq (0,${RET})
   BASECFLAGS += -msse4.2
 else
   $(error SSE4.2 compiler support required )
+endif
+
+#
+# test if compiler supports 32B(AVX2)/64B(AVX512F) move instruction.
+#
+ifneq (,${PSM_AVX})
+  ifeq (${CC},icc)
+    MAVX2=-march=core-avx2
+  else
+    MAVX2=-mavx2
+  endif
+  RET := $(shell echo "int main() {}" | ${CC} ${MAVX2} -E -dM -xc - 2>&1 | grep -q AVX2 ; echo $$?)
+  ifeq (0,${RET})
+    TMPVAR := $(BASECFLAGS)
+    BASECFLAGS := $(filter-out -msse4.2,$(TMPVAR))
+    BASECFLAGS += ${MAVX2}
+  endif
+
+  ifneq (icc,${CC})
+    RET := $(shell echo "int main() {}" | ${CC} -mavx512f -E -dM -xc - 2>&1 | grep -q AVX512 ; echo $$?)
+    ifeq (0,${RET})
+      BASECFLAGS += -mavx512f
+    endif
+  endif
 endif
 
 #
@@ -158,6 +156,10 @@ ifneq (,${PSM_COVERAGE}) # This check must come after PSM_DEBUG to override opti
 endif
 ifneq (,${PSM_LOG})
    BASECFLAGS += -DPSM_LOG
+ifneq (,${PSM_LOG_FAST_IO})
+   BASECFLAGS += -DPSM_LOG_FAST_IO
+   PSM2_ADDITIONAL_GLOBALS += psmi_log_fini;psmi_log_message;
+endif
 endif
 ifneq (,${PSM_HEAP_DEBUG})
    BASECFLAGS += -DPSM_HEAP_DEBUG
@@ -173,7 +175,7 @@ endif
 
 BASECFLAGS += -fpic -fPIC -D_GNU_SOURCE
 
-ifeq ($CC,gcc)
+ifeq (${CCARCH},gcc)
   BASECFLAGS += -funwind-tables
 endif
 

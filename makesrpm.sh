@@ -83,7 +83,13 @@ function usage()
 }
 
 err=0
-# Set TMPDIR first, so user control will override value
+
+# OUTDIR is where the Makefile places its meta-data
+OUTDIR=build_release
+
+# Set TEMPDIR first, so user control can override the value
+# This is where rpmbuild places rpm(s) and uses its build meta-data.
+# It can be set the same as OUTDIR, and work just fine if desired.
 TEMPDIR=temp.$$
 
 while [ "$1" != "" ]; do
@@ -107,14 +113,14 @@ while [ "$1" != "" ]; do
 done
 
 
-#Generic cleanup, build, and tmp folder creation
-make distclean
-make dist
+# Generic cleanup, build, and tmp folder creation
+make distclean OUTDIR=$OUTDIR
+make dist OUTDIR=$OUTDIR
 mkdir -p ./$TEMPDIR/{BUILD,RPMS,SOURCES,SPECS,SRPMS,BUILDROOT}
-#Differnet paths based on RPM_EXT
-cp ./$RPM_NAME-*.tar.gz $TEMPDIR/SOURCES
-make specfile
-cp $RPM_NAME.spec $TEMPDIR/SPECS
+# Differnet paths based on RPM_EXT
+cp ${OUTDIR}/$RPM_NAME-*.tar.gz $TEMPDIR/SOURCES
+make specfile OUTDIR=$OUTDIR
+cp ${OUTDIR}/$RPM_NAME.spec $TEMPDIR/SPECS
 rpmbuild -b$BUILDARG --define "_topdir $PWD/$TEMPDIR" --nodeps $TEMPDIR/SPECS/$RPM_NAME.spec
 
 echo "The SRPM(s) are in $TEMPDIR/SRPMS/`ls $TEMPDIR/SRPMS`"

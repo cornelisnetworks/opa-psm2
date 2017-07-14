@@ -91,7 +91,7 @@ ptl_handle_rtsmatch(psm2_mq_req_t recv_req, int was_posted)
 	if (send_req->state == MQ_STATE_COMPLETE) {
 		psmi_mq_stats_rts_account(send_req);
 		if (send_req->buf != NULL && send_req->send_msglen > 0)
-			psmi_sysbuf_free(send_req->buf);
+			psmi_mq_sysbuf_free(send_req->mq, send_req->buf);
 		/* req was left "live" even though the sender was told that the
 		 * send was done */
 		psmi_mq_req_free(send_req);
@@ -109,7 +109,7 @@ psm2_error_t self_mq_send_testwait(psm2_mq_req_t *ireq)
 	uint8_t *ubuf;
 	psm2_mq_req_t req = *ireq;
 
-	PSMI_PLOCK_ASSERT();
+	PSMI_LOCK_ASSERT(req->mq->progress_lock);
 
 	/* We're waiting on a send request, and the matching receive has not been
 	 * posted yet.  This is a deadlock condition in MPI but we accommodate it
@@ -119,7 +119,7 @@ psm2_error_t self_mq_send_testwait(psm2_mq_req_t *ireq)
 
 	ubuf = req->buf;
 	if (ubuf != NULL && req->send_msglen > 0) {
-		req->buf = psmi_sysbuf_alloc(req->send_msglen);
+		req->buf = psmi_mq_sysbuf_alloc(req->mq, req->send_msglen);
 		if (req->buf == NULL)
 			return PSM2_NO_MEMORY;
 		psmi_mq_mtucpy(req->buf, ubuf, req->send_msglen);
@@ -274,7 +274,7 @@ self_connect(ptl_t *ptl,
 	psm2_error_t err = PSM2_OK;
 	int i;
 
-	PSMI_PLOCK_ASSERT();
+	PSMI_LOCK_ASSERT(ptl->ep->mq->progress_lock);
 
 	for (i = 0; i < numep; i++) {
 		if (!array_of_epid_mask[i])
@@ -329,7 +329,7 @@ size_t self_ptl_sizeof(void)
 	return sizeof(ptl_t);
 }
 
-static
+ustatic
 psm2_error_t self_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 {
 	psmi_assert_always(ep != NULL);
@@ -344,6 +344,7 @@ psm2_error_t self_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 	memset(ctl, 0, sizeof(*ctl));
 	/* Fill in the control structure */
 	ctl->ptl = ptl;
+	ctl->ep = ep;
 	ctl->ep_poll = NULL;
 	ctl->ep_connect = self_connect;
 	ctl->ep_disconnect = self_disconnect;

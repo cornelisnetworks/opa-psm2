@@ -150,9 +150,24 @@ struct ips_ctrlq {
 	struct psmi_timer ctrlq_timer;	/* when in timerq */
 };
 
+/* Connect/disconnect, as implemented by ips */
+
 /*
- * Connect/disconnect, as implemented by ips
+ * Connections are not pairwise but we keep a single 'epaddr' for messages-from
+ * and messages-to a remote 'epaddr'.  State transitions for connecting TO and
+ * FROM 'epaddrs' are the following:
+ * Connect TO (Connect OUTGOING):
+ *   NONE -> WAITING -> ESTABLISHED -> WAITING_DISC -> DISCONNECTED -> NONE
+ *
+ * Connect FROM (we receive a connect request - Connect INCOMING)
+ *   NONE -> ESTABLISHED -> NONE
  */
+#define CSTATE_ESTABLISHED		1
+#define CSTATE_NONE			2
+#define CSTATE_OUTGOING_DISCONNECTED	3
+#define CSTATE_OUTGOING_WAITING		4
+#define CSTATE_OUTGOING_WAITING_DISC	5
+
 psm2_error_t ips_proto_connect(struct ips_proto *proto, int numep,
 			      const psm2_epid_t *array_of_epid,
 			      const int *array_of_epid_mask,
@@ -441,6 +456,7 @@ struct ips_flow {
 	uint16_t ack_interval;	/* interval to ack packets */
 	uint16_t ack_counter;	/* counter to ack packets */
 	int16_t  credits;	/* Current credits available to send on flow */
+	uint32_t ack_index;     /* Index of the last ACK message type in pending message queue */
 
 	psmi_seqnum_t xmit_seq_num;	/* transmit packet sequence number */
 	psmi_seqnum_t xmit_ack_num;	/* acked packet sequence number */
@@ -477,6 +493,7 @@ struct ips_epaddr {
 
 	uint16_t ctrl_msg_queued;	/* bitmap of queued control messages to be send */
 	uint16_t ep_mtu;		/* < Remote endpoint's MTU */
+	uint32_t window_rv;		/* RNDV window size per connection */
 
 	uint8_t  hpp_index;	/* high priority index */
 	uint8_t  context;	/* real context value */

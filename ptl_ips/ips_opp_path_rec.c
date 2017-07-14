@@ -545,8 +545,8 @@ psm2_error_t ips_opp_init(struct ips_proto *proto)
 	/* If PSM2_IDENTIFY is set display the OPP library location being used. */
 	if (getenv("PSM2_IDENTIFY")) {
 		Dl_info info_opp;
-		_HFI_INFO
-		    ("PSM path record queries using OFED Plus Plus (%s) from %s\n",
+		printf
+		    ("PSM2 path record queries using OFED Plus Plus (%s) from %s\n",
 		     DF_OPP_LIBRARY, dladdr(proto->opp_fn.op_path_open,
 					    &info_opp) ? info_opp.
 		     dli_fname :

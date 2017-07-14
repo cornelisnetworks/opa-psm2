@@ -102,9 +102,7 @@
  */
 #define HFI1_ALG_WITHIN_DEP 1
 
-#ifdef PSM_CUDA
 #define HFI1_ALG_ACROSS_ALL_DEP 2
-#endif /* PSM_CUDA */
 
 
 struct hfi1_cmd_deprecated {
@@ -117,9 +115,7 @@ struct hfi1_cmd_deprecated {
 
 #define HFI1_ALG_ACROSS		HFI1_ALG_ACROSS_DEP
 #define HFI1_ALG_WITHIN		HFI1_ALG_WITHIN_DEP
-#ifdef PSM_CUDA
 #define HFI1_ALG_ACROSS_ALL	HFI1_ALG_ACROSS_ALL_DEP
-#endif /* PSM_CUDA */
 
 #else
 

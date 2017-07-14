@@ -54,8 +54,26 @@
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
+#include "psm_mq_internal.h"
 
 int psmi_ep_device_is_enabled(const psm2_ep_t ep, int devid);
+
+#if _HFI_DEBUGGING
+PSMI_ALWAYS_INLINE(
+char *psmi_getdevice(int type))
+{
+	switch (type) {
+	case PTL_DEVID_IPS:
+		return "ips";
+	case PTL_DEVID_AMSH:
+		return "amsh";
+	case PTL_DEVID_SELF:
+		return "self";
+	default:
+		return "ips";
+	}
+}
+#endif
 
 psm2_error_t
 __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epid,
@@ -70,15 +88,12 @@ __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epi
 	int num_toconnect = 0;
 	int *epid_mask = NULL;
 	int *epid_mask_isdupof = NULL;
-	char *device;
 	uint64_t t_start = get_cycles();
 	uint64_t t_left;
 	union psmi_envvar_val timeout_intval;
 
 	PSM2_LOG_MSG("entering");
 	PSMI_ERR_UNLESS_INITIALIZED(ep);
-
-	PSMI_PLOCK();
 
 	/*
 	 * Normally we would lock here, but instead each implemented ptl component
@@ -89,8 +104,10 @@ __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epi
 	    num_of_epid < 1) {
 		err = psmi_handle_error(ep, PSM2_PARAM_ERR,
 					"Invalid psm2_ep_connect parameters");
-		goto fail;
+		goto fail_nolock;
 	}
+
+	PSMI_LOCK(ep->mq->progress_lock);
 
 	/* We need two of these masks to detect duplicates */
 	err = PSM2_NO_MEMORY;
@@ -155,23 +172,18 @@ __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epi
 		case PTL_DEVID_IPS:
 			ptlctl = &ep->ptl_ips;
 			ptl = ep->ptl_ips.ptl;
-			device = "ips";
 			break;
 		case PTL_DEVID_AMSH:
 			ptlctl = &ep->ptl_amsh;
 			ptl = ep->ptl_amsh.ptl;
-			device = "amsh";
 			break;
 		case PTL_DEVID_SELF:
 			ptlctl = &ep->ptl_self;
 			ptl = ep->ptl_self.ptl;
-			device = "self";
 			break;
 		default:
-			device = "unknown";
 			ptlctl = &ep->ptl_ips;	/*no-unused */
 			ptl = ep->ptl_ips.ptl;	/*no-unused */
-			device = "ips";	/*no-unused */
 			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 					  "Unknown/unhandled PTL id %d\n",
 					  ep->devid_enabled[i]);
@@ -179,13 +191,20 @@ __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epi
 		}
 		t_left = psmi_cycles_left(t_start, timeout);
 
-		_HFI_VDBG("Trying to connect with device %s\n", device);
+		if (_HFI_VDBG_ON) {
+			_HFI_VDBG_ALWAYS
+				("Trying to connect with device %s\n",
+				psmi_getdevice(ep->devid_enabled[i]));
+		}
 		if ((err = ptlctl->ep_connect(ptl, num_of_epid, array_of_epid,
 					      epid_mask, array_of_errors,
 					      array_of_epaddr,
 					      cycles_to_nanosecs(t_left)))) {
-			_HFI_PRDBG("Connect failure in device %s err=%d\n",
-				   device, err);
+			if (_HFI_PRDBG_ON) {
+				_HFI_PRDBG_ALWAYS
+					("Connect failure in device %s err=%d\n",
+					psmi_getdevice(ep->devid_enabled[i]), err);
+			}
 			goto connect_fail;
 		}
 
@@ -313,8 +332,9 @@ connect_fail:
 	}
 
 fail:
-	PSMI_PUNLOCK();
+	PSMI_UNLOCK(ep->mq->progress_lock);
 
+fail_nolock:
 	if (epid_mask != NULL)
 		psmi_free(epid_mask);
 	if (epid_mask_isdupof != NULL)
@@ -338,7 +358,6 @@ psm2_error_t __psm2_ep_disconnect(psm2_ep_t ep, int num_of_epaddr,
 	int num_todisconnect = 0;
 	int *epaddr_mask = NULL;
 	int *epaddr_mask_isdupof = NULL;
-	char *device;
 	uint64_t t_start = get_cycles();
 	uint64_t t_left;
 	union psmi_envvar_val timeout_intval;
@@ -346,7 +365,6 @@ psm2_error_t __psm2_ep_disconnect(psm2_ep_t ep, int num_of_epaddr,
 	PSM2_LOG_MSG("entering");
 	PSMI_ERR_UNLESS_INITIALIZED(ep);
 
-	PSMI_PLOCK();
 
 	/*
 	 * Normally we would lock here, but instead each implemented ptl component
@@ -357,8 +375,10 @@ psm2_error_t __psm2_ep_disconnect(psm2_ep_t ep, int num_of_epaddr,
 	    num_of_epaddr < 1) {
 		err = psmi_handle_error(ep, PSM2_PARAM_ERR,
 					"Invalid psm2_ep_disconnect parameters");
-		goto fail;
+		goto fail_nolock;
 	}
+
+	PSMI_LOCK(ep->mq->progress_lock);
 
 	/* We need two of these masks to detect duplicates */
 	err = PSM2_NO_MEMORY;
@@ -422,23 +442,18 @@ psm2_error_t __psm2_ep_disconnect(psm2_ep_t ep, int num_of_epaddr,
 		case PTL_DEVID_IPS:
 			ptlctl = &ep->ptl_ips;
 			ptl = ep->ptl_ips.ptl;
-			device = "ips";
 			break;
 		case PTL_DEVID_AMSH:
 			ptlctl = &ep->ptl_amsh;
 			ptl = ep->ptl_amsh.ptl;
-			device = "amsh";
 			break;
 		case PTL_DEVID_SELF:
 			ptlctl = &ep->ptl_self;
 			ptl = ep->ptl_self.ptl;
-			device = "self";
 			break;
 		default:
-			device = "unknown";
 			ptlctl = &ep->ptl_ips;	/*no-unused */
 			ptl = ep->ptl_ips.ptl;	/*no-unused */
-			device = "ips";	/*no-unused */
 			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 					  "Unknown/unhandled PTL id %d\n",
 					  ep->devid_enabled[i]);
@@ -446,12 +461,19 @@ psm2_error_t __psm2_ep_disconnect(psm2_ep_t ep, int num_of_epaddr,
 		}
 		t_left = psmi_cycles_left(t_start, timeout);
 
-		_HFI_VDBG("Trying to disconnect with device %s\n", device);
+		if (_HFI_VDBG_ON) {
+			_HFI_VDBG_ALWAYS
+				("Trying to disconnect with device %s\n",
+				psmi_getdevice(ep->devid_enabled[i]));
+		}
 		if ((err = ptlctl->ep_disconnect(ptl, 0, num_of_epaddr, array_of_epaddr,
 					      epaddr_mask, array_of_errors,
 					      cycles_to_nanosecs(t_left)))) {
-			_HFI_PRDBG("Disconnect failure in device %s err=%d\n",
-				   device, err);
+			if (_HFI_PRDBG_ON) {
+				_HFI_PRDBG_ALWAYS
+					("Disconnect failure in device %s err=%d\n",
+					psmi_getdevice(ep->devid_enabled[i]), err);
+			}
 			goto disconnect_fail;
 		}
 
@@ -564,8 +586,9 @@ disconnect_fail:
 	}
 
 fail:
-	PSMI_PUNLOCK();
+	PSMI_UNLOCK(ep->mq->progress_lock);
 
+fail_nolock:
 	if (epaddr_mask != NULL)
 		psmi_free(epaddr_mask);
 	if (epaddr_mask_isdupof != NULL)
