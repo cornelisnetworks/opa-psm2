@@ -464,7 +464,7 @@ ${OUTDIR}/${TARGLIB}.so.${MAJOR}: ${OUTDIR}/${TARGLIB}.so.${MAJOR}.${MINOR}
 # and strings -a | grep OPA does a reasonable job as well.
 $(OUTDIR)/${TARGLIB}.so.${MAJOR}.${MINOR}: ${${TARGLIB}-objs} $(LINKER_SCRIPT_FILE)
 	echo "char psmi_hfi_IFS_version[]=\"`printenv RELEASE_TAG`\";" > ${OUTDIR}/_revision.c
-	date +'char psmi_hfi_build_timestamp[] ="%F %T%:z";' >> ${OUTDIR}/_revision.c
+	date -u -d@$${SOURCE_DATE_EPOCH:-$$(date +%s)} +'char psmi_hfi_build_timestamp[] ="%F %T%:z";' >> ${OUTDIR}/_revision.c
 	echo "char psmi_hfi_sources_checksum[] =\"${SOURCES_CHKSUM_VALUE}\";" >> ${OUTDIR}/_revision.c
 	echo "char psmi_hfi_git_checksum[] =\"`git rev-parse HEAD`\";" >> ${OUTDIR}/_revision.c
 	$(CC) -c $(BASECFLAGS) $(INCLUDES) ${OUTDIR}/_revision.c -o $(OUTDIR)/_revision.o
