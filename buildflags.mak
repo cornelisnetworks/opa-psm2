@@ -58,7 +58,7 @@ $(error top_srcdir must be set to include makefile fragment)
 endif
 
 export os ?= $(shell uname -s | tr '[A-Z]' '[a-z]')
-export arch := $(shell uname -p | sed -e 's,\(i[456]86\|athlon$$\),i386,')
+export arch := $(shell uname -m | sed -e 's,\(i[456]86\|athlon$$\),i386,')
 
 ifeq (${CCARCH},gcc)
 	export CC := gcc
@@ -160,6 +160,9 @@ ifneq (,${PSM_LOG_FAST_IO})
    BASECFLAGS += -DPSM_LOG_FAST_IO
    PSM2_ADDITIONAL_GLOBALS += psmi_log_fini;psmi_log_message;
 endif
+endif
+ifneq (,${PSM_PERF})
+   BASECFLAGS += -DRDPMC_PERF_FRAMEWORK
 endif
 ifneq (,${PSM_HEAP_DEBUG})
    BASECFLAGS += -DPSM_HEAP_DEBUG

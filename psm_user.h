@@ -76,6 +76,7 @@
 #endif
 
 #include "psm_log.h"
+#include "psm_perf.h"
 
 #ifdef PSM_VALGRIND
 #define PSM_VALGRIND_REDZONE_SZ	     8
@@ -141,11 +142,33 @@ psm2_error_t psmi_mq_wait_internal(psm2_mq_req_t *ireq);
 
 int psmi_get_current_proc_location();
 
+extern int psmi_epid_ver;
 extern uint32_t non_dw_mul_sdma;
 extern psmi_lock_t psmi_creation_lock;
 
 extern psm2_ep_t psmi_opened_endpoint;
 
+PSMI_ALWAYS_INLINE(
+int
+_psmi_get_epid_version()) {
+	return psmi_epid_ver;
+}
+
+#define PSMI_EPID_VERSION_SHM 			0
+#define PSMI_EPID_SHM_ONLY				1
+#define PSMI_EPID_IPS_SHM				0
+#define PSMI_EPID_VERSION 				_psmi_get_epid_version()
+#define PSMI_MAX_EPID_VERNO_SUPPORTED	2
+#define PSMI_MIN_EPID_VERNO_SUPPORTED	1
+#define PSMI_EPID_VERNO_DEFAULT			2
+#define PSMI_EPID_V1					1
+#define PSMI_EPID_V2					2
+
+#define PSMI_EPID_GET_LID(epid) (PSMI_EPID_VERSION == PSMI_EPID_V1) ? \
+								 (int)PSMI_EPID_GET_LID_V1(epid)      \
+							   : (int)PSMI_EPID_GET_LID_V2(epid)
+
+#define PSMI_GET_SUBNET_ID(gid_hi) (gid_hi & 0xffff)
 /*
  * Default setting for Receive thread
  *

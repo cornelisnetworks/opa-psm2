@@ -2028,6 +2028,12 @@ do_rendezvous:
 			    return PSM2_NO_MEMORY;
 			req->send_msglen = len;
 			req->tag = *tag;
+
+			/* Since SEND command is blocking, this request is
+			 * entirely internal and we will not be exposed to user.
+			 * Setting as internal so it will not be added to
+			 * mq->completed_q */
+			req->flags |= PSMI_REQ_FLAG_IS_INTERNAL;
 		}
 #ifdef PSM_CUDA
 		/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
@@ -2440,7 +2446,7 @@ amsh_init(psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 		     PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
 		     (union psmi_envvar_val)
 		      1, &env_memcache_enabled);
-	if (env_memcache_enabled.e_uint) {
+	if (PSMI_IS_CUDA_ENABLED && env_memcache_enabled.e_uint) {
 		union psmi_envvar_val env_memcache_size;
 		psmi_getenv("PSM2_CUDA_MEMCACHE_SIZE",
 			    "Size of the cuda ipc memhandle cache ",
@@ -2548,7 +2554,8 @@ static psm2_error_t amsh_fini(ptl_t *ptl, int force, uint64_t timeout_ns)
 	ptl->repH.head = &ptl->amsh_empty_shortpkt;
 	ptl->reqH.head = &ptl->amsh_empty_shortpkt;
 #ifdef PSM_CUDA
-	am_cuda_memhandle_cache_map_fini();
+	if (PSMI_IS_CUDA_ENABLED)
+		am_cuda_memhandle_cache_map_fini();
 #endif
 	return PSM2_OK;
 fail:

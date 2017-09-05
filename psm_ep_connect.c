@@ -129,6 +129,13 @@ __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epi
 			epid_mask[j] = 1;
 			array_of_errors[j] = PSM2_EPID_UNKNOWN;
 			array_of_epaddr[j] = NULL;
+			if (psmi_epid_version(array_of_epid[j]) >
+						 PSMI_EPID_VERSION) {
+					psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+					  " Unkown version of EPID - %"PRIu64" \n"
+					  "Please upgrade PSM2 or set PSM2_ADDR_FMT=1 in the environment to force EPID version 1 \n",
+					  psmi_epid_version(array_of_epid[j]));
+			}
 			num_toconnect++;
 		}
 		epid_mask_isdupof[j] = -1;
@@ -304,7 +311,7 @@ connect_fail:
 		} else
 			len = snprintf(errbuf, sizeof(errbuf) - 1,
 				       "%s", err == PSM2_TIMEOUT ?
-				       "Dectected connection timeout" :
+				       "Detected connection timeout" :
 				       psm2_error_get_string(err));
 
 		/* first pass, look for all nodes with the error */
@@ -350,6 +357,18 @@ psm2_error_t __psm2_ep_disconnect(psm2_ep_t ep, int num_of_epaddr,
 				  const int *array_of_epaddr_mask,
 				  psm2_error_t *array_of_errors,
 				  int64_t timeout)
+{
+	return psm2_ep_disconnect2(ep, num_of_epaddr, array_of_epaddr,
+				   array_of_epaddr_mask, array_of_errors,
+				   PSM2_EP_DISCONNECT_GRACEFUL, timeout);
+}
+PSMI_API_DECL(psm2_ep_disconnect)
+
+psm2_error_t __psm2_ep_disconnect2(psm2_ep_t ep, int num_of_epaddr,
+				  psm2_epaddr_t *array_of_epaddr,
+				  const int *array_of_epaddr_mask,
+				  psm2_error_t *array_of_errors,
+				  int mode, int64_t timeout)
 {
 	psm2_error_t err = PSM2_OK;
 	ptl_ctl_t *ptlctl;
@@ -405,7 +424,7 @@ psm2_error_t __psm2_ep_disconnect(psm2_ep_t ep, int num_of_epaddr,
 	}
 
 	psmi_getenv("PSM2_DISCONNECT_TIMEOUT",
-		    "End-point connection timeout over-ride. 0 for no time-out.",
+		    "End-point disconnection timeout over-ride. 0 for no time-out.",
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
 		    (union psmi_envvar_val)0, &timeout_intval);
 
@@ -466,7 +485,8 @@ psm2_error_t __psm2_ep_disconnect(psm2_ep_t ep, int num_of_epaddr,
 				("Trying to disconnect with device %s\n",
 				psmi_getdevice(ep->devid_enabled[i]));
 		}
-		if ((err = ptlctl->ep_disconnect(ptl, 0, num_of_epaddr, array_of_epaddr,
+		if ((err = ptlctl->ep_disconnect(ptl, (mode == PSM2_EP_DISCONNECT_FORCE),
+					      num_of_epaddr, array_of_epaddr,
 					      epaddr_mask, array_of_errors,
 					      cycles_to_nanosecs(t_left)))) {
 			if (_HFI_PRDBG_ON) {
@@ -558,7 +578,7 @@ disconnect_fail:
 		} else
 			len = snprintf(errbuf, sizeof(errbuf) - 1,
 				       "%s", err == PSM2_TIMEOUT ?
-				       "Dectected disconnect timeout" :
+				       "Detected disconnect timeout" :
 				       psm2_error_get_string(err));
 
 		/* first pass, look for all nodes with the error */
@@ -597,4 +617,4 @@ fail_nolock:
 	PSM2_LOG_MSG("leaving");
 	return err;
 }
-PSMI_API_DECL(psm2_ep_disconnect)
+PSMI_API_DECL(psm2_ep_disconnect2)

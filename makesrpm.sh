@@ -68,6 +68,12 @@ function usage()
     echo "     s,a,b,p,c,i,l"
     echo "           Optional, default is s (sourcerpm)"
     echo "           Set single extension letter for rpmbuild -b argument"
+    echo "     -r <name>, -rpmname <name>"
+    echo "           Optional, set the output rpm name"
+    echo "     -e <basename ext>, -baseext <basename ext>"
+    echo "           Optional, set a base name extension"
+    echo "           This only appends an extra string onto the base RPM name"
+    echo "           Does not affect supporting RPMs"
     echo "     -c, -cuda"
     echo "           Optional, default is unset"
     echo "           Sets PSM_CUDA=1, creating -cuda based spec and rpms"
@@ -103,6 +109,20 @@ while [ "$1" != "" ]; do
         -c | -cuda)     export PSM_CUDA=1
                         RPM_EXT="-cuda"
                         ;;
+        -e | -baseext)  shift
+                        if [ -z "$1" ]; then
+                            usage
+                        fi
+                        $RPM_NAME_BASEEXT="$1"
+                        export RPM_NAME_BASEEXT="$1"
+                        ;;
+        -r | -rpmname)  shift
+                        if [ -z "$1" ]; then
+                            usage
+                        fi
+                        $RPM_NAME="$1"
+                        export RPM_NAME="$1"
+                        ;;
         s|a|b|p|c|i|l)  BUILDARG=$1
                         ;;
         * )             err=1
@@ -112,14 +132,13 @@ while [ "$1" != "" ]; do
     shift
 done
 
-
 # Generic cleanup, build, and tmp folder creation
 make distclean OUTDIR=$OUTDIR
-make dist OUTDIR=$OUTDIR
+make RPM_NAME=$RPM_NAME RPM_NAME_BASEEXT=$RPM_NAME_BASEEXT dist OUTDIR=$OUTDIR
 mkdir -p ./$TEMPDIR/{BUILD,RPMS,SOURCES,SPECS,SRPMS,BUILDROOT}
 # Differnet paths based on RPM_EXT
 cp ${OUTDIR}/$RPM_NAME-*.tar.gz $TEMPDIR/SOURCES
-make specfile OUTDIR=$OUTDIR
+make RPM_NAME=$RPM_NAME RPM_NAME_BASEEXT=$RPM_NAME_BASEEXT specfile OUTDIR=$OUTDIR
 cp ${OUTDIR}/$RPM_NAME.spec $TEMPDIR/SPECS
 rpmbuild -b$BUILDARG --define "_topdir $PWD/$TEMPDIR" --nodeps $TEMPDIR/SPECS/$RPM_NAME.spec
 

@@ -154,7 +154,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	proto->epinfo.ep_baseqp = base_info->bthqp;
 	proto->epinfo.ep_context = ctxt_info->ctxt;	/* "real" context */
 	proto->epinfo.ep_subcontext = ctxt_info->subctxt;
-	proto->epinfo.ep_hfi_type = psmi_epid_hfi_type(context->epid);
+	proto->epinfo.ep_hfi_type = psmi_get_hfi_type(context);
 	proto->epinfo.ep_jkey = base_info->jkey;
 
 	/* If checksums enabled we insert checksum at end of packet */
@@ -494,12 +494,14 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 
 	if (protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED) {
 #ifdef PSM_CUDA
-	if (cuda_runtime_version >= 7000) {
-		PSMI_CUDA_CALL(cudaStreamCreateWithFlags,
+	if (PSMI_IS_CUDA_ENABLED) {
+		if (cuda_runtime_version >= 7000) {
+			PSMI_CUDA_CALL(cudaStreamCreateWithFlags,
 			       &proto->cudastream_send, cudaStreamNonBlocking);
-	} else {
-		PSMI_CUDA_CALL(cudaStreamCreate,
+		} else {
+			PSMI_CUDA_CALL(cudaStreamCreate,
 			       &proto->cudastream_send);
+		}
 	}
 #endif
 		proto->scbc_rv = NULL;
@@ -684,7 +686,8 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 		}
 	}
 
-	if (protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED) {
+	if (PSMI_IS_CUDA_ENABLED &&
+		 (protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED)) {
 		struct psmi_rlimit_mpool rlim = CUDA_HOSTBUFFER_LIMITS;
 		uint32_t maxsz, chunksz, max_elements;
 
@@ -1098,7 +1101,11 @@ ips_proto_timer_ctrlq_callback(struct psmi_timer *timer, uint64_t t_cyc_expire)
 			err = ips_spio_transfer_frame(proto,
 				cqe->msg_scb.flow, &cqe->msg_scb.pbc,
 				cqe->msg_scb.cksum, 0, PSMI_TRUE,
-				have_cksum, cqe->msg_scb.cksum[0]);
+				have_cksum, cqe->msg_scb.cksum[0]
+#ifdef PSM_CUDA
+			       , 0
+#endif
+				);
 		} else {
 			err = ips_dma_transfer_frame(proto,
 				cqe->msg_scb.flow, &cqe->msg_scb,
@@ -1192,7 +1199,11 @@ ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 	case PSM_TRANSFER_PIO:
 		err = ips_spio_transfer_frame(proto, flow,
 			     &ctrlscb->pbc, payload, paylen,
-			     PSMI_TRUE, have_cksum, ctrlscb->cksum[0]);
+			     PSMI_TRUE, have_cksum, ctrlscb->cksum[0]
+#ifdef PSM_CUDA
+			     , 0
+#endif
+			     );
 		break;
 	case PSM_TRANSFER_DMA:
 		err = ips_dma_transfer_frame(proto, flow,
@@ -1343,7 +1354,11 @@ ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed)
 						   scb->ips_lrh.
 						   flags &
 						   IPS_SEND_FLAG_PKTCKSUM,
-						   scb->cksum[0])) == PSM2_OK) {
+						   scb->cksum[0]
+#ifdef PSM_CUDA
+						   , IS_TRANSFER_BUF_GPU_MEM(scb)
+#endif
+						)) == PSM2_OK) {
 			t_cyc = get_cycles();
 			scb->flags &= ~IPS_SEND_FLAG_PENDING;
 			scb->ack_timeout = proto->epinfo.ep_timeout_ack;
@@ -1959,7 +1974,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 			vec_idx++;
 			iovcnt++;
 #ifdef PSM_CUDA
-			if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM(scb->payload)) {
+			if (PSMI_IS_CUDA_ENABLED && IS_TRANSFER_BUF_GPU_MEM(scb)) {
 			    	/* without this attr, CUDA memory accesses
 				 * do not synchronize with gpudirect-rdma accesses.
 				 * We set this field only if the currently loaded driver
@@ -1967,16 +1982,10 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 				 * where we have a non gpu-direct enabled driver loaded
 				 * and PSM2 is trying to use GPU features.
 				 */
-
 				if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
 					sdmahdr->flags = HFI1_BUF_GPU_MEM;
 				else
 					sdmahdr->flags = 0;
-			} else if (PSMI_IS_CUDA_MEM(scb->payload) && !PSMI_IS_CUDA_ENABLED) {
-				err = psmi_handle_error(PSMI_EP_NORETURN,
-								PSM2_INTERNAL_ERR,
-								"Use of GPU buffer with PSM2_CUDA disabled \n");
-				goto fail;
 			} else if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
 					sdmahdr->flags = 0;
 #endif

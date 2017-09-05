@@ -63,6 +63,7 @@ static int psmi_verno_major = PSM2_VERNO_MAJOR;
 static int psmi_verno_minor = PSM2_VERNO_MINOR;
 static int psmi_verno = PSMI_VERNO_MAKE(PSM2_VERNO_MAJOR, PSM2_VERNO_MINOR);
 static int psmi_verno_client_val;
+int psmi_epid_ver;
 
 #define PSMI_NOT_INITIALIZED    0
 #define PSMI_INITIALIZED        1
@@ -242,6 +243,12 @@ psm2_error_t __psm2_init(int *major, int *minor)
 	psmi_log_initialize();
 
 	PSM2_LOG_MSG("entering");
+#ifdef RDPMC_PERF_FRAMEWORK
+	psmi_rdpmc_perf_framework_init();
+#endif /* RDPMC_PERF_FRAMEWORK */
+
+	GENERIC_PERF_INIT();
+
 	if (psmi_isinit == PSMI_INITIALIZED)
 		goto update;
 
@@ -347,6 +354,26 @@ psm2_error_t __psm2_init(int *major, int *minor)
 			     "with mallopt()\n");
 	}
 
+	{
+		union psmi_envvar_val env_epid_ver;
+		psmi_getenv("PSM2_ADDR_FMT",
+					"Used to force PSM2 to use a particular version of EPID",
+					PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
+					(union psmi_envvar_val)PSMI_EPID_VERNO_DEFAULT, &env_epid_ver);
+		psmi_epid_ver = env_epid_ver.e_int;
+		if (psmi_epid_ver > PSMI_MAX_EPID_VERNO_SUPPORTED) {
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+					  " The max epid version supported in this version of PSM2 is %d \n"
+					  "Please upgrade PSM2 \n",
+					  PSMI_MAX_EPID_VERNO_SUPPORTED);
+			goto fail;
+		} else if (psmi_epid_ver < PSMI_MIN_EPID_VERNO_SUPPORTED) {
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+					  " Invalid value provided through PSM2_ADDR_FMT \n");
+			goto fail;
+		}
+	}
+
 #ifdef PSM_CUDA
 	union psmi_envvar_val env_enable_cuda;
 	psmi_getenv("PSM2_CUDA",
@@ -396,9 +423,11 @@ psm2_error_t __psm2_init(int *major, int *minor)
 	psmi_epid_init();
 
 #ifdef PSM_CUDA
-	err = psmi_cuda_initialize();
-	if (err != PSM2_OK)
-		goto fail;
+	if (PSMI_IS_CUDA_ENABLED) {
+		err = psmi_cuda_initialize();
+		if (err != PSM2_OK)
+			goto fail;
+	}
 #endif
 
 update:
@@ -428,6 +457,7 @@ psm2_error_t __psm2_finalize(void)
 
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
 
+	GENERIC_PERF_DUMP(stderr);
 	ep = psmi_opened_endpoint;
 	while (ep != NULL) {
 		psmi_opened_endpoint = ep->user_ep_next;

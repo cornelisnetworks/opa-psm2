@@ -139,6 +139,18 @@ struct psm2_mq {
 #define MQ_HFI_THRESH_EGR_SDMA_SQ_XEON 16000    /* Eager Xeon non-blocking */
 #define MQ_HFI_THRESH_EGR_SDMA_SQ_PHI2 65536    /* Eager Phi2 non-blocking */
 
+#define MQ_HFI_THRESH_RNDV_PHI2 200000
+#define MQ_HFI_THRESH_RNDV_XEON  64000
+
+#define MQ_HFI_WINDOW_RNDV_PHI2 4194304
+#define MQ_HFI_WINDOW_RNDV_XEON  131072
+
+#ifdef PSM_CUDA
+#define MQ_HFI_THRESH_RNDV_CUDA 2097152
+#endif
+
+#define MQ_SHM_THRESH_RNDV 16000
+
 #define MQE_TYPE_IS_SEND(type)	((type) & MQE_TYPE_SEND)
 #define MQE_TYPE_IS_RECV(type)	((type) & MQE_TYPE_RECV)
 
@@ -292,6 +304,7 @@ hash_32(uint32_t a))
 
 void MOCKABLE(psmi_mq_mtucpy)(void *vdest, const void *vsrc, uint32_t nchars);
 MOCK_DCL_EPILOGUE(psmi_mq_mtucpy);
+void psmi_mq_mtucpy_host_mem(void *vdest, const void *vsrc, uint32_t nchars);
 
 #if defined(__x86_64__)
 void psmi_mq_mtucpy_safe(void *vdest, const void *vsrc, uint32_t nchars);
@@ -348,6 +361,46 @@ mq_copy_tiny(uint32_t *dest, uint32_t *src, uint8_t len))
 		*dest1++ = *src1++;
 	}
 }
+
+#ifdef PSM_CUDA
+typedef void (*psmi_mtucpy_fn_t)(void *dest, const void *src, uint32_t len);
+
+PSMI_ALWAYS_INLINE(
+void
+mq_copy_tiny_host_mem(uint32_t *dest, uint32_t *src, uint8_t len))
+{
+	switch (len) {
+	case 8:
+		*dest++ = *src++;
+	case 4:
+		*dest++ = *src++;
+	case 0:
+		return;
+	case 7:
+	case 6:
+	case 5:
+		*dest++ = *src++;
+		len -= 4;
+	case 3:
+	case 2:
+	case 1:
+		break;
+	default:		/* greater than 8 */
+		psmi_mq_mtucpy(dest, src, len);
+		return;
+	}
+	uint8_t *dest1 = (uint8_t *) dest;
+	uint8_t *src1 = (uint8_t *) src;
+	switch (len) {
+	case 3:
+		*dest1++ = *src1++;
+	case 2:
+		*dest1++ = *src1++;
+	case 1:
+		*dest1++ = *src1++;
+	}
+}
+#endif
 
 /* Typedef describing a function to populate a psm2_mq_status(2)_t given a
  * matched request.  The purpose of this typedef is to avoid duplicating

@@ -80,7 +80,7 @@ $(OUTDIR)/%.o: $(compat_build_dir)/%.c
 
 $(OUTDIR)/${COMPATLIB}.so.${MAJOR}: ${${COMPATLIB}-objs}
 	$(CC) $(BASECFLAGS) $(LINKER_SCRIPT) $(LDFLAGS) -Wl,-soname=${COMPATLIB}.so.${MAJOR} -shared \
-		 -L$(OUTDIR)/.. -lpsm2 -o $@ ${${COMPATLIB}-objs}
+		 -L$(OUTDIR)/.. ${${COMPATLIB}-objs} -lpsm2 -o $@
 
 clean:
 	@if [ -d $(OUTDIR) ]; then \

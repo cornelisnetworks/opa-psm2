@@ -121,7 +121,11 @@ psm2_error_t ips_tidcache_acquire(struct ips_tid *tidc,
 		uint32_t *length, /* buffer length, aligned to page size */
 		uint32_t *tid_array, /* output tidarray, */
 		uint32_t *tidcnt,    /* output of tid count */
-		uint32_t *pageoff);  /* output of offset in first tid */
+		uint32_t *pageoff  /* output of offset in first tid */
+#ifdef PSM_CUDA
+		, uint8_t is_cuda_ptr
+#endif
+		);
 
 psm2_error_t ips_tidcache_release(struct ips_tid *tidc,
 		uint32_t *tid_array, /* input tidarray, */
@@ -134,7 +138,11 @@ psm2_error_t ips_tid_acquire(struct ips_tid *tidc,
 		const void *buf,  /* input buffer, aligned to page boundary */
 		uint32_t *length, /* buffer length, aligned to page size */
 		uint32_t *tid_array, /* output tidarray, */
-		uint32_t *tidcnt);   /* output of tid count */
+		uint32_t *tidcnt
+#ifdef PSM_CUDA
+		, uint8_t is_cuda_ptr
+#endif
+		);   /* output of tid count */
 
 psm2_error_t ips_tid_release(struct ips_tid *tidc,
 		uint32_t *tid_array, /* input tidarray, */

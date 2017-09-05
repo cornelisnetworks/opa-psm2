@@ -151,6 +151,7 @@
 #define IPS_SEND_FLAG_PKTCKSUM          0x02	/* Has packet checksum */
 #define IPS_SEND_FLAG_AMISTINY		0x04	/* AM is tiny, exclusive */
 
+#ifdef PSM_CUDA
 /* This flag is used to indicate to the reciever when
  * the send is issued on a device buffer. This helps in
  * selecting TID path on the recieve side regardless of
@@ -158,7 +159,6 @@
  * in a special case where the send is on a device
  * buffer and the receive is on a host buffer.
  */
-#ifdef PSM_CUDA
 #define IPS_SEND_FLAG_GPU_BUF           0x08
 #endif
 

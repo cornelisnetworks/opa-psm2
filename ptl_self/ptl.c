@@ -154,7 +154,7 @@ self_mq_isend(psm2_mq_t mq, psm2_epaddr_t epaddr, uint32_t flags,
 	 * to this region of memory (used by multiple layers of the stack)
 	 * always synchronize
 	 */
-	if (PSMI_IS_CUDA_MEM((void*)ubuf)) {
+	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)ubuf)) {
 		int trueflag = 1;
 		PSMI_CUDA_CALL(cuPointerSetAttribute, &trueflag,
 			       CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
@@ -270,7 +270,6 @@ self_connect(ptl_t *ptl,
 	     psm2_epaddr_t array_of_epaddr[], uint64_t timeout_ns)
 {
 	psmi_assert_always(ptl->epaddr != NULL);
-	psm2_epaddr_t epaddr;
 	psm2_error_t err = PSM2_OK;
 	int i;
 
@@ -281,8 +280,6 @@ self_connect(ptl_t *ptl,
 			continue;
 
 		if (array_of_epid[i] == ptl->epid) {
-			epaddr = psmi_epid_lookup(ptl->ep, ptl->epid);
-			psmi_assert_always(epaddr == NULL);
 			array_of_epaddr[i] = ptl->epaddr;
 			array_of_epaddr[i]->ptlctl = ptl->ctl;
 			array_of_epaddr[i]->epid = ptl->epid;

@@ -236,6 +236,28 @@ export UDEVDIR
 #    target.
 DIST := ${RPM_NAME}-${VERSION_RELEASE}
 
+# If user has empty RPM NAME BASEEXT (defined or not), then attempt to
+# see if we are running on SLES 12.3 or newer.
+# If we are, then change the base package name, but not the supporting
+# packages to libpsm2-2. Do note this requires support both in the Makefile
+# specfile target rule as well as changes in the libpsm2.spec.in
+# file as well.
+ifeq ($(RPM_NAME_BASEEXT),)
+# Detect current version of the OS
+OS := $(shell grep -m1 NAME /etc/os-release | cut -f 2 -d\")
+OSVERSION := $(shell grep VERSION_ID /etc/os-release | cut -f 2 -d\" | cut -f 1 -d.)
+OSSUBVERSION := $(shell grep VERSION_ID /etc/os-release | cut -f 2 -d\" | cut -f 2 -d.)
+
+override RPM_NAME_BASEEXT := $(shell \
+    if [ "$(OS)" = "SLES" ]; then \
+       if [ "$(OSVERSION)" \> "11" ]; then \
+          if [ "$(OSSUBVERSION)" \> "2" ]; then \
+             echo "-2"; \
+          fi \
+       fi \
+    fi)
+endif
+
 all: outdir symlinks
 	@if [ ! -e $(HISTORY) ] || [ -z "`grep -E '^$(OUTDIR)$$' $(HISTORY)`" ]; then \
 		echo $(OUTDIR) >> $(HISTORY); \
@@ -331,10 +353,11 @@ endif
 	install -m 0644 -D include/opa_revision.h ${DESTDIR}/usr/include/hfi1diag/opa_revision.h
 	install -m 0644 -D psmi_wrappers.h ${DESTDIR}/usr/include/hfi1diag/psmi_wrappers.h
 
-specfile: specfile_clean
-	sed -e 's/@VERSION@/'${VERSION_RELEASE}'/g' ${RPM_NAME}.spec.in | \
+specfile: outdir specfile_clean
+	sed -e 's/@VERSION@/'${VERSION_RELEASE}'/g' libpsm2.spec.in | \
 		sed -e 's/@TARGLIB@/'${TARGLIB}'/g' \
 			-e 's/@RPM_NAME@/'${RPM_NAME}'/g' \
+			-e 's/@RPM_NAME_BASEEXT@/'${RPM_NAME_BASEEXT}'/g' \
 			-e 's/@COMPATLIB@/'${COMPATLIB}'/g' \
 			-e 's/@COMPATMAJOR@/'${COMPATMAJOR}'/g' \
 			-e 's;@UDEVDIR@;'${UDEVDIR}';g' \
@@ -414,6 +437,7 @@ ${TARGLIB}-objs := ptl_am/am_reqrep_shmem.o	\
 		   psm_memcpy.o			\
 		   psm_mock.o			\
 		   psm.o			\
+		   psm_perf.o			\
 		   libuuid/psm_uuid.o		\
 		   libuuid/parse.o		\
 		   libuuid/pack.o		\
@@ -464,7 +488,7 @@ ${OUTDIR}/${TARGLIB}.so.${MAJOR}: ${OUTDIR}/${TARGLIB}.so.${MAJOR}.${MINOR}
 # and strings -a | grep OPA does a reasonable job as well.
 $(OUTDIR)/${TARGLIB}.so.${MAJOR}.${MINOR}: ${${TARGLIB}-objs} $(LINKER_SCRIPT_FILE)
 	echo "char psmi_hfi_IFS_version[]=\"`printenv RELEASE_TAG`\";" > ${OUTDIR}/_revision.c
-	date +'char psmi_hfi_build_timestamp[] ="%F %T%:z";' >> ${OUTDIR}/_revision.c
+	date -u -d@$${SOURCE_DATE_EPOCH:-$$(date +%s)} +'char psmi_hfi_build_timestamp[] ="%F %T%:z";' >> ${OUTDIR}/_revision.c
 	echo "char psmi_hfi_sources_checksum[] =\"${SOURCES_CHKSUM_VALUE}\";" >> ${OUTDIR}/_revision.c
 	echo "char psmi_hfi_git_checksum[] =\"`git rev-parse HEAD`\";" >> ${OUTDIR}/_revision.c
 	$(CC) -c $(BASECFLAGS) $(INCLUDES) ${OUTDIR}/_revision.c -o $(OUTDIR)/_revision.o

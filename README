@@ -266,3 +266,27 @@ PSM2 APIs, refer to Section 5.
 
 Link to latest (as of Mar 2017) PSM2 Programmer's Guide:
 http://www.intel.com/content/dam/support/us/en/documents/network-and-i-o/fabric-products/Intel_PSM2_PG_H76473_v5_0.pdf
+
+PSM Compatibility Support
+------------
+
+libpsm2-compat suppports applications that use the PSM API instead of
+the PSM2 API, through a compatibility library. This library is an interface
+between PSM applications and the PSM2 API.
+
+If the system has an application that is coded to use PSM and has requirements
+to use PSM2 (i.e. the host has Omni-Path hardware), the compatibility library
+must be used.
+
+Please refer to your operating system's documentation to find how to modify the
+order in which system directories are searched for dynamic libraries. The
+libpsm2-compat version of libpsm_infinipath.so.1 must be earlier on the search
+path than that of libpsm-infinipath. Doing so allows applications coded to PSM
+to transparently use the PSM2 API and devices which require it.
+
+Please note that the installation path for the libpsm2-compat version of
+libpsm_infinipath.so.1 will differ depending on your operating system
+specifics. Common locations include:
+- /usr/lib64/psm2-compat/
+- /usr/lib/psm2-compat/
+

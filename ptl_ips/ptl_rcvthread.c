@@ -128,7 +128,8 @@ psm2_error_t ips_ptl_rcvthread_init(ptl_t *ptl, struct ips_recvhdrq *recvq)
 	rcvc->t_start_cyc = get_cycles();
 
 #ifdef PSM_CUDA
-	PSMI_CUDA_DRIVER_API_CALL(cuCtxGetCurrent, &ctxt);
+	if (PSMI_IS_CUDA_ENABLED)
+		PSMI_CUDA_DRIVER_API_CALL(cuCtxGetCurrent, &ctxt);
 #endif
 
 	if (ptl->runtime_flags & PSMI_RUNTIME_RCVTHREAD) {
@@ -332,7 +333,7 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 	psm2_error_t err;
 
 #ifdef PSM_CUDA
-	if (ctxt != NULL)
+	if (PSMI_IS_CUDA_ENABLED && ctxt != NULL)
 		PSMI_CUDA_DRIVER_API_CALL(cuCtxSetCurrent, ctxt);
 #endif
 

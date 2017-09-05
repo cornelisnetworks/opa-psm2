@@ -162,12 +162,11 @@ struct ips_connect_reqrep {
  */
 
 /**
- * Configure flows for an ipsaddr. 
+ * Configure flows for an ipsaddr.
  *
  * @arg ipsaddr - the ipsaddr to configure the flows for
  * @arg proto - the protocol used
  *
- * @pre ipsaddr's ep_mtu must be set
  * @pre proto's flags must be set
  *
  * Flows should be configured:
@@ -229,7 +228,7 @@ ips_flow_fini(struct ips_epaddr *ipsaddr, struct ips_proto *proto)
 static
 psm2_epaddr_t
 ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
-		 const char *hostname, unsigned long timeout);
+		 const char *hostname, uint16_t hfi_type, unsigned long timeout);
 
 /*
  * Given a connection request, set mtu, communication index and hdr length
@@ -255,8 +254,8 @@ ips_ipsaddr_set_req_params(struct ips_proto *proto,
 	uint64_t *data;
 	psmi_assert_always(req->mtu > 0);
 	uint16_t common_mtu = min(req->mtu, proto->epinfo.ep_mtu);
+	int ptype, pidx;
 
-	ipsaddr->ep_mtu = req->mtu;
 	/*
 	 * Make RNDV window size being dependent on MTU size;
 	 * This is due to fact that number of send packets
@@ -273,17 +272,19 @@ ips_ipsaddr_set_req_params(struct ips_proto *proto,
 	 * For path record queries the epr_mtu and epr_sl are setup correctly
 	 * from the path itself.
 	 */
-	if (proto->ep->path_res_type == PSM2_PATH_RES_NONE) {
-		int ptype, pidx;
-		for (ptype = IPS_PATH_LOW_PRIORITY;
-		     ptype < IPS_PATH_MAX_PRIORITY; ptype++)
-			for (pidx = 0;
-			     pidx < ipsaddr->pathgrp->pg_num_paths[ptype];
-			     pidx++) {
+	for (ptype = IPS_PATH_LOW_PRIORITY;
+	     ptype < IPS_PATH_MAX_PRIORITY; ptype++)
+		for (pidx = 0;
+		     pidx < ipsaddr->pathgrp->pg_num_paths[ptype]; pidx++) {
+			if (proto->ep->path_res_type == PSM2_PATH_RES_NONE) {
 				ipsaddr->pathgrp->pg_path[pidx][ptype]->pr_mtu =
-				    common_mtu;
+					common_mtu;
+			} else {
+				ipsaddr->pathgrp->pg_path[pidx][ptype]->pr_mtu =
+				    min(common_mtu,
+					ipsaddr->pathgrp->pg_path[pidx][ptype]->pr_mtu);
 			}
-	}
+		}
 
 	/*
 	 * We've got updated mtu/path records, need to re-initialize the flows to take
@@ -339,9 +340,10 @@ ips_ipsaddr_set_req_params(struct ips_proto *proto,
 			if (data[2 * i] == ep->gid_hi) {
 
 				epaddr =
-				    ips_alloc_epaddr(&ep->ptl_ips.ptl->proto, 0,
-						     data[2 * i + 1], NULL,
-						     5000);
+					ips_alloc_epaddr(&ep->ptl_ips.ptl->proto, 0,
+							 data[2 * i + 1], NULL,
+							  PSMI_HFI_TYPE_OPA1,
+									  5000);
 				if (epaddr == NULL)
 					return PSM2_NO_MEMORY;
 
@@ -536,21 +538,19 @@ MOCKABLE(ips_flow_init)(struct ips_flow *flow, struct ips_proto *proto,
 	 * member.
 	 */
 
-	/* min of local and remote endpoint MTU */
-	flow->frag_size = min(ipsaddr->ep_mtu, proto->epinfo.ep_mtu);
-	/* take the path into the consideration */
-	flow->frag_size = min(flow->frag_size, flow->path->pr_mtu);
+	/* min of local MTU and path MTU */
+	flow->frag_size = min(proto->epinfo.ep_mtu, flow->path->pr_mtu);
 	/* if PIO, need to consider local pio buffer size */
 	if (transfer_type == PSM_TRANSFER_PIO) {
 		flow->frag_size = min(flow->frag_size, proto->epinfo.ep_piosize);
-		_HFI_VDBG("[ipsaddr=%p] PIO flow->frag_size: %u = min(ipsaddr->ep_mtu(%u), "
-			"proto->epinfo.ep_mtu(%u), flow->path->pr_mtu(%u), proto->epinfo.ep_piosize(%u))",
-			ipsaddr, flow->frag_size, ipsaddr->ep_mtu, proto->epinfo.ep_mtu,
+		_HFI_VDBG("[ipsaddr=%p] PIO flow->frag_size: %u = min("
+			"proto->epinfo.ep_mtu(%u), flow->path->pr_mtu(%u), proto->epinfo.ep_piosize(%u))\n",
+			ipsaddr, flow->frag_size, proto->epinfo.ep_mtu,
 			flow->path->pr_mtu, proto->epinfo.ep_piosize);
 	} else {
-		_HFI_VDBG("[ipsaddr=%p] SDMA flow->frag_size: %u = min(ipsaddr->ep_mtu(%u), "
-			"proto->epinfo.ep_mtu(%u), flow->path->pr_mtu(%u))",
-			ipsaddr, flow->frag_size, ipsaddr->ep_mtu, proto->epinfo.ep_mtu,
+		_HFI_VDBG("[ipsaddr=%p] SDMA flow->frag_size: %u = min("
+			"proto->epinfo.ep_mtu(%u), flow->path->pr_mtu(%u))\n",
+			ipsaddr, flow->frag_size, proto->epinfo.ep_mtu,
 			flow->path->pr_mtu);
 	}
 
@@ -583,13 +583,13 @@ MOCK_DEF_EPILOGUE(ips_flow_init);
 static
 psm2_epaddr_t
 ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
-		 const char *hostname, unsigned long timeout)
+		 const char *hostname, uint16_t hfi_type, unsigned long timeout)
 {
 	psm2_error_t err = PSM2_OK;
 	psm2_epaddr_t epaddr;
 	ips_epaddr_t *ipsaddr;
 	ips_path_grp_t *pathgrp;
-	uint16_t lid, hfitype;
+	uint16_t lid;
 
 	/* The PSM/PTL-level epaddr, ips-level epaddr, and per-peer msgctl
 	 * structures are collocated in memory for performance reasons -- this is
@@ -642,9 +642,6 @@ ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
 	ipsaddr->ctrl_msg_queued = 0;
 	ipsaddr->msg_toggle = 0;
 
-	/* Setup MTU and PIO size */
-	ipsaddr->ep_mtu = proto->epinfo.ep_mtu;
-
 	/* Actual context of peer */
 	ipsaddr->context = PSMI_EPID_GET_CONTEXT(epid);
 	/* Subcontext */
@@ -652,9 +649,8 @@ ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
 
 	/* Get path record for <service, slid, dlid> tuple */
 	lid = PSMI_EPID_GET_LID(epid);
-	hfitype = PSMI_EPID_GET_HFITYPE(epid);
 	err = proto->ibta.get_path_rec(proto, proto->epinfo.ep_base_lid,
-				       __cpu_to_be16(lid), hfitype, timeout,
+				       __cpu_to_be16(lid), hfi_type, timeout,
 				       &pathgrp);
 	if (err != PSM2_OK) {
 		psmi_free(epaddr);
@@ -687,7 +683,7 @@ ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
 
 	/* Add epaddr to PSM's epid table */
 	psmi_epid_add(proto->ep, epaddr->epid, epaddr);
-	psmi_assert_always(psmi_epid_lookup(proto->ep, epaddr->epid) == epaddr);
+	psmi_assert(psmi_epid_lookup(proto->ep, epaddr->epid) == epaddr);
 
 	return epaddr;
 }
@@ -783,7 +779,7 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 			 * reply. */
 			if (ipsaddr == NULL) {
 				ips_path_grp_t *pathgrp;
-				uint16_t lid, hfitype;
+				uint16_t lid;
 
 				ipsaddr = &ipsaddr_f;
 				memset(&ipsaddr_f, 0, sizeof(ips_epaddr_t));
@@ -794,13 +790,12 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 
 				/* Get path record for peer */
 				lid = PSMI_EPID_GET_LID(hdr->epid);
-				hfitype = PSMI_EPID_GET_HFITYPE(hdr->epid);
 				err = proto->ibta.get_path_rec(proto,
 							       proto->epinfo.
-							       ep_base_lid,
-							       __cpu_to_be16
-							       (lid), hfitype,
-							       3000, &pathgrp);
+								   ep_base_lid,
+							       __cpu_to_be16(lid),
+							       PSMI_HFI_TYPE_OPA1,
+								   3000, &pathgrp);
 				if (err != PSM2_OK)
 					goto fail;
 
@@ -811,7 +806,6 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 				/* If the send fails because of pio_busy, don't let ips queue
 				 * the request on an invalid ipsaddr, just drop the reply */
 				ipsaddr_f.ctrl_msg_queued = ~0;
-				ipsaddr->ep_mtu = proto->epinfo.ep_mtu;
 
 				psmi_assert(proto->msgflowid < EP_FLOW_LAST);
 
@@ -893,6 +887,7 @@ ptl_handle_connect_req(struct ips_proto *proto, psm2_epaddr_t epaddr,
 		newconnect = 1;
 		if ((epaddr =
 		     ips_alloc_epaddr(proto, 1, req->epid, req->hostname,
+					      PSMI_HFI_TYPE_OPA1,
 				      5000)) == NULL) {
 			err = PSM2_NO_MEMORY;
 			goto fail;
@@ -1021,11 +1016,11 @@ ips_proto_connect(struct ips_proto *proto, int numep,
 
 	/* First pass: make sure array of errors is at least fully defined */
 	for (i = 0; i < numep; i++) {
-		_HFI_VDBG("epid-connect=%s connect to %ld:%ld:%ld\n",
+		_HFI_VDBG("epid-connect=%s connect to %d:%d:%d\n",
 			  array_of_epid_mask[i] ? "YES" : " NO",
-			  PSMI_EPID_GET_LID(array_of_epid[i]),
-			  PSMI_EPID_GET_CONTEXT(array_of_epid[i]),
-			  PSMI_EPID_GET_SUBCONTEXT(array_of_epid[i]));
+			  (int)PSMI_EPID_GET_LID(array_of_epid[i]),
+			  (int)PSMI_EPID_GET_CONTEXT(array_of_epid[i]),
+			  (int)PSMI_EPID_GET_SUBCONTEXT(array_of_epid[i]));
 		if (array_of_epid_mask[i]) {
 			array_of_errors[i] = PSM2_EPID_UNKNOWN;
 			array_of_epaddr[i] = NULL;
@@ -1045,12 +1040,23 @@ ips_proto_connect(struct ips_proto *proto, int numep,
 			continue;
 		}
 
+		if ((PSMI_EPID_VERSION == PSMI_EPID_V2)
+			 && (PSMI_GET_SUBNET_ID(proto->ep->gid_hi) !=
+			 	 PSMI_EPID_GET_SUBNET_ID(array_of_epid[i]))) {
+					psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+					  " Trying to connect to a HFI (subnet id - %"PRIu64")on a"
+					  " different subnet - %"PRIu64" \n",
+					  PSMI_GET_SUBNET_ID(proto->ep->gid_hi),
+					  PSMI_EPID_GET_SUBNET_ID(array_of_epid[i]));
+		}
+
 		epaddr = psmi_epid_lookup(proto->ep, array_of_epid[i]);
 		if (epaddr == NULL) {
 			/* We're sending a connect request message before some other node
 			 * has sent its connect message */
 			epaddr = ips_alloc_epaddr(proto, 1, array_of_epid[i],
 						  NULL,
+						  PSMI_HFI_TYPE_OPA1,
 						  (timeout_in / 1000000UL));
 			if (epaddr == NULL) {
 				err = PSM2_NO_MEMORY;

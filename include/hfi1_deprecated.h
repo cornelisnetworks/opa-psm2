@@ -89,9 +89,8 @@
 /*
  * round robin contexts across HFIs, then
  * ports; this is the default.
- * For CUDA builds, this option spreads the
- * HFI selection within the local socket. If
- * it is preferred to spread job over over entire set of
+ * This option spreads the HFI selection within the local socket.
+ * If it is preferred to spread job over over entire set of
  * HFIs within the system, see ALG_ACROSS_ALL below.
  */
 #define HFI1_ALG_ACROSS_DEP 0
@@ -101,9 +100,6 @@
  * active ports within), then next HFI
  */
 #define HFI1_ALG_WITHIN_DEP 1
-
-#define HFI1_ALG_ACROSS_ALL_DEP 2
-
 
 struct hfi1_cmd_deprecated {
 	__u32 type;        /* command type */
@@ -115,13 +111,15 @@ struct hfi1_cmd_deprecated {
 
 #define HFI1_ALG_ACROSS		HFI1_ALG_ACROSS_DEP
 #define HFI1_ALG_WITHIN		HFI1_ALG_WITHIN_DEP
-#define HFI1_ALG_ACROSS_ALL	HFI1_ALG_ACROSS_ALL_DEP
 
 #else
 
 #define HFI1_SWMAJOR_SHIFT 16
 
 #endif /* defined( IB_IOCTL_MAGIC )*/
+
+#define HFI1_ALG_ACROSS_ALL_DEP 2
+#define HFI1_ALG_ACROSS_ALL	HFI1_ALG_ACROSS_ALL_DEP
 
 /* Note that struct hfi1_user_info_dep declaration is identical to
    the struct hfi1_user_info declaration from MAJOR version 5 of the

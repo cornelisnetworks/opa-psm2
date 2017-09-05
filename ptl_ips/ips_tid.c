@@ -182,7 +182,11 @@ psm2_error_t ips_tid_fini(struct ips_tid *tidc)
 psm2_error_t
 ips_tid_acquire(struct ips_tid *tidc,
 		const void *buf, uint32_t *length,
-		uint32_t *tid_array, uint32_t *tidcnt)
+		uint32_t *tid_array, uint32_t *tidcnt
+#ifdef PSM_CUDA
+		, uint8_t is_cuda_ptr
+#endif
+		)
 {
 	struct ips_tid_ctrl *ctrl = tidc->tid_ctrl;
 	psm2_error_t err = PSM2_OK;
@@ -209,7 +213,7 @@ ips_tid_acquire(struct ips_tid *tidc,
 	}
 
 #ifdef PSM_CUDA
-	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*) buf))
+	if (is_cuda_ptr)
 		flags = HFI1_BUF_GPU_MEM;
 #endif
 

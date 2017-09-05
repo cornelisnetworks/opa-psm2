@@ -218,8 +218,10 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 	psmi_assert(ctrl->spio_blockcpy_selected != NULL);
 
 #ifdef PSM_CUDA
-	PSMI_CUDA_CALL(cudaHostAlloc, (void **) &ctrl->cuda_pio_buffer,
+	if (PSMI_IS_CUDA_ENABLED) {
+		PSMI_CUDA_CALL(cudaHostAlloc, (void **) &ctrl->cuda_pio_buffer,
 		       10240 /* Max MTU */, cudaHostAllocPortable);
+	}
 #endif
 
 	_HFI_PRDBG("ips_spio_init() done\n");
@@ -230,7 +232,8 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 psm2_error_t ips_spio_fini(struct ips_spio *ctrl)
 {
 #ifdef PSM_CUDA
-	PSMI_CUDA_CALL(cudaFreeHost, (void *) ctrl->cuda_pio_buffer);
+	if (PSMI_IS_CUDA_ENABLED)
+		PSMI_CUDA_CALL(cudaFreeHost, (void *) ctrl->cuda_pio_buffer);
 #endif
 	spio_report_stall(ctrl, get_cycles(), 0ULL);
 	if (!ctrl->context->spio_ctrl)
@@ -698,7 +701,11 @@ psm2_error_t
 ips_spio_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 			struct hfi_pbc *pbc, uint32_t *payload,
 			uint32_t length, uint32_t isCtrlMsg,
-			uint32_t cksum_valid, uint32_t cksum)
+			uint32_t cksum_valid, uint32_t cksum
+#ifdef PSM_CUDA
+			, uint32_t is_cuda_payload
+#endif
+			)
 {
 	struct ips_spio *ctrl = proto->spioc;
 	volatile struct ips_spio_ctrl *spio_ctrl = ctrl->spio_ctrl;
@@ -829,7 +836,7 @@ fi_busy:
 
 	/* Write to PIO: other blocks of payload */
 #ifdef PSM_CUDA
-	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void *) payload)) {
+	if (is_cuda_payload) {
 		/* Since the implementation of cudaMemcpy is unknown,
 		   and the HFI specifies several conditions for how PIO
 		   writes must occur, for safety reasons we should not assume

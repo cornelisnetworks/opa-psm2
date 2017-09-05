@@ -196,6 +196,30 @@ ips_shortcpy(void *vdest, const void *vsrc, uint32_t nchars))
 	return;
 }
 
+#ifdef PSM_CUDA
+PSMI_ALWAYS_INLINE(
+void
+ips_shortcpy_host_mem(void *vdest, const void *vsrc, uint32_t nchars))
+{
+	unsigned char *dest = vdest;
+	const unsigned char *src = vsrc;
+
+	if (nchars >> 2)
+		hfi_dwordcpy((uint32_t *) dest, (uint32_t *) src, nchars >> 2);
+	dest += (nchars >> 2) << 2;
+	src += (nchars >> 2) << 2;
+	switch (nchars & 0x03) {
+	case 3:
+		*dest++ = *src++;
+	case 2:
+		*dest++ = *src++;
+	case 1:
+		*dest++ = *src++;
+	}
+	return;
+}
+#endif
+
 extern psm2_error_t ips_ptl_poll(ptl_t *ptl, int _ignored);
 
 /*
@@ -413,8 +437,10 @@ ips_ptl_mq_rndv(struct ips_proto *proto, psm2_mq_req_t req,
 	 * is issued on a device buffer. This helps the
 	 * receiver select TID instead of using eager buffers.
 	 */
-	if (req->is_buf_gpu_mem)
+	if (req->is_buf_gpu_mem) {
 		ips_scb_flags(scb) |= IPS_SEND_FLAG_GPU_BUF;
+		scb->mq_req = req;	/* request comes from GPU domain (device) ... */
+	}
 	req->cuda_hostbuf_used = 0;
 	if ((!(proto->flags & IPS_PROTO_FLAG_GPUDIRECT_RDMA_SEND) &&
 	   req->is_buf_gpu_mem &&
@@ -430,6 +456,10 @@ ips_ptl_mq_rndv(struct ips_proto *proto, psm2_mq_req_t req,
 		STAILQ_INIT(&req->sendreq_prefetch);
 		offset = 0;
 		req->cuda_hostbuf_used = 1;
+		scb->mq_req = NULL;	/*  ... but it is transferred to host memory,
+					   so setting req = NULL lets us take a faster
+					   decision on scb's locality while sending
+					   (see IS_CUDA_BUF() macro) */
 
 		/* start prefetching */
 		req->prefetch_send_msgoff = 0;
@@ -554,7 +584,12 @@ ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 		    ipsaddr->msgctl->mq_send_seqnum++;
 		ips_scb_copy_tag(scb->ips_lrh.tag, tag->tag);
 
-		mq_copy_tiny((uint32_t *) &ips_scb_hdrdata(scb),
+#ifdef PSM_CUDA
+		mq_copy_tiny_host_mem
+#else
+		mq_copy_tiny
+#endif
+			((uint32_t *) &ips_scb_hdrdata(scb),
 			     (uint32_t *) ubuf, len);
 		err = ips_mq_send_envelope(proto, flow, scb, PSMI_TRUE);
 		if (err != PSM2_OK)
@@ -584,7 +619,12 @@ ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 		ips_scb_length(scb) = paylen;
 		if (len > paylen) {
 			/* there are nonDW bytes, copy to header */
-			mq_copy_tiny((uint32_t *)&ips_scb_hdrdata(scb).u32w0,
+#ifdef PSM_CUDA
+			mq_copy_tiny_host_mem
+#else
+			mq_copy_tiny
+#endif
+				((uint32_t *)&ips_scb_hdrdata(scb).u32w0,
 				(uint32_t *)((uintptr_t)ubuf + paylen),
 				len - paylen);
 
@@ -697,7 +737,12 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 		    ipsaddr->msgctl->mq_send_seqnum++;
 		ips_scb_copy_tag(scb->ips_lrh.tag, tag->tag);
 
-		mq_copy_tiny((uint32_t *) &ips_scb_hdrdata(scb),
+#ifdef PSM_CUDA
+		mq_copy_tiny_host_mem
+#else
+		mq_copy_tiny
+#endif
+			((uint32_t *) &ips_scb_hdrdata(scb),
 			     (uint32_t *) ubuf, len);
 		err = ips_mq_send_envelope(proto, flow, scb, PSMI_TRUE);
 		if (err != PSM2_OK)
@@ -722,7 +767,12 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 		ips_scb_length(scb) = paylen;
 		if (len > paylen) {
 			/* there are nonDW bytes, copy to header */
-			mq_copy_tiny((uint32_t *)&ips_scb_hdrdata(scb).u32w0,
+#ifdef PSM_CUDA
+			mq_copy_tiny_host_mem
+#else
+			mq_copy_tiny
+#endif
+				((uint32_t *)&ips_scb_hdrdata(scb).u32w0,
 				(uint32_t *)((uintptr_t)ubuf + paylen),
 				len - paylen);
 		}
@@ -760,7 +810,12 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 				err = PSM2_OK;
 			} else {
 				/* copy to bounce buffer */
-				ips_shortcpy(ips_scb_buffer(scb),
+#ifdef PSM_CUDA
+				ips_shortcpy_host_mem
+#else
+				ips_shortcpy
+#endif
+					(ips_scb_buffer(scb),
 					(void*)ubuf, paylen);
 			}
 		}

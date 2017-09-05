@@ -1340,7 +1340,7 @@ psm2_mq_test2(psm2_mq_req_t *request, psm2_mq_status2_t *status);
  *
  * @retval PSM2_OK The request could be successfully cancelled such that the
  *                preposted receive buffer could be removed from the preposted
- *                receive queue before a match occured. The associated @c
+ *                receive queue before a match occurred. The associated @c
  *                request remains unchanged and the user must still return
  *                the storage to the MQ library.
  *

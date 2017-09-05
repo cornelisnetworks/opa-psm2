@@ -282,7 +282,7 @@ struct psmi_error_item psmi_error_items[] = {
 	{PSMI_NOLOG, "unknown 37"},
 	{PSMI_NOLOG, "unknown 38"},
 	{PSMI_NOLOG, "unknown 39"},
-	{PSMI_NOLOG, "Unknown/unresolved connection status (other errors occured)"},	/* PSM2_EPID_UNKNOWN = 40 */
+	{PSMI_NOLOG, "Unknown/unresolved connection status (other errors occurred)"},	/* PSM2_EPID_UNKNOWN = 40 */
 	{PSMI_NOLOG, "Endpoint could not be reached"},	/* PSM2_EPID_UNREACHABLE = 41 */
 	{PSMI_NOLOG, "unknown 42"},
 	{LOG_CRIT, "Invalid node (mismatch in bit width 32/64 or byte order)"},	/* PSM2_EPID_INVALID_NODE = 43 */

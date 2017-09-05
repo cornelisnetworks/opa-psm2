@@ -307,6 +307,25 @@ void MOCKABLE(psmi_mq_mtucpy)(void *vdest, const void *vsrc, uint32_t nchars)
 }
 MOCK_DEF_EPILOGUE(psmi_mq_mtucpy);
 
+void psmi_mq_mtucpy_host_mem(void *vdest, const void *vsrc, uint32_t nchars)
+{
+	unsigned char *dest = (unsigned char *)vdest;
+	const unsigned char *src = (const unsigned char *)vsrc;
+
+	if (nchars >> 2)
+		hfi_dwordcpy((uint32_t *) dest, (uint32_t *) src, nchars >> 2);
+	dest += (nchars >> 2) << 2;
+	src += (nchars >> 2) << 2;
+	switch (nchars & 0x03) {
+	case 3:
+		*dest++ = *src++;
+	case 2:
+		*dest++ = *src++;
+	case 1:
+		*dest++ = *src++;
+	}
+}
+
 #if 0				/* defined(__x86_64__) No consumers of mtucpy safe */
 void psmi_mq_mtucpy_safe(void *vdest, const void *vsrc, uint32_t nchars)
 {
@@ -828,12 +847,24 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 
 	PSM2_LOG_MSG("entering");
 	psmi_assert(MQE_TYPE_IS_RECV(req->type));
+#ifdef PSM_CUDA
+	psmi_mtucpy_fn_t psmi_mtucpy_fn;
+	if (req->is_buf_gpu_mem)
+		psmi_mtucpy_fn = psmi_mq_mtucpy;
+	else
+		psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
+#endif
 
 	switch (req->state) {
 	case MQ_STATE_COMPLETE:
 		if (req->buf != NULL) {	/* 0-byte messages don't alloc a sysbuf */
 			copysz = mq_set_msglen(req, len, req->send_msglen);
-			psmi_mq_mtucpy(buf, (const void *)req->buf, copysz);
+#ifdef PSM_CUDA
+			psmi_mtucpy_fn
+#else
+			psmi_mq_mtucpy
+#endif
+				(buf, (const void *)req->buf, copysz);
 			psmi_mq_sysbuf_free(mq, req->buf);
 		}
 		req->buf = buf;
@@ -848,7 +879,12 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 		 */
 		req->recv_msgoff = min(req->recv_msgoff, copysz);
 		if (req->recv_msgoff) {
-			psmi_mq_mtucpy(buf, (const void *)req->buf,
+#ifdef PSM_CUDA
+			psmi_mtucpy_fn
+#else
+			psmi_mq_mtucpy
+#endif
+				(buf, (const void *)req->buf,
 				       req->recv_msgoff);
 		}
 		/* What's "left" is no access */
@@ -869,7 +905,12 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 		 */
 		req->recv_msgoff = min(req->recv_msgoff, copysz);
 		if (req->recv_msgoff) {
-			psmi_mq_mtucpy(buf, (const void *)req->buf,
+#ifdef PSM_CUDA
+			psmi_mtucpy_fn
+#else
+			psmi_mq_mtucpy
+#endif
+				(buf, (const void *)req->buf,
 				       req->recv_msgoff);
 		}
 		/* What's "left" is no access */
@@ -1313,18 +1354,18 @@ psm2_error_t psmi_mq_malloc(psm2_mq_t *mqo)
 	 * sensible defaults until then */
 	if(psmi_cpu_model == CPUID_MODEL_PHI_GEN2 || psmi_cpu_model == CPUID_MODEL_PHI_GEN2M)
 	{
-		mq->hfi_thresh_rv = 200000; /* 200k, splitting diff 128K & 256K */
-		mq->hfi_base_window_rv = 4*1024*1024; /* 4MB */
+		mq->hfi_thresh_rv = MQ_HFI_THRESH_RNDV_PHI2;
+		mq->hfi_base_window_rv = MQ_HFI_WINDOW_RNDV_PHI2;
 	} else {
-		mq->hfi_thresh_rv = 64000;
-		mq->hfi_base_window_rv = 131072;
+		mq->hfi_thresh_rv = MQ_HFI_THRESH_RNDV_XEON;
+		mq->hfi_base_window_rv = MQ_HFI_WINDOW_RNDV_XEON;
 	}
-	mq->hfi_thresh_tiny = 8;
+	mq->hfi_thresh_tiny = MQ_HFI_THRESH_TINY;
 #ifdef PSM_CUDA
 	if (PSMI_IS_CUDA_ENABLED)
-		mq->hfi_base_window_rv = 2097152;
+		mq->hfi_base_window_rv = MQ_HFI_THRESH_RNDV_CUDA;
 #endif
-	mq->shm_thresh_rv = 16000;
+	mq->shm_thresh_rv = MQ_SHM_THRESH_RNDV;
 
 	memset(&mq->stats, 0, sizeof(psm2_mq_stats_t));
 	err = psmi_mq_req_init(mq);

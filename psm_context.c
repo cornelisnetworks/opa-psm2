@@ -452,10 +452,25 @@ psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 	}
 
 	/* Construct epid for this Endpoint */
-	context->epid = PSMI_EPID_PACK(lid, context->ctrl->ctxt_info.ctxt,
-				       context->ctrl->ctxt_info.subctxt,
-				       context->ctrl->__hfi_unit,
-				       hfi_type, 0x3ffffff);
+	switch (PSMI_EPID_VERSION) {
+		case PSMI_EPID_V1:
+			context->epid = PSMI_EPID_PACK_V1(lid, context->ctrl->ctxt_info.ctxt,
+								context->ctrl->ctxt_info.subctxt,
+								context->ctrl->__hfi_unit,
+								PSMI_EPID_VERSION, 0x3ffffff);
+			break;
+		case PSMI_EPID_V2:
+			context->epid = PSMI_EPID_PACK_V2(lid, context->ctrl->ctxt_info.ctxt,
+								context->ctrl->ctxt_info.subctxt,
+								PSMI_EPID_IPS_SHM, /*Not a only-shm epid */
+								PSMI_EPID_VERSION, ep->gid_hi);
+			break;
+		default:
+			/* Epid version is greater than max supportd version. */
+			psmi_assert_always(PSMI_EPID_VERSION <= PSMI_EPID_V2);
+			break;
+	}
+
 
 	_HFI_VDBG
 	    ("construct epid: lid %d ctxt %d subctxt %d hcatype %d mtu %d\n",

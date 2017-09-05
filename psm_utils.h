@@ -103,7 +103,7 @@ void psmi_epid_itor_init(struct psmi_eptab_iterator *itor, psm2_ep_t ep);
 void *psmi_epid_itor_next(struct psmi_eptab_iterator *itor);
 void psmi_epid_itor_fini(struct psmi_eptab_iterator *itor);
 
-uint64_t psmi_epid_hfi_type(psm2_epid_t epid);
+uint64_t psmi_epid_version(psm2_epid_t epid);
 
 /*
  * Hostname manipulation
@@ -292,7 +292,7 @@ void psmi_uuid_unparse(const psm2_uuid_t uuid, char *out);
 int psmi_uuid_compare(const psm2_uuid_t uuA, const psm2_uuid_t uuB);
 void *psmi_memcpyo(void *dst, const void *src, size_t n);
 uint32_t psmi_crc(unsigned char *buf, int len);
-uint32_t psmi_get_hfi_type(psmi_context_t *context);
+uint32_t psmi_get_hfi_type(const psmi_context_t *context);
 
 /*
  * Internal CPUID detection

@@ -162,19 +162,33 @@ psm2_error_t psmi_mq_req_init(psm2_mq_t mq)
 		 * and destroy events.
 		 */
 #ifdef PSM_CUDA
-		if ((mq->rreq_pool =
-		     psmi_mpool_create_for_cuda(sizeof(struct psm2_mq_req), chunksz,
-				       maxsz, 0, DESCRIPTORS, NULL,
-				       NULL, psmi_cuda_recvreq_alloc_func, NULL)) == NULL) {
+		if (PSMI_IS_CUDA_ENABLED) {
+			if ((mq->rreq_pool =
+	                     psmi_mpool_create_for_cuda(sizeof(struct psm2_mq_req), chunksz,
+                                       maxsz, 0, DESCRIPTORS, NULL,
+                                       NULL, psmi_cuda_recvreq_alloc_func, NULL)) == NULL) {
+				err = PSM2_NO_MEMORY;
+				goto fail;
+			}
+		}
+		else {
+			if ((mq->rreq_pool =
+				psmi_mpool_create(sizeof(struct psm2_mq_req), chunksz,
+                                       maxsz, 0, DESCRIPTORS, NULL,
+                                       NULL)) == NULL) {
+				err = PSM2_NO_MEMORY;
+				goto fail;
+			}
+		}
 #else
 		if ((mq->rreq_pool =
-		     psmi_mpool_create(sizeof(struct psm2_mq_req), chunksz,
+			psmi_mpool_create(sizeof(struct psm2_mq_req), chunksz,
 				       maxsz, 0, DESCRIPTORS, NULL,
 				       NULL)) == NULL) {
-#endif
 			err = PSM2_NO_MEMORY;
 			goto fail;
 		}
+#endif
 	}
 
 	/* Warm up the allocators */

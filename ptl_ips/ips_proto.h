@@ -492,7 +492,6 @@ struct ips_epaddr {
 	uint32_t connidx_incoming;	/* my connection idx */
 
 	uint16_t ctrl_msg_queued;	/* bitmap of queued control messages to be send */
-	uint16_t ep_mtu;		/* < Remote endpoint's MTU */
 	uint32_t window_rv;		/* RNDV window size per connection */
 
 	uint8_t  hpp_index;	/* high priority index */

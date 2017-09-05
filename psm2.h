@@ -515,7 +515,7 @@ typedef struct psm2_error_token *psm2_error_token_t;
  * individually set for each opened endpoint.  By default, endpoints will
  * inherit the global handler registered at the time of open.
  *
- * @param[in] ep Handle associated to the endpoint over which the error occured
+ * @param[in] ep Handle associated to the endpoint over which the error occurred
  *               or @c NULL if the error is being handled by the global error
  *               handler.
  * @param[in] error PSM2 error identifier
@@ -879,8 +879,8 @@ psm2_ep_epid_share_memory(psm2_ep_t ep, psm2_epid_t epid, int *result);
  */
 psm2_error_t psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout);
 
-#define PSM2_EP_CLOSE_GRACEFUL	0   /**< Graceful mode in @ref psm2_ep_close */
-#define PSM2_EP_CLOSE_FORCE	1   /**< Forceful mode in @ref psm2_ep_close */
+#define PSM2_EP_CLOSE_GRACEFUL	0	/**< Graceful mode in @ref psm2_ep_close */
+#define PSM2_EP_CLOSE_FORCE	1	/**< Forceful mode in @ref psm2_ep_close */
 
 /** @brief Provide mappings for network id to hostname
  *
@@ -1031,6 +1031,9 @@ psm2_ep_connect(psm2_ep_t ep, int num_of_epid, const psm2_epid_t *array_of_epid,
 * restored back to the state before calling psm2_ep_connect. The application
 * must call psm2_ep_connect to establish the connections again.
 *
+* This function is equivalent to calling psm2_ep_disconnect2() with mode ==
+* PSM2_EP_DISCONNECT_GRACEFUL.
+*
 * @param[in] ep PSM2 endpoint handle
 *
 * @param[in] num_of_epaddr The number of endpoint addresses to disconnect from,
@@ -1108,6 +1111,100 @@ psm2_error_t psm2_ep_disconnect(psm2_ep_t ep, int num_of_epaddr,
 				psm2_epaddr_t *array_of_epaddr,
 				const int *array_of_epaddr_mask,
 				psm2_error_t *array_of_errors, int64_t timeout);
+
+/* @brief Disconnect one or more remote endpoints from a local endpoint.
+*
+* Function to non-collectively disconnect a connection to a set of endpoint
+* addresses and free the endpoint addresses. After disconnecting, the
+* application cannot send messages to the remote processes and PSM2 is
+* restored back to the state before calling psm2_ep_connect. The application
+* must call psm2_ep_connect to establish the connections again.
+*
+* @param[in] ep PSM2 endpoint handle
+*
+* @param[in] num_of_epaddr The number of endpoint addresses to disconnect from,
+*                          which also indicates the number of elements contained
+*                          in all of the function’s array-based parameters.
+*
+* @param[in] array_of_epaddr User-allocated array that contains num_of_epaddr
+*                            valid endpoint addresses. Each endpoint address (or
+*                            epaddr) has been obtained through a previous
+*                            psm2_ep_connect call.
+*
+* @param[in] array_of_epaddr_mask User-allocated array that contains
+*                                 num_of_epaddr integers. This array of masks
+*                                 allows users to select which of the
+*                                 epaddresses in array_of_epaddr should be
+*                                 disconnected. If the integer at index i is
+*                                 zero, PSM2 does not attempt to disconnect to
+*                                 the epaddr at index i in array_of_epaddr. If
+*                                 this parameter is NULL, PSM2 tries to
+*                                 disconnect all epaddr in array_of_epaddr.
+*
+* @param[out] array_of_errors User-allocated array of at least num_of_epaddr
+*                             elements. If the function does not return PSM2_OK,
+*                             this array can be consulted for each endpoint
+*                             address not masked off by array_of_epaddr_mask to
+*                             know why the endpoint could not be disconnected.
+*                             Any endpoint address that could not be
+*                             disconnected because of an unrelated failure is
+*                             marked as PSM2_EPID_UNKNOWN. If the function
+*                             returns PSM2_OK, the errors for all endpoint
+*                             addresses also contain PSM2_OK.
+*
+* @param[in] mode One of @ref PSM2_EP_DISCONECT_GRACEFUL or @ref PSM2_EP_DISCONECT_FORCE
+*
+* @param[in] timeout Timeout in nanoseconds after which disconnection attempts
+*                    are abandoned. Setting this value to 0 disables timeout and
+*                    waits until all endpoints have been successfully
+*                    disconnected or until an error is detected. Supplying a
+*                    negative value here sets the disconnection mode to "force".
+*
+* @pre You have established the connections with previous psm2_ep_connect calls.
+*
+* @post If the disconnect is successful, the corresponding epaddr in
+*       array_of_epaddr is reset to NULL pointer.
+*
+* @post If unsuccessful, you can query the return status of each individual
+*       remote endpoint in array_of_errors.
+*
+* @post PSM2 does not keep any reference to the arrays passed into the function
+*       and the caller is free to deallocate them.
+*
+* @post The error value with the highest importance is returned by the function
+*       if some portion of the communication failed. Refer to individual errors
+*       in array_of_errors whenever the function cannot return PSM2_OK.
+*
+* @returns PSM2_OK The entire set of endpoint IDs were successfully disconnected
+*          and endpoint addresses are freed by PSM2.
+*
+* @code{.c}
+int disconnect_endpoints(psm2_ep_t ep, int num_epaddr,
+             const psm2_epaddr_t *array_of_epaddr)
+{
+    psm2_error_t *errors =
+        (psm2_error_t *)calloc(num_epaddr, sizeof(psm2_error_t));
+    if (errors == NULL)
+        return -1;
+    psm2_ep_disconnect2(
+        ep, num_epaddr, array_of_epaddr,
+        NULL, // We want to disconnect all epaddrs, no mask needed,
+        errors,
+	PSM2_EP_DISCONECT_GRACEFUL,
+        30 * e9); // 30 second timeout, 0 ns is forever
+    free(errors);
+    return 1;
+}
+@endcode
+*/
+psm2_error_t psm2_ep_disconnect2(psm2_ep_t ep, int num_of_epaddr,
+				psm2_epaddr_t *array_of_epaddr,
+				const int *array_of_epaddr_mask,
+				psm2_error_t *array_of_errors,
+				int mode, int64_t timeout);
+
+#define PSM2_EP_DISCONNECT_GRACEFUL	PSM2_EP_CLOSE_GRACEFUL   /**< Graceful mode in @ref psm2_ep_disconnect2 */
+#define PSM2_EP_DISCONNECT_FORCE	PSM2_EP_CLOSE_FORCE   /**< Forceful mode in @ref psm2_ep_disconnect2 */
 
 /** @brief Ensure endpoint communication progress
  *

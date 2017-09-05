@@ -96,7 +96,11 @@ psm2_error_t ips_spio_transfer_frame(struct ips_proto *proto,
 				struct ips_flow *flow, struct hfi_pbc *pbc,
 				uint32_t *payload, uint32_t length,
 				uint32_t isCtrlMsg, uint32_t cksum_valid,
-				uint32_t cksum);
+				uint32_t cksum
+#ifdef PSM_CUDA
+				, uint32_t is_cuda_payload
+#endif
+);
 
 psm2_error_t ips_spio_process_events(const struct ptl *ptl);
 

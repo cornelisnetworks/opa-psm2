@@ -799,7 +799,7 @@ uint32_t psmi_crc(unsigned char *buf, int len)
 }
 
 /* Return the HFI type being used for a context */
-uint32_t psmi_get_hfi_type(psmi_context_t *context)
+uint32_t psmi_get_hfi_type(const psmi_context_t *context)
 {
 	return PSMI_HFI_TYPE_OPA1;
 }

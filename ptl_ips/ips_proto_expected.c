@@ -376,7 +376,8 @@ MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 
 #ifdef PSM_CUDA
 	{
-		if (!(proto->flags & IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV)) {
+		if (PSMI_IS_CUDA_ENABLED &&
+			 !(proto->flags & IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV)) {
 			struct psmi_rlimit_mpool rlim = CUDA_HOSTBUFFER_LIMITS;
 			uint32_t maxsz, chunksz, max_elements;
 
@@ -464,7 +465,8 @@ psm2_error_t ips_protoexp_fini(struct ips_protoexp *protoexp)
 	psm2_error_t err = PSM2_OK;
 
 #ifdef PSM_CUDA
-	if(!(protoexp->proto->flags & IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV)) {
+	if(PSMI_IS_CUDA_ENABLED &&
+		 !(protoexp->proto->flags & IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV)) {
 		psmi_mpool_destroy(protoexp->cuda_hostbuf_pool_small_recv);
 		psmi_mpool_destroy(protoexp->cuda_hostbuf_pool_recv);
 	}
@@ -1420,8 +1422,8 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 	 *     (with 64-byte offset mode or KDETH.OM = 1)
 	 *   - Assuming a 4KB page size, 2MB/4KB = 512 pages.
 	 */
-	psmi_mq_mtucpy(&tidsendc->tid_list, tid_list,
-			sizeof(ips_tid_session_list));
+	psmi_mq_mtucpy_host_mem(&tidsendc->tid_list, tid_list,
+				sizeof(ips_tid_session_list));
 	ips_dump_tids(tid_list, "Received %d tids: ",
 				tid_list->tsess_tidcount);
 
@@ -1779,6 +1781,13 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 		psmi_assert(scb->nfrag == 1);
 	}
 
+#ifdef PSM_CUDA
+	if (tidsendc->mqreq->is_buf_gpu_mem &&		/* request's buffer comes from GPU realm */
+	   !tidsendc->mqreq->cuda_hostbuf_used) {	/* and it was NOT moved to HOST memory */
+		scb->mq_req = tidsendc->mqreq;		/* so let's mark it per scb, not to check its locality again */
+	}
+#endif
+
 	return scb;
 }
 
@@ -2026,12 +2035,20 @@ ips_tid_recv_alloc_frag(struct ips_protoexp *protoexp,
 		if ((err = ips_tidcache_acquire(&protoexp->tidc,
 			    (void *)pageaddr, &reglen,
 			    (uint32_t *) tid_list->tsess_list, &num_tids,
-			    &tidoff)))
+			    &tidoff
+#ifdef PSM_CUDA
+			    , tidrecvc->is_ptr_gpu_backed
+#endif
+			    )))
 			goto fail;
 	} else {
 		if ((err = ips_tid_acquire(&protoexp->tidc,
 			    (void *)pageaddr, &reglen,
-			    (uint32_t *) tid_list->tsess_list, &num_tids)))
+			    (uint32_t *) tid_list->tsess_list, &num_tids
+#ifdef PSM_CUDA
+			    , tidrecvc->is_ptr_gpu_backed
+#endif
+			)))
 			goto fail;
 	}
 

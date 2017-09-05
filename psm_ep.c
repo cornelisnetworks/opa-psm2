@@ -414,12 +414,12 @@ uint64_t psmi_epid_subcontext(psm2_epid_t epid)
 }
 
 /* Currently not exposed to users, we don't acknowledge the existence of
- * service levels and HFI types encoding within epids. This may require
+ * service levels encoding within epids. This may require
  * changing to expose SLs
  */
-uint64_t psmi_epid_hfi_type(psm2_epid_t epid)
+uint64_t psmi_epid_version(psm2_epid_t epid)
 {
-	return (uint64_t) PSMI_EPID_GET_HFITYPE(epid);
+	return (uint64_t) PSMI_EPID_GET_EPID_VERSION(epid);
 }
 
 uint64_t __psm2_epid_context(psm2_epid_t epid)
@@ -596,7 +596,7 @@ __psm2_ep_epid_share_memory(psm2_ep_t ep, psm2_epid_t epid, int *result_o)
 	PSMI_ERR_UNLESS_INITIALIZED(ep);
 
 	if ((!psmi_ep_device_is_enabled(ep, PTL_DEVID_IPS)) ||
-	    (psmi_epid_hfi_type(epid) == PSMI_HFI_TYPE_DEFAULT)) {
+		(psmi_epid_version(epid) == PSMI_EPID_VERSION_SHM)) {
 		/* If we are in the no hfi-mode, or the other process is,
 		 * the epid doesn't help us - so assume both we're on the same
 		 * machine and try to connect.
@@ -1397,14 +1397,40 @@ psmi_ep_open_device(const psm2_ep_t ep,
 		 * Since a jobkey is not available from IPS, pull the
 		 * first 16 bits from the UUID.
 		 */
-
-		*epid = PSMI_EPID_PACK(((uint16_t *) unique_job_key)[0],
-				       (rank >> 3), rank, 0,
-				       PSMI_HFI_TYPE_DEFAULT, rank);
+		switch (PSMI_EPID_VERSION) {
+			case PSMI_EPID_V1:
+				*epid = PSMI_EPID_PACK_V1(((uint16_t *) unique_job_key)[0],
+					   (rank >> 3), rank, 0,
+					   PSMI_EPID_VERSION_SHM, rank);
+				break;
+			case PSMI_EPID_V2:
+				/* Construct epid for this Endpoint */
+				*epid = PSMI_EPID_PACK_V2_SHM(getpid(),
+								PSMI_EPID_SHM_ONLY, /*is a only-shm epid */
+								PSMI_EPID_VERSION);
+				break;
+			default:
+				/* Epid version is greater than max supportd version. */
+				psmi_assert_always(PSMI_EPID_VERSION <= PSMI_EPID_V2);
+				break;
+		}
 	} else {
 		/* Self-only, meaning only 1 proc max */
-		*epid = PSMI_EPID_PACK(
-		    0, 0, 0, 0, PSMI_HFI_TYPE_DEFAULT, 0x3ffffff);
+		switch (PSMI_EPID_VERSION) {
+			case PSMI_EPID_V1:
+				*epid = PSMI_EPID_PACK_V1(
+					0, 0, 0, 0, PSMI_EPID_VERSION_SHM, 0x3ffffff);
+				break;
+			case PSMI_EPID_V2:
+				*epid = PSMI_EPID_PACK_V2_SHM(0,
+								PSMI_EPID_SHM_ONLY, /*is a only-shm epid */
+								PSMI_EPID_VERSION);
+				break;
+			default:
+				/* Epid version is greater than max supportd version. */
+				psmi_assert_always(PSMI_EPID_VERSION <= PSMI_EPID_V2);
+				break;
+		}
 	}
 
 fail:
