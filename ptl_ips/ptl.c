@@ -620,6 +620,14 @@ ips_ptl_getopt(const void *component_obj, int optname,
 	return ips_ptl_optctl(component_obj, optname, optval, optlen, 1);
 }
 
+
+static
+uint32_t
+ips_ptl_rcvthread_is_enabled(const ptl_t *ptl)
+{
+	return (ptl->runtime_flags & PSMI_RUNTIME_RCVTHREAD);
+}
+
 psm2_error_t ips_ptl_poll(ptl_t *ptl, int _ignored)
 {
 	const uint64_t current_count = get_cycles();
@@ -947,4 +955,10 @@ struct ptl_ctl_init
 psmi_ptl_ips = {
 	ips_ptl_sizeof, ips_ptl_init, ips_ptl_fini, ips_ptl_setopt,
 	    ips_ptl_getopt
+};
+
+struct ptl_ctl_rcvthread
+psmi_ptl_ips_rcvthread = {
+	ips_ptl_rcvthread_is_enabled,
+	ips_ptl_rcvthread_transfer_ownership,
 };

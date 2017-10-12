@@ -494,6 +494,44 @@ ret:
 psm2_error_t psmi_context_close(psmi_context_t *context)
 {
 	if (context->fd >= 0) {
+		struct hfi1_base_info *binfo;
+		struct hfi1_ctxt_info *cinfo;
+		int __hfi_pg_sz = sysconf(_SC_PAGESIZE);
+		binfo = &context->ctrl->base_info;
+		cinfo = &context->ctrl->ctxt_info;
+
+		munmap((void*)PSMI_ALIGNDOWN(binfo->sc_credits_addr, __hfi_pg_sz),
+		       __hfi_pg_sz);
+		munmap((void*)PSMI_ALIGNDOWN(binfo->pio_bufbase_sop, __hfi_pg_sz),
+		       cinfo->credits * 64);
+		munmap((void*)PSMI_ALIGNDOWN(binfo->pio_bufbase, __hfi_pg_sz),
+		       cinfo->credits * 64);
+		munmap((void*)PSMI_ALIGNDOWN(binfo->rcvhdr_bufbase, __hfi_pg_sz),
+		       cinfo->rcvhdrq_cnt * cinfo->rcvhdrq_entsize);
+		munmap((void*)PSMI_ALIGNDOWN(binfo->rcvegr_bufbase, __hfi_pg_sz),
+		       cinfo->egrtids * cinfo->rcvegr_size);
+		munmap((void*)PSMI_ALIGNDOWN(binfo->sdma_comp_bufbase, __hfi_pg_sz),
+		       cinfo->sdma_ring_size * sizeof(struct hfi1_sdma_comp_entry));
+		/* only unmap the RTAIL if it was enabled in the first place */
+		if (cinfo->runtime_flags & HFI1_CAP_DMA_RTAIL) {
+			munmap((void*)PSMI_ALIGNDOWN(binfo->rcvhdrtail_base, __hfi_pg_sz),
+			       __hfi_pg_sz);
+		}
+		munmap((void*)PSMI_ALIGNDOWN(binfo->events_bufbase, __hfi_pg_sz),
+		       __hfi_pg_sz);
+		munmap((void*)PSMI_ALIGNDOWN(binfo->status_bufbase, __hfi_pg_sz),
+		       __hfi_pg_sz);
+
+		/* only unmap subcontext-related stuff it subcontexts are enabled */
+		if (context->user_info.subctxt_cnt > 0) {
+			munmap((void*)PSMI_ALIGNDOWN(binfo->subctxt_uregbase, __hfi_pg_sz),
+			       __hfi_pg_sz);
+			munmap((void*)PSMI_ALIGNDOWN(binfo->subctxt_rcvhdrbuf, __hfi_pg_sz),
+			       __hfi_pg_sz);
+			munmap((void*)PSMI_ALIGNDOWN(binfo->subctxt_rcvegrbuf, __hfi_pg_sz),
+			       __hfi_pg_sz);
+		}
+
 		hfi_context_close(context->fd);
 		context->fd = -1;
 	}

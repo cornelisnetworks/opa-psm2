@@ -190,5 +190,6 @@ psm2_error_t ips_ptl_shared_poll(ptl_t *ptl, int _ignored);
  */
 psm2_error_t ips_ptl_rcvthread_init(ptl_t *ptl, struct ips_recvhdrq *recvq);
 psm2_error_t ips_ptl_rcvthread_fini(ptl_t *ptl);
+void ips_ptl_rcvthread_transfer_ownership(ptl_t *from_ptl, ptl_t *to_ptl);
 
 #endif /* _IPS_PTL_H */

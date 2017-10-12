@@ -104,6 +104,11 @@ struct ptl_ctl_init {
 		       void *optval, uint64_t *optlen);
 };
 
+struct ptl_ctl_rcvthread {
+	uint32_t(*is_enabled) (const ptl_t *ptl);
+	void(*transfer_ownership) (ptl_t *from_ptl, ptl_t *to_ptl);
+};
+
 typedef
 struct ptl_arg {
 	union {

@@ -1205,6 +1205,22 @@ psm2_error_t __psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout_in)
 	 * interface to allow asynchronous finalization
 	 */
 
+
+	/* Check if transfer ownership of receive thread is needed before closing ep.
+	 * In case of PSM2_MULTI_EP support receive thread is created and assigned
+	 * to first opened endpoint. Receive thread is killed when closing this
+	 * endpoint.
+	 */
+	if (ep->user_ep_next != NULL) {
+		/* Receive thread will be transfered and assigned to ep->user_ep_next
+		 * only if currently working receive thread (which will be killed) is
+		 * assigned to ep and there isn't any assigned to ep->user_ep_next.
+		 */
+		if ((psmi_ptl_ips_rcvthread.is_enabled(ep->ptl_ips.ptl)) &&
+		    (!psmi_ptl_ips_rcvthread.is_enabled(ep->user_ep_next->ptl_ips.ptl)))
+			psmi_ptl_ips_rcvthread.transfer_ownership(ep->ptl_ips.ptl, ep->user_ep_next->ptl_ips.ptl);
+	}
+
 	/*
 	 * Before freeing the master ep itself,
 	 * remove it from the global linklist.

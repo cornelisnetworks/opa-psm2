@@ -213,6 +213,23 @@ fail:
 	return err;
 }
 
+void ips_ptl_rcvthread_transfer_ownership(ptl_t *from_ptl, ptl_t *to_ptl)
+{
+	struct ptl_rcvthread *rcvc;
+
+	from_ptl->runtime_flags &= ~(PSMI_RUNTIME_RCVTHREAD);
+	to_ptl->runtime_flags |= PSMI_RUNTIME_RCVTHREAD;
+
+	to_ptl->rcvthread = from_ptl->rcvthread;
+	from_ptl->rcvthread = NULL;
+
+	rcvc = to_ptl->rcvthread;
+
+	rcvc->recvq = &to_ptl->recvq;
+	rcvc->context = to_ptl->context;
+	rcvc->ptl = to_ptl;
+}
+
 psm2_error_t rcvthread_initsched(struct ptl_rcvthread *rcvc)
 {
 	union psmi_envvar_val env_to;
@@ -322,8 +339,6 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 {
 	struct ptl_rcvthread *rcvc = (struct ptl_rcvthread *)rcvthreadc;
 	struct ips_recvhdrq *recvq = rcvc->recvq;
-	psmi_context_t *context = (psmi_context_t *) rcvc->context;
-	int fd_dev = context->fd;
 	int fd_pipe = rcvc->pipefd[0];
 	psm2_ep_t ep;
 	struct pollfd pfd[2];
@@ -354,7 +369,7 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 	_HFI_PRDBG("Enabled communication thread on URG packets\n");
 
 	while (1) {
-		pfd[0].fd = fd_dev;
+		pfd[0].fd = rcvc->context->fd;
 		pfd[0].events = POLLIN;
 		pfd[0].revents = 0;
 		pfd[1].fd = fd_pipe;
