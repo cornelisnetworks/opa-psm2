@@ -55,6 +55,7 @@ set -e
 
 BUILD_OPTS="gFGbBAS"
 BUILD_OPT=F
+SIGN_PKG=1
 
 function literate()
 {
@@ -63,11 +64,12 @@ function literate()
 
 function usage()
 {
-    echo "Usage: ${0##*/} [-h] [debuild -($(literate $BUILD_OPTS '|'))]"
+    echo "Usage: ${0##*/} [-h] [-n] [debuild -($(literate $BUILD_OPTS '|'))]"
+	echo "    -n : do not sign package"
     exit $1
 }
 
-while getopts "h$BUILD_OPTS" OPT; do
+while getopts "hn$BUILD_OPTS" OPT; do
     case $OPT in
         h)
             usage
@@ -75,6 +77,9 @@ while getopts "h$BUILD_OPTS" OPT; do
         \?)
             usage 1
                 ;;
+		n)
+			SIGN_PKG=0
+			    ;;
         *)
             BUILD_OPT=$OPT
                 ;;
@@ -90,16 +95,21 @@ test ! $# -eq 0 && usage
 # Annotate changelog
 cat debian/changelog.in > debian/changelog
 
-GIT_TAG_PREFIX=v
+GIT_TAG_PREFIX=PSM2_
 GIT_TAG_RELEASE=$(git describe --tags --long --match="$GIT_TAG_PREFIX*")
-VERSION=$(sed -e "s/^$GIT_TAG_PREFIX\(.\+\)-\(.\+\)-.\+/\1_\2/" -e 's/_/./g' <<< "$GIT_TAG_RELEASE")
+VERSION=$(sed -e "s/^$GIT_TAG_PREFIX\(.\+\)-\(.\+\)-.\+/\1_\2/" -e 's/_/./g' -e 's/-/./g' <<< "$GIT_TAG_RELEASE")
+
+DEBUILD_OPTS=
+if [ $SIGN_PKG -eq 0 ] ; then
+	DEBUILD_OPTS="-us -uc"
+fi
 
 debchange --newversion=$VERSION "Bump up version to $VERSION"
 
 debchange --release ""
 
 # Build package
-debuild -$BUILD_OPT -tc
+debuild -$BUILD_OPT -tc $DEBUILD_OPTS
 
 echo "The deb package(s) is (are) in parent directory"
 
