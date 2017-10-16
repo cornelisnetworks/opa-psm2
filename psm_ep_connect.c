@@ -54,8 +54,26 @@
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
+#include "psm_mq_internal.h"
 
 int psmi_ep_device_is_enabled(const psm2_ep_t ep, int devid);
+
+#if _HFI_DEBUGGING
+PSMI_ALWAYS_INLINE(
+char *psmi_getdevice(int type))
+{
+	switch (type) {
+	case PTL_DEVID_IPS:
+		return "ips";
+	case PTL_DEVID_AMSH:
+		return "amsh";
+	case PTL_DEVID_SELF:
+		return "self";
+	default:
+		return "ips";
+	}
+}
+#endif
 
 psm2_error_t
 __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epid,
@@ -70,7 +88,6 @@ __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epi
 	int num_toconnect = 0;
 	int *epid_mask = NULL;
 	int *epid_mask_isdupof = NULL;
-	char *device;
 	uint64_t t_start = get_cycles();
 	uint64_t t_left;
 	union psmi_envvar_val timeout_intval;
@@ -78,19 +95,19 @@ __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epi
 	PSM2_LOG_MSG("entering");
 	PSMI_ERR_UNLESS_INITIALIZED(ep);
 
-	PSMI_PLOCK();
-
 	/*
 	 * Normally we would lock here, but instead each implemented ptl component
 	 * does its own locking.  This is mostly because the ptl components are
-	 * ahead of the PSM interface in that they can disconnect their peers.
+	 * ahead of the PSM2 interface in that they can disconnect their peers.
 	 */
 	if (ep == NULL || array_of_epaddr == NULL || array_of_epid == NULL ||
 	    num_of_epid < 1) {
 		err = psmi_handle_error(ep, PSM2_PARAM_ERR,
 					"Invalid psm2_ep_connect parameters");
-		goto fail;
+		goto fail_nolock;
 	}
+
+	PSMI_LOCK(ep->mq->progress_lock);
 
 	/* We need two of these masks to detect duplicates */
 	err = PSM2_NO_MEMORY;
@@ -112,6 +129,13 @@ __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epi
 			epid_mask[j] = 1;
 			array_of_errors[j] = PSM2_EPID_UNKNOWN;
 			array_of_epaddr[j] = NULL;
+			if (psmi_epid_version(array_of_epid[j]) >
+						 PSMI_EPID_VERSION) {
+					psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+					  " Unkown version of EPID - %"PRIu64" \n"
+					  "Please upgrade PSM2 or set PSM2_ADDR_FMT=1 in the environment to force EPID version 1 \n",
+					  psmi_epid_version(array_of_epid[j]));
+			}
 			num_toconnect++;
 		}
 		epid_mask_isdupof[j] = -1;
@@ -155,23 +179,18 @@ __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epi
 		case PTL_DEVID_IPS:
 			ptlctl = &ep->ptl_ips;
 			ptl = ep->ptl_ips.ptl;
-			device = "ips";
 			break;
 		case PTL_DEVID_AMSH:
 			ptlctl = &ep->ptl_amsh;
 			ptl = ep->ptl_amsh.ptl;
-			device = "amsh";
 			break;
 		case PTL_DEVID_SELF:
 			ptlctl = &ep->ptl_self;
 			ptl = ep->ptl_self.ptl;
-			device = "self";
 			break;
 		default:
-			device = "unknown";
 			ptlctl = &ep->ptl_ips;	/*no-unused */
 			ptl = ep->ptl_ips.ptl;	/*no-unused */
-			device = "ips";	/*no-unused */
 			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 					  "Unknown/unhandled PTL id %d\n",
 					  ep->devid_enabled[i]);
@@ -179,13 +198,20 @@ __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epi
 		}
 		t_left = psmi_cycles_left(t_start, timeout);
 
-		_HFI_VDBG("Trying to connect with device %s\n", device);
+		if (_HFI_VDBG_ON) {
+			_HFI_VDBG_ALWAYS
+				("Trying to connect with device %s\n",
+				psmi_getdevice(ep->devid_enabled[i]));
+		}
 		if ((err = ptlctl->ep_connect(ptl, num_of_epid, array_of_epid,
 					      epid_mask, array_of_errors,
 					      array_of_epaddr,
 					      cycles_to_nanosecs(t_left)))) {
-			_HFI_PRDBG("Connect failure in device %s err=%d\n",
-				   device, err);
+			if (_HFI_PRDBG_ON) {
+				_HFI_PRDBG_ALWAYS
+					("Connect failure in device %s err=%d\n",
+					psmi_getdevice(ep->devid_enabled[i]), err);
+			}
 			goto connect_fail;
 		}
 
@@ -243,22 +269,22 @@ connect_fail:
 
 		if (err == PSM2_EPID_UNREACHABLE) {
 			char *deverr = "of an incorrect setting";
-			char *eperr = " ";
+			char *eperr = "";
 			char *devname = NULL;
 			if (!psmi_ep_device_is_enabled(ep, PTL_DEVID_AMSH)) {
 				deverr =
-				    "there is no shared memory PSM device (shm)";
-				eperr = " shared memory ";
+				    "there is no shared memory PSM2 device (shm)";
+				eperr = " shared memory";
 			} else
 			    if (!psmi_ep_device_is_enabled(ep, PTL_DEVID_IPS)) {
 				deverr =
-				    "there is no OPA PSM device (hfi)";
-				eperr = " OPA ";
+				    "there is no OPA PSM2 device (hfi)";
+				eperr = " OPA";
 			}
 
 			len = snprintf(errbuf, sizeof(errbuf) - 1,
-				       "Some%sendpoints could not be connected because %s "
-				       "in the currently enabled PSM_DEVICES (",
+				       "Some%s endpoints could not be connected because %s "
+				       "in the currently enabled PSM2_DEVICES (",
 				       eperr, deverr);
 			for (i = 0; i < PTL_MAX_INIT && len < sizeof(errbuf) - 1;
 			     i++) {
@@ -285,7 +311,7 @@ connect_fail:
 		} else
 			len = snprintf(errbuf, sizeof(errbuf) - 1,
 				       "%s", err == PSM2_TIMEOUT ?
-				       "Dectected connection timeout" :
+				       "Detected connection timeout" :
 				       psm2_error_get_string(err));
 
 		/* first pass, look for all nodes with the error */
@@ -309,12 +335,13 @@ connect_fail:
 			}
 		}
 		errbuf[sizeof(errbuf) - 1] = '\0';
-		err = psmi_handle_error(ep, err, errbuf);
+		err = psmi_handle_error(ep, err, "%s", errbuf);
 	}
 
 fail:
-	PSMI_PUNLOCK();
+	PSMI_UNLOCK(ep->mq->progress_lock);
 
+fail_nolock:
 	if (epid_mask != NULL)
 		psmi_free(epid_mask);
 	if (epid_mask_isdupof != NULL)
@@ -324,3 +351,270 @@ fail:
 	return err;
 }
 PSMI_API_DECL(psm2_ep_connect)
+
+psm2_error_t __psm2_ep_disconnect(psm2_ep_t ep, int num_of_epaddr,
+				  psm2_epaddr_t *array_of_epaddr,
+				  const int *array_of_epaddr_mask,
+				  psm2_error_t *array_of_errors,
+				  int64_t timeout)
+{
+	return psm2_ep_disconnect2(ep, num_of_epaddr, array_of_epaddr,
+				   array_of_epaddr_mask, array_of_errors,
+				   PSM2_EP_DISCONNECT_GRACEFUL, timeout);
+}
+PSMI_API_DECL(psm2_ep_disconnect)
+
+psm2_error_t __psm2_ep_disconnect2(psm2_ep_t ep, int num_of_epaddr,
+				  psm2_epaddr_t *array_of_epaddr,
+				  const int *array_of_epaddr_mask,
+				  psm2_error_t *array_of_errors,
+				  int mode, int64_t timeout)
+{
+	psm2_error_t err = PSM2_OK;
+	ptl_ctl_t *ptlctl;
+	ptl_t *ptl;
+	int i, j, dup_idx;
+	int num_todisconnect = 0;
+	int *epaddr_mask = NULL;
+	int *epaddr_mask_isdupof = NULL;
+	uint64_t t_start = get_cycles();
+	uint64_t t_left;
+	union psmi_envvar_val timeout_intval;
+
+	PSM2_LOG_MSG("entering");
+	PSMI_ERR_UNLESS_INITIALIZED(ep);
+
+
+	/*
+	 * Normally we would lock here, but instead each implemented ptl component
+	 * does its own locking.  This is mostly because the ptl components are
+	 * ahead of the PSM2 interface in that they can disconnect their peers.
+	 */
+	if (ep == NULL || array_of_epaddr == NULL ||
+	    num_of_epaddr < 1) {
+		err = psmi_handle_error(ep, PSM2_PARAM_ERR,
+					"Invalid psm2_ep_disconnect parameters");
+		goto fail_nolock;
+	}
+
+	PSMI_LOCK(ep->mq->progress_lock);
+
+	/* We need two of these masks to detect duplicates */
+	err = PSM2_NO_MEMORY;
+	epaddr_mask =
+	    (int *)psmi_malloc(ep, UNDEFINED, sizeof(int) * num_of_epaddr);
+	if (epaddr_mask == NULL)
+		goto fail;
+	epaddr_mask_isdupof =
+	    (int *)psmi_malloc(ep, UNDEFINED, sizeof(int) * num_of_epaddr);
+	if (epaddr_mask_isdupof == NULL)
+		goto fail;
+	err = PSM2_OK;
+
+	/* Eventually handle timeouts across all connects. */
+	for (j = 0; j < num_of_epaddr; j++) {
+		if (array_of_epaddr_mask != NULL && !array_of_epaddr_mask[j])
+			epaddr_mask[j] = 0;
+		else {
+			epaddr_mask[j] = 1;
+			array_of_errors[j] = PSM2_EPID_UNKNOWN;
+			num_todisconnect++;
+		}
+		epaddr_mask_isdupof[j] = -1;
+	}
+
+	psmi_getenv("PSM2_DISCONNECT_TIMEOUT",
+		    "End-point disconnection timeout over-ride. 0 for no time-out.",
+		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
+		    (union psmi_envvar_val)0, &timeout_intval);
+
+	if (getenv("PSM2_DISCONNECT_TIMEOUT")) {
+		timeout = timeout_intval.e_uint * SEC_ULL;
+	} else if (timeout > 0) {
+		/* The timeout parameter provides the minimum timeout. A heuristic
+		 * is used to scale up the timeout linearly with the number of
+		 * endpoints, and we allow one second per 100 endpoints. */
+		timeout = max(timeout, (num_todisconnect * SEC_ULL) / 100);
+	}
+
+	if (timeout > 0 && timeout < PSMI_MIN_EP_CONNECT_TIMEOUT)
+		timeout = PSMI_MIN_EP_CONNECT_TIMEOUT;
+	_HFI_PRDBG("Disconnect %d endpoints with time-out of %.2f secs\n",
+		   num_todisconnect, (double)timeout / 1e9);
+
+	/* Look for duplicates in input array */
+	for (i = 0; i < num_of_epaddr; i++) {
+		for (j = i + 1; j < num_of_epaddr; j++) {
+			if (array_of_epaddr[i] == array_of_epaddr[j] &&
+			    epaddr_mask[i] && epaddr_mask[j]) {
+				epaddr_mask[j] = 0;	/* don't disconnect more than once */
+				epaddr_mask_isdupof[j] = i;
+			}
+		}
+	}
+
+	for (i = 0; i < PTL_MAX_INIT; i++) {
+		if (ep->devid_enabled[i] == -1)
+			continue;
+		/* Set up the right connect ptrs */
+		switch (ep->devid_enabled[i]) {
+		case PTL_DEVID_IPS:
+			ptlctl = &ep->ptl_ips;
+			ptl = ep->ptl_ips.ptl;
+			break;
+		case PTL_DEVID_AMSH:
+			ptlctl = &ep->ptl_amsh;
+			ptl = ep->ptl_amsh.ptl;
+			break;
+		case PTL_DEVID_SELF:
+			ptlctl = &ep->ptl_self;
+			ptl = ep->ptl_self.ptl;
+			break;
+		default:
+			ptlctl = &ep->ptl_ips;	/*no-unused */
+			ptl = ep->ptl_ips.ptl;	/*no-unused */
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+					  "Unknown/unhandled PTL id %d\n",
+					  ep->devid_enabled[i]);
+			break;
+		}
+		t_left = psmi_cycles_left(t_start, timeout);
+
+		if (_HFI_VDBG_ON) {
+			_HFI_VDBG_ALWAYS
+				("Trying to disconnect with device %s\n",
+				psmi_getdevice(ep->devid_enabled[i]));
+		}
+		if ((err = ptlctl->ep_disconnect(ptl, (mode == PSM2_EP_DISCONNECT_FORCE),
+					      num_of_epaddr, array_of_epaddr,
+					      epaddr_mask, array_of_errors,
+					      cycles_to_nanosecs(t_left)))) {
+			if (_HFI_PRDBG_ON) {
+				_HFI_PRDBG_ALWAYS
+					("Disconnect failure in device %s err=%d\n",
+					psmi_getdevice(ep->devid_enabled[i]), err);
+			}
+			goto disconnect_fail;
+		}
+
+		/* Now process what's been disconnected */
+		for (j = 0; j < num_of_epaddr; j++) {
+			dup_idx = epaddr_mask_isdupof[j];
+			if (!epaddr_mask[j] && dup_idx == -1)
+				continue;
+
+			if (dup_idx != -1) {	/* dup */
+				array_of_errors[j] = array_of_errors[dup_idx];
+				epaddr_mask_isdupof[j] = -1;
+			}
+
+			if (array_of_errors[j] == PSM2_OK) {
+				epaddr_mask[j] = 0;	/* don't try on next ptl */
+				array_of_epaddr[j] = NULL;
+				ep->connections--;
+			}
+		}
+	}
+
+	for (i = 0; i < num_of_epaddr; i++) {
+		if (array_of_epaddr_mask != NULL && !array_of_epaddr_mask[i])
+			continue;
+		/* If we see unreachable here, that means some PTLs were not enabled */
+		if (array_of_errors[i] == PSM2_EPID_UNREACHABLE) {
+			err = PSM2_EPID_UNREACHABLE;
+			break;
+		}
+	}
+
+disconnect_fail:
+	/* If the error is a timeout (at worse) and the client is OPA MPI,
+	 * just return timeout to let OPA MPI handle the hostnames that
+	 * timed out */
+	if (err != PSM2_OK) {
+		char errbuf[PSM2_ERRSTRING_MAXLEN];
+		size_t len;
+		int j = 0;
+
+		if (err == PSM2_EPID_UNREACHABLE) {
+			char *deverr = "of an incorrect setting";
+			char *eperr = "";
+			char *devname = NULL;
+			if (!psmi_ep_device_is_enabled(ep, PTL_DEVID_AMSH)) {
+				deverr =
+				    "there is no shared memory PSM2 device (shm)";
+				eperr = " shared memory";
+			} else
+			    if (!psmi_ep_device_is_enabled(ep, PTL_DEVID_IPS)) {
+				deverr =
+				    "there is no OPA PSM2 device (hfi)";
+				eperr = " OPA";
+			}
+
+			len = snprintf(errbuf, sizeof(errbuf) - 1,
+				       "Some%s endpoints could not be disconnected because %s "
+				       "in the currently enabled PSM2_DEVICES (",
+				       eperr, deverr);
+			for (i = 0; i < PTL_MAX_INIT && len < sizeof(errbuf) - 1; i++) {
+				switch (ep->devid_enabled[i]) {
+				case PTL_DEVID_IPS:
+					devname = "hfi";
+					break;
+				case PTL_DEVID_AMSH:
+					devname = "shm";
+					break;
+				case PTL_DEVID_SELF:
+				default:
+					devname = "self";
+					break;
+				}
+				len +=
+				    snprintf(errbuf + len,
+					     sizeof(errbuf) - len - 1, "%s,",
+					     devname);
+			}
+			if (len < sizeof(errbuf) - 1 && devname != NULL)
+				/* parsed something, remove trailing comma */
+				errbuf[len - 1] = ')';
+		} else
+			len = snprintf(errbuf, sizeof(errbuf) - 1,
+				       "%s", err == PSM2_TIMEOUT ?
+				       "Detected disconnect timeout" :
+				       psm2_error_get_string(err));
+
+		/* first pass, look for all nodes with the error */
+		for (i = 0; i < num_of_epaddr && len < sizeof(errbuf) - 1; i++) {
+			if (array_of_epaddr_mask != NULL
+			    && !array_of_epaddr_mask[i])
+				continue;
+			if (array_of_errors[i] == PSM2_OK)
+				continue;
+			if (array_of_errors[i] == PSM2_EPID_UNREACHABLE &&
+			    err != PSM2_EPID_UNREACHABLE)
+				continue;
+			if (err == array_of_errors[i]) {
+				len +=
+				    snprintf(errbuf + len,
+					     sizeof(errbuf) - len - 1, "%c %s",
+					     j == 0 ? ':' : ',',
+					     psmi_epaddr_get_hostname
+					     (array_of_epaddr[i]->epid));
+				j++;
+			}
+		}
+		errbuf[sizeof(errbuf) - 1] = '\0';
+		err = psmi_handle_error(ep, err, "%s", errbuf);
+	}
+
+fail:
+	PSMI_UNLOCK(ep->mq->progress_lock);
+
+fail_nolock:
+	if (epaddr_mask != NULL)
+		psmi_free(epaddr_mask);
+	if (epaddr_mask_isdupof != NULL)
+		psmi_free(epaddr_mask_isdupof);
+
+	PSM2_LOG_MSG("leaving");
+	return err;
+}
+PSMI_API_DECL(psm2_ep_disconnect2)

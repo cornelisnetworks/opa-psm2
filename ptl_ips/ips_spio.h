@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #ifndef IPS_SPIO_H
 #define IPS_SPIO_H
@@ -96,7 +96,11 @@ psm2_error_t ips_spio_transfer_frame(struct ips_proto *proto,
 				struct ips_flow *flow, struct hfi_pbc *pbc,
 				uint32_t *payload, uint32_t length,
 				uint32_t isCtrlMsg, uint32_t cksum_valid,
-				uint32_t cksum);
+				uint32_t cksum
+#ifdef PSM_CUDA
+				, uint32_t is_cuda_payload
+#endif
+);
 
 psm2_error_t ips_spio_process_events(const struct ptl *ptl);
 
@@ -174,6 +178,12 @@ struct ips_spio {
 	/* 8B copying, 16B copying, 32B copying, and 64B copying */
 	ips_spio_blockcpy_fn_t spio_blockcpy_routines[4];
 	ips_spio_blockcpy_fn_t spio_blockcpy_selected;
+
+#ifdef PSM_CUDA
+	/* Use an intermediate buffer when writing PIO data from the
+	   GPU to ensure that we follow the HFI's write ordering rules. */
+	unsigned char *cuda_pio_buffer;
+#endif
 };
 
 #endif /* IPS_SPIO_H */

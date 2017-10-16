@@ -56,11 +56,19 @@
 
 #include <signal.h>
 #include "psm2_mock_testing.h"
+#include "opa_intf.h"
 
 #if defined( IB_IOCTL_MAGIC )
 #include <sys/ioctl.h>
 #endif
 
+/* If this is a mocking tests build, we introduce "incision points"
+ * through which we can easily mock external dependencies.
+ * For non-mocking-tests build, we bypass those indirections
+ * for performance reasons.
+ */
+
+#ifdef PSM2_MOCK_TESTING
 void MOCKABLE(psmi_exit)(int status);
 MOCK_DCL_EPILOGUE(psmi_exit);
 
@@ -72,6 +80,19 @@ MOCK_DCL_EPILOGUE(psmi_ioctl);
 
 int MOCKABLE(psmi_sigaction)(int signum, const struct sigaction *act, struct sigaction *oldact);
 MOCK_DCL_EPILOGUE(psmi_sigaction);
+
+void MOCKABLE(psmi_rmb)(void);
+MOCK_DCL_EPILOGUE(psmi_rmb);
+
+#else /* def PSM2_MOCK_TESTING */
+
+#define psmi_exit	exit
+#define psmi_write	write
+#define psmi_ioctl	ioctl
+#define psmi_sigaction	sigaction
+#define psmi_rmb 	ips_rmb
+
+#endif /* def PSM2_MOCK_TESTING */
 
 #endif // _PSMI_WRAPPERS_H
 

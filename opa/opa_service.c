@@ -260,11 +260,11 @@ int hfi_context_open_ex(int unit, int port, uint64_t open_timeout,
 		{
 			int major = c.addr >> HFI1_SWMAJOR_SHIFT;
 			if (major != hfi_get_user_major_version()) {
-				/* If there is a skew between the major version of the driver
-				   that is executing and the major version which was used during
-				   compilation of PSM, we treat that is a fatal error. */
-                                _HFI_INFO("PSM2 and driver version mismatch: (%d != %d)\n",
-					  major, hfi_get_user_major_version());
+					/* If there is a skew between the major version of the driver
+					   that is executing and the major version which was used during
+					   compilation of PSM, we treat that is a fatal error. */
+					_HFI_INFO("PSM2 and driver version mismatch: (%d != %d)\n",
+						  major, hfi_get_user_major_version());
 				close(fd);
 				return -1;
 			}
@@ -342,6 +342,9 @@ int _hfi_cmd_ioctl(int fd, struct hfi1_cmd *cmd, size_t count)
         [PSMI_HFI_CMD_CTXT_RESET]       = {HFI1_IOCTL_CTXT_RESET    , 1},
         [PSMI_HFI_CMD_TID_INVAL_READ]   = {HFI1_IOCTL_TID_INVAL_READ, 0},
         [PSMI_HFI_CMD_GET_VERS]         = {HFI1_IOCTL_GET_VERS      , 1},
+#ifdef PSM_CUDA
+	[PSMI_HFI_CMD_TID_UPDATE_V2]	= {HFI1_IOCTL_TID_UPDATE_V2 , 0},
+#endif
     };
 
 	if (cmd->type < PSMI_HFI_CMD_LAST)

@@ -825,7 +825,7 @@ psm2_error_t ips_recvhdrq_scan_cca (struct ips_recvhdrq *recvq)
 							    &ctrlscb, ctrlscb.cksum, 0);
 			}
 		}
-		else if_pt (_is_cca_becn_set(rcv_ev.p_hdr) << (IPS_RECV_EVENT_BECN - 1) ) {
+		else if_pt (0 != (_is_cca_becn_set(rcv_ev.p_hdr) << (IPS_RECV_EVENT_BECN - 1))) {
 			struct ips_epstate_entry *epstaddr = ips_epstate_lookup(recvq->epstate,
 										rcv_ev.p_hdr->connidx);
 

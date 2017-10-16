@@ -232,17 +232,24 @@
 	(((val) >> HFI_KHDR_TIDCTRL_SHIFT) & \
 	HFI_KHDR_TIDCTRL_MASK)
 
+#ifdef PSM_CUDA
+extern int is_driver_gpudirect_enabled;
+
+static __inline__ int _psmi_is_driver_gpudirect_enabled() __attribute__((always_inline));
+
+static __inline__ int
+_psmi_is_driver_gpudirect_enabled()
+{
+	return is_driver_gpudirect_enabled;
+}
+#define PSMI_IS_DRIVER_GPUDIRECT_ENABLED _psmi_is_driver_gpudirect_enabled()
+#endif
+
 /* this portion only defines what we currently use */
 struct hfi_pbc {
 	__u32 pbc0;
-
-	union {
-		struct {
-			__u16 PbcStaticRateControlCnt;
-			__u16 fill1;
-		};
-		__u32 pbc1;
-	};
+	__u16 PbcStaticRateControlCnt;
+	__u16 fill1;
 };
 
 /* hfi kdeth header format */
@@ -291,7 +298,13 @@ struct hfi_kdeth {
 #define HFI_MESSAGE_HDR_SIZE_HFI       (HFI_MESSAGE_HDR_SIZE-20)
 /* SPIO includes 8B PBC and message header */
 #define HFI_SPIO_HDR_SIZE      (8+56)
-/* SDMA includes 8B sdma hdr, 8B PBC, and message header */
+/*
+ * SDMA includes 8B sdma hdr, 8B PBC, and message header.
+ * If we are using GPU workloads, we need to set a new
+ * "flags" member which takes another 2 bytes in the
+ * sdma hdr. We let the driver know of this 2 extra bytes
+ * at runtime when we set the length for the iovecs.
+ */
 #define HFI_SDMA_HDR_SIZE      (8+8+56)
 
 /* functions for extracting fields from rcvhdrq entries for the driver.
@@ -791,10 +804,14 @@ static __inline__ void hfi_hdrset_seq(__le32 *rbuf, uint32_t val)
 /* Returns 0 on success, else an errno.  See full description at declaration */
 static __inline__ int32_t hfi_update_tid(struct _hfi_ctrl *ctrl,
 					 uint64_t vaddr, uint32_t *length,
-					 uint64_t tidlist, uint32_t *tidcnt)
+					 uint64_t tidlist, uint32_t *tidcnt, uint16_t flags)
 {
 	struct hfi1_cmd cmd;
+#ifdef PSM_CUDA
+	struct hfi1_tid_info_v2 tidinfo;
+#else
 	struct hfi1_tid_info tidinfo;
+#endif
 	int err;
 
 	tidinfo.vaddr = vaddr;		/* base address for this send to map */
@@ -804,6 +821,15 @@ static __inline__ int32_t hfi_update_tid(struct _hfi_ctrl *ctrl,
 	tidinfo.tidcnt = 0;		/* clear to zero */
 
 	cmd.type = PSMI_HFI_CMD_TID_UPDATE;
+#ifdef PSM_CUDA
+	cmd.type = PSMI_HFI_CMD_TID_UPDATE_V2;
+
+	if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
+		tidinfo.flags = flags;
+	else
+		tidinfo.flags = 0;
+#endif
+
 	cmd.len = sizeof(tidinfo);
 	cmd.addr = (__u64) &tidinfo;
 

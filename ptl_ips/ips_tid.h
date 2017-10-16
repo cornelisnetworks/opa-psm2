@@ -71,6 +71,11 @@ typedef void (*ips_tid_avail_cb_fn_t) (struct ips_tid *, void *context);
 #define PSM_TIDLIST_BUFSIZE	4096
 /* Max tid-session window size */
 #define PSM_TID_WINSIZE		(4*1024*1024)
+/* Max number of packets for a single TID flow, fitting tid-session window.
+   In PSM2 packet integrity is realized by PSN (Packet Sequence Number),
+   which is kept as 11 bits field (for 9B KDETH),
+   giving max value 2048 (0 - 2047) */
+#define PSM_TID_MAX_PKTS	2048
 /* Total number of combined pages from the Tid-pair to be merged */
 #define PSM_MAX_NUM_PAGES_IN_TIDPAIR	512
 
@@ -116,7 +121,11 @@ psm2_error_t ips_tidcache_acquire(struct ips_tid *tidc,
 		uint32_t *length, /* buffer length, aligned to page size */
 		uint32_t *tid_array, /* output tidarray, */
 		uint32_t *tidcnt,    /* output of tid count */
-		uint32_t *pageoff);  /* output of offset in first tid */
+		uint32_t *pageoff  /* output of offset in first tid */
+#ifdef PSM_CUDA
+		, uint8_t is_cuda_ptr
+#endif
+		);
 
 psm2_error_t ips_tidcache_release(struct ips_tid *tidc,
 		uint32_t *tid_array, /* input tidarray, */
@@ -129,7 +138,11 @@ psm2_error_t ips_tid_acquire(struct ips_tid *tidc,
 		const void *buf,  /* input buffer, aligned to page boundary */
 		uint32_t *length, /* buffer length, aligned to page size */
 		uint32_t *tid_array, /* output tidarray, */
-		uint32_t *tidcnt);   /* output of tid count */
+		uint32_t *tidcnt
+#ifdef PSM_CUDA
+		, uint8_t is_cuda_ptr
+#endif
+		);   /* output of tid count */
 
 psm2_error_t ips_tid_release(struct ips_tid *tidc,
 		uint32_t *tid_array, /* input tidarray, */

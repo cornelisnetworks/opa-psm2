@@ -55,7 +55,24 @@
 
 #ifndef _PSM_UUID_H
 #define _PSM_UUID_H
+struct uuid {
+	uint32_t	time_low;
+	uint16_t	time_mid;
+	uint16_t	time_hi_and_version;
+	uint16_t	clock_seq;
+	uint8_t	node[6];
+};
+
+typedef unsigned char uuid_t[16];
+
 int	    psmi_uuid_parse(const char *in, psm2_uuid_t uu);
 void	    psmi_uuid_unparse(const psm2_uuid_t uuid, char *out);
 int	    psmi_uuid_compare(const psm2_uuid_t uuA, const psm2_uuid_t uuB);
+int uuid_compare(const uuid_t uu1, const uuid_t uu2);
+void uuid_pack(const struct uuid *uu, uuid_t ptr);
+void uuid_unparse(const uuid_t uu, char *out);
+void uuid_unparse_upper(const uuid_t uu, char *out);
+void uuid_unparse_lower(const uuid_t uu, char *out);
+void uuid_unpack(const uuid_t in, struct uuid *uu);
+int uuid_parse(const char *in, uuid_t uu);
 #endif

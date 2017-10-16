@@ -53,7 +53,6 @@
 
 #include "../psm2.h"
 #include "../psm2_mq.h"
-#include "../psm_user.h"
 #include "../psm2_am.h"
 
 /* Functions from TS psm.h */

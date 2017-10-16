@@ -54,6 +54,7 @@
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
+#include "psm_mq_internal.h"
 
 /*
  *
@@ -63,209 +64,171 @@
 
 #define MM_FLAG_NONE  0
 #define MM_FLAG_TRANSIENT  0x1
-#define MM_NUM_OF_POOLS 7
-
-struct psmi_mem_ctrl {
-	struct psmi_mem_block_ctrl *free_list;
-	uint32_t total_alloc;
-	uint32_t current_available;
-	uint32_t block_size;
-	uint32_t flags;
-	uint32_t replenishing_rate;
-};
 
 struct psmi_mem_block_ctrl {
 	union {
-		struct psmi_mem_ctrl *mem_handler;
+		psmi_mem_ctrl_t *mem_handler;
 		struct psmi_mem_block_ctrl *next;
 	};
 	char _redzone[PSM_VALGRIND_REDZONE_SZ];
 };
 
-struct psmi_sysbuf_allocator {
-	int is_initialized;
-	struct psmi_mem_ctrl handler_index[MM_NUM_OF_POOLS];
-	uint64_t mem_ctrl_total_bytes;
-};
 
-static struct psmi_sysbuf_allocator psmi_sysbuf;
-
-
-#if 0
-/* There's a version with a basic wrapper around malloc, as a back up */
-void *psmi_sysbuf_alloc(psm2_ep_t ep, uint32_t nbytes)
+/* Per MQ allocators */
+void psmi_mq_sysbuf_init(psm2_mq_t mq)
 {
-	return malloc(nbytes);
+    int i;
+    uint32_t block_sizes[] = {256, 512, 1024, 2048, 4096, 8192, (uint32_t)-1};
+    uint32_t replenishing_rate[] = {128, 64, 32, 16, 8, 4, 0};
+
+    if (mq->mem_ctrl_is_init)
+        return;
+    mq->mem_ctrl_is_init = 1;
+
+    for (i=0; i < MM_NUM_OF_POOLS; i++) {
+        mq->handler_index[i].block_size = block_sizes[i];
+        mq->handler_index[i].current_available = 0;
+        mq->handler_index[i].free_list = NULL;
+        mq->handler_index[i].total_alloc = 0;
+        mq->handler_index[i].replenishing_rate = replenishing_rate[i];
+
+        if (block_sizes[i] == -1) {
+            psmi_assert_always(replenishing_rate[i] == 0);
+            mq->handler_index[i].flags = MM_FLAG_TRANSIENT;
+        }
+        else {
+            psmi_assert_always(replenishing_rate[i] > 0);
+            mq->handler_index[i].flags = MM_FLAG_NONE;
+        }
+    }
+
+    VALGRIND_CREATE_MEMPOOL(mq, PSM_VALGRIND_REDZONE_SZ,
+                            PSM_VALGRIND_MEM_UNDEFINED);
+
+    /* Hit once on each block size so we have a pool that's allocated */
+    for (i=0; i < MM_NUM_OF_POOLS; i++) {
+        void *ptr;
+        if (block_sizes[i] == -1)
+            continue;
+        ptr = psmi_mq_sysbuf_alloc(mq, block_sizes[i]);
+        psmi_mq_sysbuf_free(mq, ptr);
+    }
 }
 
-void psmi_sysbuf_free(psm2_ep_t ep, void *ptr)
+void psmi_mq_sysbuf_fini(psm2_mq_t mq)  // free all buffers that is currently not used
 {
-	free(ptr);
+    struct psmi_mem_block_ctrl *block;
+    int i;
+
+    if (mq->mem_ctrl_is_init == 0)
+        return;
+
+    VALGRIND_DESTROY_MEMPOOL(mq);
+
+    for (i=0; i < MM_NUM_OF_POOLS; i++) {
+        while ((block = mq->handler_index[i].free_list) != NULL) {
+            mq->handler_index[i].free_list = block->next;
+            psmi_free(block);
+        }
+    }
+    mq->mem_ctrl_is_init = 0;
 }
 
-#else
-
-int psmi_sysbuf_init(void)
+void psmi_mq_sysbuf_getinfo(psm2_mq_t mq, char *buf, size_t len)
 {
-	int i;
-	uint32_t block_sizes[] = { 256, 512, 1024,
-		2048, 4096, 8192, (uint32_t) -1 };
-	uint32_t replenishing_rate[] = { 128, 64, 32, 16, 8, 4, 0 };
-
-	if (psmi_sysbuf.is_initialized)
-		return PSM2_OK;
-
-	for (i = 0; i < MM_NUM_OF_POOLS; i++) {
-		psmi_sysbuf.handler_index[i].block_size = block_sizes[i];
-		psmi_sysbuf.handler_index[i].current_available = 0;
-		psmi_sysbuf.handler_index[i].free_list = NULL;
-		psmi_sysbuf.handler_index[i].total_alloc = 0;
-		psmi_sysbuf.handler_index[i].replenishing_rate =
-			replenishing_rate[i];
-
-		if (block_sizes[i] == -1) {
-			psmi_assert_always(replenishing_rate[i] == 0);
-			psmi_sysbuf.handler_index[i].flags =
-				MM_FLAG_TRANSIENT;
-		} else {
-			psmi_assert_always(replenishing_rate[i] > 0);
-			psmi_sysbuf.handler_index[i].flags = MM_FLAG_NONE;
-		}
-	}
-
-	VALGRIND_CREATE_MEMPOOL(&psmi_sysbuf, PSM_VALGRIND_REDZONE_SZ,
-				PSM_VALGRIND_MEM_UNDEFINED);
-
-	/* Hit once on each block size so we have a pool that's allocated */
-	for (i = 0; i < MM_NUM_OF_POOLS; i++) {
-		void *ptr;
-		if (block_sizes[i] == -1)
-			continue;
-		ptr = psmi_sysbuf_alloc(block_sizes[i]);
-		psmi_assert(ptr);
-		psmi_sysbuf_free(ptr);
-	}
-
-	return PSM2_OK;
+    snprintf(buf, len-1, "Sysbuf consumption: %"PRIu64" bytes\n",
+             mq->mem_ctrl_total_bytes);
+    buf[len-1] = '\0';
+    return;
 }
 
-void psmi_sysbuf_fini(void)
+void *psmi_mq_sysbuf_alloc(psm2_mq_t mq, uint32_t alloc_size)
 {
-	struct psmi_mem_block_ctrl *block;
-	struct psmi_mem_ctrl *handler_index;
-	int i;
+    psmi_mem_ctrl_t *mm_handler = mq->handler_index;
+    struct psmi_mem_block_ctrl *new_block;
+    int replenishing;
 
-	if (!psmi_sysbuf.is_initialized)
-		return;
+    /* There is a timing race with ips initialization, fix later.
+ *      * XXX */
+    if (!mq->mem_ctrl_is_init)
+        psmi_mq_sysbuf_init(mq);
 
-	VALGRIND_DESTROY_MEMPOOL(&psmi_sysbuf);
+    mq->stats.rx_sysbuf_num++;
+    mq->stats.rx_sysbuf_bytes += alloc_size;
 
-	handler_index = psmi_sysbuf.handler_index;
-	for (i = 0; i < MM_NUM_OF_POOLS; i++) {
-		while ((block = handler_index[i].free_list) != NULL) {
-			handler_index[i].free_list = block->next;
-			psmi_free(block);
-		}
-	}
+    while (mm_handler->block_size < alloc_size)
+        mm_handler++;
+
+    replenishing = mm_handler->replenishing_rate;
+
+    if (mm_handler->current_available == 0) { // allocate more buffers
+        if (mm_handler->flags & MM_FLAG_TRANSIENT) {
+            uint32_t newsz = alloc_size + sizeof(struct psmi_mem_block_ctrl)
+                                        + PSM_VALGRIND_REDZONE_SZ;
+            new_block = psmi_malloc(mq->ep, UNEXPECTED_BUFFERS, newsz);
+
+            if (new_block) {
+                new_block->mem_handler = mm_handler;
+                new_block++;
+                mm_handler->total_alloc++;
+                mq->mem_ctrl_total_bytes += newsz;
+                VALGRIND_MEMPOOL_ALLOC(mq, new_block, alloc_size);
+            }
+            return new_block;
+        }
+
+        do {
+            uint32_t newsz = mm_handler->block_size + sizeof(struct psmi_mem_block_ctrl) +
+                             PSM_VALGRIND_REDZONE_SZ;
+
+            new_block = psmi_malloc(mq->ep, UNEXPECTED_BUFFERS, newsz);
+            mq->mem_ctrl_total_bytes += newsz;
+
+            if (new_block) {
+                mm_handler->current_available++;
+                mm_handler->total_alloc++;
+
+                new_block->next = mm_handler->free_list;
+                mm_handler->free_list = new_block;
+            }
+
+        } while (--replenishing && new_block);
+    }
+
+    if (mm_handler->current_available) {
+        mm_handler->current_available--;
+
+        new_block = mm_handler->free_list;
+        mm_handler->free_list = new_block->next;
+
+        new_block->mem_handler = mm_handler;
+        new_block++;
+
+        VALGRIND_MEMPOOL_ALLOC(mq, new_block, mm_handler->block_size);
+        return new_block;
+    }
+    return NULL;
 }
 
-void psmi_sysbuf_getinfo(char *buf, size_t len)
+void psmi_mq_sysbuf_free(psm2_mq_t mq, void * mem_to_free)
 {
-	snprintf(buf, len - 1, "Sysbuf consumption: %" PRIu64 " bytes\n",
-		 psmi_sysbuf.mem_ctrl_total_bytes);
-	buf[len - 1] = '\0';
-	return;
+    struct psmi_mem_block_ctrl * block_to_free;
+    psmi_mem_ctrl_t *mm_handler;
+
+    psmi_assert_always(mq->mem_ctrl_is_init);
+
+    block_to_free = (struct psmi_mem_block_ctrl *)mem_to_free - 1;
+    mm_handler = block_to_free->mem_handler;
+
+    VALGRIND_MEMPOOL_FREE(mq, mem_to_free);
+
+    if (mm_handler->flags & MM_FLAG_TRANSIENT) {
+        psmi_free(block_to_free);
+    } else {
+        block_to_free->next = mm_handler->free_list;
+        mm_handler->free_list = block_to_free;
+        mm_handler->current_available++;
+    }
+
+    return;
 }
-
-void *psmi_sysbuf_alloc(uint32_t alloc_size)
-{
-	struct psmi_mem_ctrl *mm_handler = psmi_sysbuf.handler_index;
-	struct psmi_mem_block_ctrl *new_block;
-	int replenishing;
-
-	while (mm_handler->block_size < alloc_size)
-		mm_handler++;
-
-	replenishing = mm_handler->replenishing_rate;
-
-	if (mm_handler->current_available == 0) { /* allocate more buffers */
-		if (mm_handler->flags & MM_FLAG_TRANSIENT) {
-			uint32_t newsz = alloc_size +
-				sizeof(struct psmi_mem_block_ctrl) +
-				PSM_VALGRIND_REDZONE_SZ;
-			new_block = psmi_malloc(PSMI_EP_NONE,
-					UNEXPECTED_BUFFERS, newsz);
-
-			if (new_block) {
-				new_block->mem_handler = mm_handler;
-				new_block++;
-				mm_handler->total_alloc++;
-				psmi_sysbuf.mem_ctrl_total_bytes += newsz;
-				VALGRIND_MEMPOOL_ALLOC(&psmi_sysbuf, new_block,
-						       alloc_size);
-			}
-			return new_block;
-		}
-
-		do {
-			uint32_t newsz =
-			    mm_handler->block_size +
-			    sizeof(struct psmi_mem_block_ctrl) +
-			    PSM_VALGRIND_REDZONE_SZ;
-
-			new_block = psmi_malloc(PSMI_EP_NONE,
-					UNEXPECTED_BUFFERS, newsz);
-			psmi_sysbuf.mem_ctrl_total_bytes += newsz;
-
-			if (new_block) {
-				mm_handler->current_available++;
-				mm_handler->total_alloc++;
-
-				new_block->next = mm_handler->free_list;
-				mm_handler->free_list = new_block;
-			}
-
-		} while (--replenishing && new_block);
-	}
-
-	if (mm_handler->current_available) {
-		mm_handler->current_available--;
-
-		new_block = mm_handler->free_list;
-		mm_handler->free_list = new_block->next;
-
-		new_block->mem_handler = mm_handler;
-		new_block++;
-
-		VALGRIND_MEMPOOL_ALLOC(&psmi_sysbuf, new_block,
-				mm_handler->block_size);
-		return new_block;
-	}
-
-	return NULL;
-}
-
-void psmi_sysbuf_free(void *mem_to_free)
-{
-	struct psmi_mem_block_ctrl *block_to_free;
-	struct psmi_mem_ctrl *mm_handler;
-
-	block_to_free = (struct psmi_mem_block_ctrl *) mem_to_free - 1;
-	mm_handler = block_to_free->mem_handler;
-
-	VALGRIND_MEMPOOL_FREE(&psmi_sysbuf, mem_to_free);
-
-	if (mm_handler->flags & MM_FLAG_TRANSIENT) {
-		psmi_free(block_to_free);
-	} else {
-		block_to_free->next = mm_handler->free_list;
-		mm_handler->free_list = block_to_free;
-
-		mm_handler->current_available++;
-	}
-
-	return;
-}
-#endif
-
-

@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 /* included header files  */
 #include <stdlib.h>
@@ -217,6 +217,13 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 	}
 	psmi_assert(ctrl->spio_blockcpy_selected != NULL);
 
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED) {
+		PSMI_CUDA_CALL(cudaHostAlloc, (void **) &ctrl->cuda_pio_buffer,
+		       10240 /* Max MTU */, cudaHostAllocPortable);
+	}
+#endif
+
 	_HFI_PRDBG("ips_spio_init() done\n");
 
 	return PSM2_OK;
@@ -224,6 +231,10 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 
 psm2_error_t ips_spio_fini(struct ips_spio *ctrl)
 {
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED)
+		PSMI_CUDA_CALL(cudaFreeHost, (void *) ctrl->cuda_pio_buffer);
+#endif
 	spio_report_stall(ctrl, get_cycles(), 0ULL);
 	if (!ctrl->context->spio_ctrl)
 		psmi_free((void *)ctrl->spio_ctrl);
@@ -690,7 +701,11 @@ psm2_error_t
 ips_spio_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 			struct hfi_pbc *pbc, uint32_t *payload,
 			uint32_t length, uint32_t isCtrlMsg,
-			uint32_t cksum_valid, uint32_t cksum)
+			uint32_t cksum_valid, uint32_t cksum
+#ifdef PSM_CUDA
+			, uint32_t is_cuda_payload
+#endif
+			)
 {
 	struct ips_spio *ctrl = proto->spioc;
 	volatile struct ips_spio_ctrl *spio_ctrl = ctrl->spio_ctrl;
@@ -820,6 +835,19 @@ fi_busy:
 	_HFI_VDBG("pio qw write sop %p: 8\n", pioaddr);
 
 	/* Write to PIO: other blocks of payload */
+#ifdef PSM_CUDA
+	if (is_cuda_payload) {
+		/* Since the implementation of cudaMemcpy is unknown,
+		   and the HFI specifies several conditions for how PIO
+		   writes must occur, for safety reasons we should not assume
+		   that cudaMemcpy will follow the HFI's requirements.
+		   The cudaMemcpy should instead write into a buffer in
+		   host memory, and then PSM can copy to the HFI as usual. */
+		PSMI_CUDA_CALL(cudaMemcpy, ctrl->cuda_pio_buffer,
+			       payload, paylen, cudaMemcpyDeviceToHost);
+		payload = (uint32_t *) ctrl->cuda_pio_buffer;
+	}
+#endif
 	if (length >= 64) {
 		uint32_t blks2send = length >> 6;
 		uint32_t blks2end =

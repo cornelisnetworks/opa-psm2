@@ -59,6 +59,8 @@
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
 #include "ips_recvhdrq.h"
+#include "psm_mq_internal.h"
+#include "psm_user.h"
 
 /* All in milliseconds */
 #define RCVTHREAD_TO_MIN_FREQ	    10	/* min of 10 polls per sec */
@@ -95,6 +97,14 @@ struct ptl_rcvthread {
 	uint32_t last_timeout;
 };
 
+#ifdef PSM_CUDA
+	/* This is a global cuda context (extern declaration in psm_user.h)
+         * stored to provide hints during a cuda failure
+         * due to a null cuda context.
+         */
+	CUcontext ctxt;
+#endif
+
 /*
  * The receive thread knows about the ptl interface, so it can muck with it
  * directly.
@@ -116,6 +126,11 @@ psm2_error_t ips_ptl_rcvthread_init(ptl_t *ptl, struct ips_recvhdrq *recvq)
 	rcvc->ptl = ptl;
 	rcvc->context = ptl->context;
 	rcvc->t_start_cyc = get_cycles();
+
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED)
+		PSMI_CUDA_DRIVER_API_CALL(cuCtxGetCurrent, &ctxt);
+#endif
 
 	if (ptl->runtime_flags & PSMI_RUNTIME_RCVTHREAD) {
 
@@ -153,10 +168,9 @@ psm2_error_t ips_ptl_rcvthread_fini(ptl_t *ptl)
 {
 	struct ptl_rcvthread *rcvc = (struct ptl_rcvthread *)ptl->rcvthread;
 	uint64_t t_now;
-	double t_cancel_us;
 	psm2_error_t err = PSM2_OK;
 
-	PSMI_PLOCK_ASSERT();
+	PSMI_LOCK_ASSERT(ptl->ep->mq->progress_lock);
 
 	if (ptl->rcvthread == NULL)
 		return err;
@@ -183,20 +197,37 @@ psm2_error_t ips_ptl_rcvthread_fini(ptl_t *ptl)
 			    ("unable to close pipe to receive thread cleanly\n");
 		}
 		pthread_join(rcvc->hdrq_threadid, NULL);
-		t_cancel_us =
-		    (double)cycles_to_nanosecs(get_cycles() - t_now) / 1e3;
 
-		_HFI_PRDBG("rcvthread poll success %lld/%lld times, "
-			   "thread cancelled in %.3f us\n",
-			   (long long)rcvc->pollok, (long long)rcvc->pollcnt,
-			   t_cancel_us);
-
+		if (_HFI_PRDBG_ON) {
+			_HFI_PRDBG_ALWAYS
+				("rcvthread poll success %lld/%lld times, "
+				 "thread cancelled in %.3f us\n",
+				(long long)rcvc->pollok, (long long)rcvc->pollcnt,
+				(double)cycles_to_nanosecs(get_cycles() - t_now) / 1e3);
+		}
 	}
 
 	psmi_free(ptl->rcvthread);
 
 fail:
 	return err;
+}
+
+void ips_ptl_rcvthread_transfer_ownership(ptl_t *from_ptl, ptl_t *to_ptl)
+{
+	struct ptl_rcvthread *rcvc;
+
+	from_ptl->runtime_flags &= ~(PSMI_RUNTIME_RCVTHREAD);
+	to_ptl->runtime_flags |= PSMI_RUNTIME_RCVTHREAD;
+
+	to_ptl->rcvthread = from_ptl->rcvthread;
+	from_ptl->rcvthread = NULL;
+
+	rcvc = to_ptl->rcvthread;
+
+	rcvc->recvq = &to_ptl->recvq;
+	rcvc->context = to_ptl->context;
+	rcvc->ptl = to_ptl;
 }
 
 psm2_error_t rcvthread_initsched(struct ptl_rcvthread *rcvc)
@@ -308,16 +339,18 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 {
 	struct ptl_rcvthread *rcvc = (struct ptl_rcvthread *)rcvthreadc;
 	struct ips_recvhdrq *recvq = rcvc->recvq;
-	psmi_context_t *context = (psmi_context_t *) rcvc->context;
-	int fd_dev = context->fd;
 	int fd_pipe = rcvc->pipefd[0];
-	psm2_ep_t ep = context->ep;
+	psm2_ep_t ep;
 	struct pollfd pfd[2];
 	int ret;
 	int next_timeout = rcvc->last_timeout;
 	uint64_t t_cyc;
 	psm2_error_t err;
 
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED && ctxt != NULL)
+		PSMI_CUDA_DRIVER_API_CALL(cuCtxSetCurrent, ctxt);
+#endif
 
 	PSM2_LOG_MSG("entering");
 	/* No reason to have many of these, keep this as a backup in case the
@@ -336,7 +369,7 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 	_HFI_PRDBG("Enabled communication thread on URG packets\n");
 
 	while (1) {
-		pfd[0].fd = fd_dev;
+		pfd[0].fd = rcvc->context->fd;
 		pfd[0].events = POLLIN;
 		pfd[0].revents = 0;
 		pfd[1].fd = fd_pipe;
@@ -353,64 +386,78 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 						  PSM2_INTERNAL_ERR,
 						  "Receive thread poll() error: %s",
 						  strerror(errno));
-		}
-		else
-	if (pfd[1].revents) {
-		/* Any type of event on this fd means exit, should be POLLHUP */
-		_HFI_DBG("close thread: revents=0x%x\n", pfd[1].revents);
-		close(fd_pipe);
-		break;
-	} else {
-		rcvc->pollcnt++;
+		} else if (pfd[1].revents) {
+			/* Any type of event on this fd means exit, should be POLLHUP */
+			_HFI_DBG("close thread: revents=0x%x\n", pfd[1].revents);
+			close(fd_pipe);
+			break;
+		} else {
+			rcvc->pollcnt++;
+			if (!PSMI_LOCK_TRY(psmi_creation_lock)) {
 
-		if (ret == 0 || pfd[0].revents & (POLLIN | POLLERR)) {
-			if (PSMI_PLOCK_DISABLED) {
-				/* We do this check without acquiring the lock, no sense to
-				 * adding the overhead and it doesn't matter if we're
-				 * wrong. */
-				if (ips_recvhdrq_isempty(recvq))
-					continue;
-				if(recvq->proto->flags & IPS_PROTO_FLAG_CCA_PRESCAN) {
-					ips_recvhdrq_scan_cca(recvq);
-				}
-				if (!ips_recvhdrq_trylock(recvq))
-					continue;
-				err = ips_recvhdrq_progress(recvq);
-				if (err == PSM2_OK)
-					rcvc->pollok++;
-				else
-					rcvc->pollcyc += get_cycles() - t_cyc;
-				ips_recvhdrq_unlock(recvq);
-			} else if (!PSMI_PLOCK_TRY()) {
-				/* If we time out, we service shm and hfi.  If not, we
-				 * assume to have received an hfi interrupt and service
-				 * only hfi.
-				 */
-				if(recvq->proto->flags & IPS_PROTO_FLAG_CCA_PRESCAN ) {
-						ips_recvhdrq_scan_cca(recvq);
-				}
-				err = psmi_poll_internal(ep,
-							 ret ==
-							 0 ? PSMI_TRUE :
-							 PSMI_FALSE);
+				if (ret == 0 || pfd[0].revents & (POLLIN | POLLERR)) {
+					if (PSMI_LOCK_DISABLED) {
+						/* We do this check without acquiring the lock, no sense to
+						* adding the overhead and it doesn't matter if we're
+						* wrong. */
+						if (ips_recvhdrq_isempty(recvq))
+							continue;
+						if(recvq->proto->flags & IPS_PROTO_FLAG_CCA_PRESCAN) {
+							ips_recvhdrq_scan_cca(recvq);
+						}
+						if (!ips_recvhdrq_trylock(recvq))
+							continue;
+						err = ips_recvhdrq_progress(recvq);
+						if (err == PSM2_OK)
+							rcvc->pollok++;
+						else
+							rcvc->pollcyc += get_cycles() - t_cyc;
+						ips_recvhdrq_unlock(recvq);
+					} else {
 
-				if (err == PSM2_OK) {
-					rcvc->pollok++;
-					/*
-					   if (rcvc->pollok % 1000 == 0 && rcvc->pollok >= 1000)
-					   _HFI_INFO("pollok = %lld\n", (unsigned long long)rcvc->pollok);
-					 */
-				} else
-					rcvc->pollcyc += get_cycles() - t_cyc;
-				PSMI_PUNLOCK();
+						ep = psmi_opened_endpoint;
+
+						if (!PSMI_LOCK_TRY(ep->mq->progress_lock)) {
+							if(recvq->proto->flags & IPS_PROTO_FLAG_CCA_PRESCAN ) {
+									ips_recvhdrq_scan_cca(recvq);
+							}
+							PSMI_UNLOCK(ep->mq->progress_lock);
+						}
+
+						/* Go through all master endpoints. */
+						do{
+							if (!PSMI_LOCK_TRY(ep->mq->progress_lock)) {
+								/* If we time out, we service shm and hfi.  If not, we
+								* assume to have received an hfi interrupt and service
+								* only hfi.
+								*/
+								err = psmi_poll_internal(ep,
+											 ret ==
+											 0 ? PSMI_TRUE :
+											 PSMI_FALSE);
+
+								if (err == PSM2_OK)
+									rcvc->pollok++;
+								else
+									rcvc->pollcyc += get_cycles() - t_cyc;
+								PSMI_UNLOCK(ep->mq->progress_lock);
+							}
+
+							/* get next endpoint from multi endpoint list */
+							ep = ep->user_ep_next;
+						} while(NULL != ep);
+					}
+				}
+
+				PSMI_UNLOCK(psmi_creation_lock);
 			}
-		}
 
-		if (ret == 0) { /* change timeout only on timed out poll */
-			rcvc->pollcnt_to++;
-			next_timeout = rcvthread_next_timeout(rcvc);
+			if (ret == 0) { /* change timeout only on timed out poll */
+				rcvc->pollcnt_to++;
+				next_timeout = rcvthread_next_timeout(rcvc);
+			}
+
 		}
-	}
 	}
 
 	PSM2_LOG_MSG("leaving");

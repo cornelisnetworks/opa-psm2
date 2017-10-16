@@ -171,17 +171,39 @@ struct ips_scb {
 		psm2_am_completion_fn_t completion_am;
 	};
 	void *cb_param;
+#ifdef PSM_CUDA
+	psm2_mq_req_t mq_req;		/* back pointer to original request */
+#endif
 
-	/* sdma header place holder, psm code should access
-	 * the sdma_req_info only using the following accessor.
-	 * Given an IPS_SCB pointer, return the sdma_req_info pointer: */
-#define psmi_get_sdma_req_info(IPS_SCB) ((struct sdma_req_info *)(((char*)&IPS_SCB->pbc)-sizeof(struct sdma_req_info)))
-	struct sdma_req_info _DO_NOT_USE_;
+	/* sdma header place holder, PSM2 code should access
+	 * the sdma_req_info only using the psmi_get_sdma_req_info()
+	 * accessor function. */
+	/*
+	 * The size of struct sdma_req_info is variable. (10 bytes for
+	 * GPU-direct and 8 bytes for non GPU-Direct)
+	 * When GPU-Direct feature is used, all 10 bytes of the space is used.
+	 * Otherwise, we only use upto 8 bytes. The usage is controlled by
+	 * psmi_get_sdma_req_info() in ips_proto.h
+	 */
+	union {
+		struct sdma_req_info _DO_NOT_USE_;
+		struct sdma_req_info_v6_3 _PLEASE_DO_NOT_USE_;
+	};
 	struct {
 		struct hfi_pbc pbc;
 		struct ips_message_header ips_lrh;
 	} PSMI_CACHEALIGN;
 };
+
+#ifdef PSM_CUDA
+#define IS_TRANSFER_BUF_GPU_MEM(scb) (scb->mq_req != NULL)
+/* In case we need to be more precise about scb's locality
+ * we can expand the macro in place, e.g.
+ * #define IS_TRANSFER_BUF_GPU_MEM(scb) (scb->mq_req != NULL && \
+ * 					 scb->mq_req->is_buf_gpu_mem && \
+ * 					!scb->mq_req->cuda_hostbuf_used)
+ */
+#endif
 
 void ips_scbctrl_free(ips_scb_t *scb);
 int ips_scbctrl_bufalloc(ips_scb_t *scb);

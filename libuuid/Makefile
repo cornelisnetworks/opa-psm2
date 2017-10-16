@@ -59,7 +59,7 @@ include $(top_srcdir)/buildflags.mak
 CFLAGS += -DPSM_UUID=1 -Wno-unused-function
 INCLUDES += -I$(top_srcdir)
 
-${TARGLIB}-objs := psm_uuid.o
+${TARGLIB}-objs := psm_uuid.o parse.o pack.o unpack.o unparse.o
 ${TARGLIB}-objs := $(patsubst %.o, $(OUTDIR)/%.o, ${${TARGLIB}-objs})
 
 DEPS := $(${TARGLIB}-objs:.o=.d)

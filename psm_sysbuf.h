@@ -58,14 +58,24 @@
 
 #include "psm_user.h"
 
-/*
- * Unexpected buffer management
- */
+#define MM_NUM_OF_POOLS 7
 
-int psmi_sysbuf_init(void);
-void psmi_sysbuf_fini(void);
-void *psmi_sysbuf_alloc(uint32_t nbytes);
-void psmi_sysbuf_free(void *);
-void psmi_sysbuf_getinfo(char *buf, size_t len);
+typedef struct psmi_mem_ctrl {
+    struct psmi_mem_block_ctrl *free_list;
+    uint32_t total_alloc;
+    uint32_t current_available;
+    uint32_t block_size;
+    uint32_t flags;
+    uint32_t replenishing_rate;
+} psmi_mem_ctrl_t;
+
+/*
+ * MQ unexpected buffer management
+ */
+void  psmi_mq_sysbuf_init(psm2_mq_t mq);
+void  psmi_mq_sysbuf_fini(psm2_mq_t mq);
+void* psmi_mq_sysbuf_alloc(psm2_mq_t mq, uint32_t nbytes);
+void  psmi_mq_sysbuf_free(psm2_mq_t mq, void *);
+void  psmi_mq_sysbuf_getinfo(psm2_mq_t mq, char *buf, size_t len);
 
 #endif /* SYSBUF_INT_H */

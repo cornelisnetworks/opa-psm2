@@ -109,6 +109,17 @@ psm2_mq_req_t MOCKABLE(psmi_mq_req_alloc)(psm2_mq_t mq, uint32_t type)
 }
 MOCK_DEF_EPILOGUE(psmi_mq_req_alloc);
 
+#ifdef PSM_CUDA
+void psmi_cuda_recvreq_alloc_func(int is_alloc, void* context, void* obj) {
+	psm2_mq_req_t recvreq = (psm2_mq_req_t)obj;
+	if (is_alloc)
+		PSMI_CUDA_CALL(cudaEventCreate, &recvreq->cuda_ipc_event);
+	else
+		PSMI_CUDA_CALL(cudaEventDestroy, recvreq->cuda_ipc_event);
+	return;
+}
+#endif
+
 psm2_error_t psmi_mq_req_init(psm2_mq_t mq)
 {
 	psm2_mq_req_t warmup_req;
@@ -147,14 +158,37 @@ psm2_error_t psmi_mq_req_init(psm2_mq_t mq)
 		if ((err =
 		     psmi_parse_mpool_env(mq, 0, &rlim, &maxsz, &chunksz)))
 			goto fail;
-
+		/* Have a callback function for receive req mpool which creates
+		 * and destroy events.
+		 */
+#ifdef PSM_CUDA
+		if (PSMI_IS_CUDA_ENABLED) {
+			if ((mq->rreq_pool =
+	                     psmi_mpool_create_for_cuda(sizeof(struct psm2_mq_req), chunksz,
+                                       maxsz, 0, DESCRIPTORS, NULL,
+                                       NULL, psmi_cuda_recvreq_alloc_func, NULL)) == NULL) {
+				err = PSM2_NO_MEMORY;
+				goto fail;
+			}
+		}
+		else {
+			if ((mq->rreq_pool =
+				psmi_mpool_create(sizeof(struct psm2_mq_req), chunksz,
+                                       maxsz, 0, DESCRIPTORS, NULL,
+                                       NULL)) == NULL) {
+				err = PSM2_NO_MEMORY;
+				goto fail;
+			}
+		}
+#else
 		if ((mq->rreq_pool =
-		     psmi_mpool_create(sizeof(struct psm2_mq_req), chunksz,
+			psmi_mpool_create(sizeof(struct psm2_mq_req), chunksz,
 				       maxsz, 0, DESCRIPTORS, NULL,
 				       NULL)) == NULL) {
 			err = PSM2_NO_MEMORY;
 			goto fail;
 		}
+#endif
 	}
 
 	/* Warm up the allocators */

@@ -139,11 +139,16 @@ ips_tidcache_remove(struct ips_tid *tidc, uint32_t tidcnt)
  */
 static psm2_error_t
 ips_tidcache_register(struct ips_tid *tidc,
-		unsigned long start, uint32_t length, uint32_t *firstidx)
+		unsigned long start, uint32_t length, uint32_t *firstidx
+#ifdef PSM_CUDA
+		, uint8_t is_cuda_ptr
+#endif
+		)
 {
 	cl_qmap_t *p_map = &tidc->tid_cachemap;
 	uint32_t tidoff, tidlen;
 	uint32_t idx, tidcnt;
+	uint16_t flags = 0;
 	psm2_error_t err;
 
 	/*
@@ -179,11 +184,28 @@ ips_tidcache_register(struct ips_tid *tidc,
 
 retry:
 	tidcnt = 0;
+
+#ifdef PSM_CUDA
+	if (is_cuda_ptr)
+		flags = HFI1_BUF_GPU_MEM;
+#endif
+
 	if (hfi_update_tid(tidc->context->ctrl,
 			(uint64_t) start, &length,
-			(uint64_t) tidc->tid_array, &tidcnt) < 0) {
+			(uint64_t) tidc->tid_array, &tidcnt, flags) < 0) {
 		/* if driver reaches lockable memory limit */
-		if (errno == ENOMEM && NIDLE) {
+		if ((errno == ENOMEM
+#ifdef PSM_CUDA
+			/* This additional check is in place for just the cuda
+			 * version. It is a temporary workaround for a known
+			 * issue where nvidia driver returns EINVAL instead of
+			 * ENOMEM when there is no BAR1 space left to pin pages.
+			 * PSM frees tidcache enteries when the driver sends
+			 * EINVAL there by unpinning pages and freeing some
+			 * BAR1 space.*/
+		     || (PSMI_IS_CUDA_ENABLED && errno == EINVAL)
+#endif
+			) && NIDLE) {
 			uint64_t lengthEvicted = ips_tidcache_evict(tidc,length);
 
 			if (lengthEvicted >= length)
@@ -336,7 +358,11 @@ psm2_error_t
 ips_tidcache_acquire(struct ips_tid *tidc,
 		const void *buf, uint32_t *length,
 		uint32_t *tid_array, uint32_t *tidcnt,
-		uint32_t *tidoff)
+		uint32_t *tidoff
+#ifdef PSM_CUDA
+		, uint8_t is_cuda_ptr
+#endif
+		)
 {
 	cl_qmap_t *p_map = &tidc->tid_cachemap;
 	cl_map_item_t *p_item;
@@ -421,7 +447,11 @@ retry:
 		 * there is an error, we return from here, PSM
 		 * will try later.
 		 */
-		err = ips_tidcache_register(tidc, start, nbytes, &idx);
+		err = ips_tidcache_register(tidc, start, nbytes, &idx
+#ifdef PSM_CUDA
+					, is_cuda_ptr
+#endif
+				);
 		if (err)
 			return err;
 	}
@@ -458,7 +488,11 @@ retry:
 			 * if it is error to register new pages, we break
 			 * here and return the tids we already have.
 			 */
-			err = ips_tidcache_register(tidc, start, nbytes, &idx);
+			err = ips_tidcache_register(tidc, start, nbytes, &idx
+#ifdef PSM_CUDA
+					, is_cuda_ptr
+#endif
+				);
 			if (err)
 				break;
 		} else if (INVALIDATE(idx) != 0) {

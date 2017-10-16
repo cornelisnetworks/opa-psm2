@@ -596,7 +596,7 @@ ips_ptl_optctl(const void *core_obj, int optname,
 	default:
 		err =
 		    psmi_handle_error(NULL, PSM2_PARAM_ERR,
-				      "Unknown PSM_IB option %u.", optname);
+				      "Unknown PSM2_IB option %u.", optname);
 	}
 
 exit_fn:
@@ -620,10 +620,18 @@ ips_ptl_getopt(const void *component_obj, int optname,
 	return ips_ptl_optctl(component_obj, optname, optval, optlen, 1);
 }
 
+
+static
+uint32_t
+ips_ptl_rcvthread_is_enabled(const ptl_t *ptl)
+{
+	return (ptl->runtime_flags & PSMI_RUNTIME_RCVTHREAD);
+}
+
 psm2_error_t ips_ptl_poll(ptl_t *ptl, int _ignored)
 {
 	const uint64_t current_count = get_cycles();
-	const int do_lock = PSMI_PLOCK_DISABLED &&
+	const int do_lock = PSMI_LOCK_DISABLED &&
 	    (ptl->runtime_flags & PSMI_RUNTIME_RCVTHREAD);
 	psm2_error_t err = PSM2_OK_NO_PROGRESS;
 	psm2_error_t err2;
@@ -852,7 +860,7 @@ ips_ptl_connect(ptl_t *ptl, int numep, const psm2_epid_t *array_of_epid,
 	int *mask_array = NULL;
 	int i;
 
-	PSMI_PLOCK_ASSERT();
+	PSMI_LOCK_ASSERT(ptl->ep->mq->progress_lock);
 	err = ips_proto_connect(&ptl->proto, numep, array_of_epid,
 				array_of_epid_mask, array_of_errors,
 				array_of_epaddr, timeout_in);
@@ -935,8 +943,7 @@ ips_ptl_disconnect(ptl_t *ptl, int force, int numep,
 {
 	psm2_error_t err;
 
-	fprintf(stderr, "Aiee! ips_proto_disconnect() called.\n");
-	PSMI_PLOCK_ASSERT();
+	PSMI_LOCK_ASSERT(ptl->ep->mq->progress_lock);
 	err = ips_proto_disconnect(&ptl->proto, force, numep, array_of_epaddr,
 				   array_of_epaddr_mask, array_of_errors,
 				   timeout_in);
@@ -948,4 +955,10 @@ struct ptl_ctl_init
 psmi_ptl_ips = {
 	ips_ptl_sizeof, ips_ptl_init, ips_ptl_fini, ips_ptl_setopt,
 	    ips_ptl_getopt
+};
+
+struct ptl_ctl_rcvthread
+psmi_ptl_ips_rcvthread = {
+	ips_ptl_rcvthread_is_enabled,
+	ips_ptl_rcvthread_transfer_ownership,
 };

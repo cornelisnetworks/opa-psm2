@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #ifndef _PSMI_IN_USER_H
 #error psm_mpool.h not meant to be included directly, include psm_user.h instead
@@ -68,17 +68,31 @@
 /* Backwards compatibility */
 #define PSMI_MPOOL_ALIGN	PSMI_MPOOL_ALIGN_CACHE
 
-typedef void (*non_empty_callback_fn_t) (void *context);
 typedef struct mpool *mpool_t;
+typedef void (*non_empty_callback_fn_t) (void *context);
+typedef void (*alloc_dealloc_callback_fn_t) (int is_alloc, void *context,
+					     void *chunk);
 
-mpool_t psmi_mpool_create(size_t obj_size, uint32_t num_obj_per_chunk,
+mpool_t
+MOCKABLE(psmi_mpool_create)(size_t obj_size, uint32_t num_obj_per_chunk,
 			  uint32_t num_obj_max_total, int flags,
 			  psmi_memtype_t statstype,
 			  non_empty_callback_fn_t cb, void *context);
+MOCK_DCL_EPILOGUE(psmi_mpool_create);
+
+mpool_t psmi_mpool_create_for_cuda(size_t obj_size, uint32_t num_obj_per_chunk,
+				   uint32_t num_obj_max_total, int flags,
+				   psmi_memtype_t statstype,
+				   non_empty_callback_fn_t cb, void *context,
+				   alloc_dealloc_callback_fn_t ad_cb,
+				   void *ad_context);
 
 void psmi_mpool_destroy(mpool_t mp);
-void psmi_mpool_get_obj_info(mpool_t mp, uint32_t *num_obj_per_chunk,
+
+void
+MOCKABLE(psmi_mpool_get_obj_info)(mpool_t mp, uint32_t *num_obj_per_chunk,
 			     uint32_t *num_obj_max_total);
+MOCK_DCL_EPILOGUE(psmi_mpool_get_obj_info);
 
 void *psmi_mpool_get(mpool_t mp);
 void psmi_mpool_put(void *obj);

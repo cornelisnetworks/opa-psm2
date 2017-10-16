@@ -50,36 +50,96 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
+#It makes no sense to have both CUDA and non-CUDA in the same invocation
+#as they require different versions of the hfi1_user.h at this point in time.
+#Limiting this script to only build CUDA if requested
+
+#default BUILDARG to build source RPM only
 BUILDARG=s
+RPM_NAME=libpsm2
+
+function usage()
+{
+    echo "Usage: $0 [OPTION] [OPTION] [OPTION]"
+    echo " "
+    echo "Creates tar ball of source and source rpms by default."
+    echo "Optionally generates binary rpm(s) "
+    echo " "
+    echo "     s,a,b,p,c,i,l"
+    echo "           Optional, default is s (sourcerpm)"
+    echo "           Set single extension letter for rpmbuild -b argument"
+    echo "     -r <name>, -rpmname <name>"
+    echo "           Optional, set the output rpm name"
+    echo "     -e <basename ext>, -baseext <basename ext>"
+    echo "           Optional, set a base name extension"
+    echo "           This only appends an extra string onto the base RPM name"
+    echo "           Does not affect supporting RPMs"
+    echo "     -c, -cuda"
+    echo "           Optional, default is unset"
+    echo "           Sets PSM_CUDA=1, creating -cuda based spec and rpms"
+    echo "     -d <path>, -dir <path>"
+    echo "           Optionally sets output folder for rpmbuild to use"
+    echo "     Examples:"
+    echo "           $0 b"
+    echo "           $0 s -cuda"
+    echo "           $0 -cuda"
+    echo "           $0 -d ./temp"
+    echo "           $0 b -cuda -dir output"
+    exit 1
+}
 
 err=0
-if [ $# -gt 1 ]; then
-    err=1
-elif [ $# -eq 1 ]; then
+
+# OUTDIR is where the Makefile places its meta-data
+OUTDIR=build_release
+
+# Set TEMPDIR first, so user control can override the value
+# This is where rpmbuild places rpm(s) and uses its build meta-data.
+# It can be set the same as OUTDIR, and work just fine if desired.
+TEMPDIR=temp.$$
+
+while [ "$1" != "" ]; do
     case $1 in
-	a|b|p|c|i|l)
-	    BUILDARG=$1
-	    ;;
-	*)
-	    err=1
+        -d | -dir)      shift
+                        if [ -z "$1" ]; then
+                            usage
+                        fi
+                        TEMPDIR=$1
+                        ;;
+        -c | -cuda)     export PSM_CUDA=1
+                        RPM_EXT="-cuda"
+                        ;;
+        -e | -baseext)  shift
+                        if [ -z "$1" ]; then
+                            usage
+                        fi
+                        $RPM_NAME_BASEEXT="$1"
+                        export RPM_NAME_BASEEXT="$1"
+                        ;;
+        -r | -rpmname)  shift
+                        if [ -z "$1" ]; then
+                            usage
+                        fi
+                        $RPM_NAME="$1"
+                        export RPM_NAME="$1"
+                        ;;
+        s|a|b|p|c|i|l)  BUILDARG=$1
+                        ;;
+        * )             err=1
+                        usage
+                        ;;
     esac
-fi
+    shift
+done
 
-if [ $err -ne 0 ]; then
-    echo "usage: $0 [rpmbuild arg (a|b|p|c|i|l)]"
-    exit 1
-fi
+# Generic cleanup, build, and tmp folder creation
+make distclean OUTDIR=$OUTDIR
+make RPM_NAME=$RPM_NAME RPM_NAME_BASEEXT=$RPM_NAME_BASEEXT dist OUTDIR=$OUTDIR
+mkdir -p ./$TEMPDIR/{BUILD,RPMS,SOURCES,SPECS,SRPMS,BUILDROOT}
+# Differnet paths based on RPM_EXT
+cp ${OUTDIR}/$RPM_NAME-*.tar.gz $TEMPDIR/SOURCES
+make RPM_NAME=$RPM_NAME RPM_NAME_BASEEXT=$RPM_NAME_BASEEXT specfile OUTDIR=$OUTDIR
+cp ${OUTDIR}/$RPM_NAME.spec $TEMPDIR/SPECS
+rpmbuild -b$BUILDARG --define "_topdir $PWD/$TEMPDIR" --nodeps $TEMPDIR/SPECS/$RPM_NAME.spec
 
-RPM_NAME=libpsm2
-make distclean
-rm -rf temp.$$
-
-make dist
-
-mkdir -p temp.$$/{BUILD,RPMS,SOURCES,SPECS,SRPMS,BUILDROOT}
-cp ./$RPM_NAME-*.tar.gz temp.$$/SOURCES
-make specfile
-cp $RPM_NAME.spec temp.$$/SPECS
-rpmbuild -b$BUILDARG --define "_topdir $PWD/temp.$$" --nodeps temp.$$/SPECS/$RPM_NAME.spec
-
-echo The source rpm is in temp.$$/SRPMS/`ls temp.$$/SRPMS`
+echo "The SRPM(s) are in $TEMPDIR/SRPMS/`ls $TEMPDIR/SRPMS`"

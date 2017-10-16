@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #include <sched.h>
 
@@ -283,6 +283,15 @@ void MOCKABLE(psmi_mq_mtucpy)(void *vdest, const void *vsrc, uint32_t nchars)
 {
 	unsigned char *dest = (unsigned char *)vdest;
 	const unsigned char *src = (const unsigned char *)vsrc;
+
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED && (PSMI_IS_CUDA_MEM(vdest) || PSMI_IS_CUDA_MEM((void *) vsrc))) {
+		PSMI_CUDA_CALL(cudaMemcpy,
+			       vdest, vsrc, nchars, cudaMemcpyDefault);
+		return;
+	}
+#endif
+
 	if (nchars >> 2)
 		hfi_dwordcpy((uint32_t *) dest, (uint32_t *) src, nchars >> 2);
 	dest += (nchars >> 2) << 2;
@@ -297,6 +306,25 @@ void MOCKABLE(psmi_mq_mtucpy)(void *vdest, const void *vsrc, uint32_t nchars)
 	}
 }
 MOCK_DEF_EPILOGUE(psmi_mq_mtucpy);
+
+void psmi_mq_mtucpy_host_mem(void *vdest, const void *vsrc, uint32_t nchars)
+{
+	unsigned char *dest = (unsigned char *)vdest;
+	const unsigned char *src = (const unsigned char *)vsrc;
+
+	if (nchars >> 2)
+		hfi_dwordcpy((uint32_t *) dest, (uint32_t *) src, nchars >> 2);
+	dest += (nchars >> 2) << 2;
+	src += (nchars >> 2) << 2;
+	switch (nchars & 0x03) {
+	case 3:
+		*dest++ = *src++;
+	case 2:
+		*dest++ = *src++;
+	case 1:
+		*dest++ = *src++;
+	}
+}
 
 #if 0				/* defined(__x86_64__) No consumers of mtucpy safe */
 void psmi_mq_mtucpy_safe(void *vdest, const void *vsrc, uint32_t nchars)
@@ -327,11 +355,11 @@ psmi_mq_iprobe_inner(psm2_mq_t mq, psm2_epaddr_t src,
 {
 	psm2_mq_req_t req;
 
-	PSMI_PLOCK();
+	PSMI_LOCK(mq->progress_lock);
 	req = mq_req_match_with_tagsel(mq, src, tag, tagsel, remove_req);
 
 	if (req != NULL) {
-		PSMI_PUNLOCK();
+		PSMI_UNLOCK(mq->progress_lock);
 		return req;
 	}
 
@@ -339,7 +367,7 @@ psmi_mq_iprobe_inner(psm2_mq_t mq, psm2_epaddr_t src,
 	/* try again */
 	req = mq_req_match_with_tagsel(mq, src, tag, tagsel, remove_req);
 
-	PSMI_PUNLOCK();
+	PSMI_UNLOCK(mq->progress_lock);
 	return req;
 }
 
@@ -482,9 +510,9 @@ psm2_error_t __psm2_mq_cancel(psm2_mq_req_t *ireq)
 	 * We only allow cancellation of rendezvous sends, consider the eager sends
 	 * as always unsuccessfully cancelled.
 	 */
-	PSMI_PLOCK();
-
 	mq = req->mq;
+	PSMI_LOCK(mq->progress_lock);
+
 	if (MQE_TYPE_IS_RECV(req->type)) {
 		if (req->state == MQ_STATE_POSTED) {
 			int rc;
@@ -502,7 +530,7 @@ psm2_error_t __psm2_mq_cancel(psm2_mq_req_t *ireq)
 					req);
 	}
 
-	PSMI_PUNLOCK();
+	PSMI_UNLOCK(mq->progress_lock);
 
 	PSM2_LOG_MSG("leaving");
 
@@ -532,7 +560,7 @@ psmi_mq_wait_inner(psm2_mq_req_t *ireq, void *status,
 	}
 
 	if (do_lock)
-		PSMI_PLOCK();
+		PSMI_LOCK(req->mq->progress_lock);
 
 	if (req->state != MQ_STATE_COMPLETE) {
 		psm2_mq_t mq = req->mq;
@@ -546,7 +574,7 @@ psmi_mq_wait_inner(psm2_mq_req_t *ireq, void *status,
 		if (req->testwait_callback) {
 			err = req->testwait_callback(ireq);
 			if (do_lock)
-				PSMI_PUNLOCK();
+				PSMI_UNLOCK(req->mq->progress_lock);
 			if (status != NULL) {
 				status_copy(req, status);
 			}
@@ -576,7 +604,7 @@ psmi_mq_wait_inner(psm2_mq_req_t *ireq, void *status,
 
 fail_with_lock:
 	if (do_lock)
-		PSMI_PUNLOCK();
+		PSMI_UNLOCK(req->mq->progress_lock);
 	return err;
 }
 
@@ -635,12 +663,12 @@ psmi_mq_test_inner(psm2_mq_req_t *ireq, void *status,
 
 	if (req->state != MQ_STATE_COMPLETE) {
 		if (req->testwait_callback) {
-			PSMI_PLOCK();
+			PSMI_LOCK(req->mq->progress_lock);
 			err = req->testwait_callback(ireq);
 			if (status != NULL) {
 				status_copy(req, status);
 			}
-			PSMI_PUNLOCK();
+			PSMI_UNLOCK(req->mq->progress_lock);
 			return err;
 		} else
 			return PSM2_MQ_NO_COMPLETIONS;
@@ -654,10 +682,10 @@ psmi_mq_test_inner(psm2_mq_req_t *ireq, void *status,
 	     req, req->tag.tag[0], req->tag.tag[1], req->tag.tag[2], req->buf,
 	     req->buf_len, req->error_code);
 
-	PSMI_PLOCK();
+	PSMI_LOCK(req->mq->progress_lock);
 	mq_qq_remove(&req->mq->completed_q, req);
 	psmi_mq_req_free(req);
-	PSMI_PUNLOCK();
+	PSMI_UNLOCK(req->mq->progress_lock);
 
 	*ireq = PSM2_MQ_REQINVALID;
 
@@ -701,11 +729,11 @@ __psm2_mq_isend2(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags,
 	PSMI_ASSERT_INITIALIZED();
 	psmi_assert(stag != NULL);
 
-	PSMI_PLOCK();
+	PSMI_LOCK(mq->progress_lock);
 	err =
 	    dest->ptlctl->mq_isend(mq, dest, flags, stag, buf, len, context,
 				   req);
-	PSMI_PUNLOCK();
+	PSMI_UNLOCK(mq->progress_lock);
 
 #if 0
 #ifdef PSM_VALGRIND
@@ -741,11 +769,11 @@ __psm2_mq_isend(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags, uint64_t stag,
 
 	PSMI_ASSERT_INITIALIZED();
 
-	PSMI_PLOCK();
+	PSMI_LOCK(mq->progress_lock);
 	err =
 	    dest->ptlctl->mq_isend(mq, dest, flags, &tag, buf, len, context,
 				   req);
-	PSMI_PUNLOCK();
+	PSMI_UNLOCK(mq->progress_lock);
 
 #if 0
 #ifdef PSM_VALGRIND
@@ -776,9 +804,9 @@ __psm2_mq_send2(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags,
 	PSMI_ASSERT_INITIALIZED();
 	psmi_assert(stag != NULL);
 
-	PSMI_PLOCK();
+	PSMI_LOCK(mq->progress_lock);
 	err = dest->ptlctl->mq_send(mq, dest, flags, stag, buf, len);
-	PSMI_PUNLOCK();
+	PSMI_UNLOCK(mq->progress_lock);
 	PSM2_LOG_MSG("leaving");
 	return err;
 }
@@ -798,9 +826,9 @@ __psm2_mq_send(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags, uint64_t stag,
 
 	PSMI_ASSERT_INITIALIZED();
 
-	PSMI_PLOCK();
+	PSMI_LOCK(mq->progress_lock);
 	err = dest->ptlctl->mq_send(mq, dest, flags, &tag, buf, len);
-	PSMI_PUNLOCK();
+	PSMI_UNLOCK(mq->progress_lock);
 	PSM2_LOG_MSG("leaving");
 	return err;
 }
@@ -819,13 +847,25 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 
 	PSM2_LOG_MSG("entering");
 	psmi_assert(MQE_TYPE_IS_RECV(req->type));
+#ifdef PSM_CUDA
+	psmi_mtucpy_fn_t psmi_mtucpy_fn;
+	if (req->is_buf_gpu_mem)
+		psmi_mtucpy_fn = psmi_mq_mtucpy;
+	else
+		psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
+#endif
 
 	switch (req->state) {
 	case MQ_STATE_COMPLETE:
 		if (req->buf != NULL) {	/* 0-byte messages don't alloc a sysbuf */
 			copysz = mq_set_msglen(req, len, req->send_msglen);
-			psmi_mq_mtucpy(buf, (const void *)req->buf, copysz);
-			psmi_sysbuf_free(req->buf);
+#ifdef PSM_CUDA
+			psmi_mtucpy_fn
+#else
+			psmi_mq_mtucpy
+#endif
+				(buf, (const void *)req->buf, copysz);
+			psmi_mq_sysbuf_free(mq, req->buf);
 		}
 		req->buf = buf;
 		req->buf_len = len;
@@ -839,14 +879,19 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 		 */
 		req->recv_msgoff = min(req->recv_msgoff, copysz);
 		if (req->recv_msgoff) {
-			psmi_mq_mtucpy(buf, (const void *)req->buf,
+#ifdef PSM_CUDA
+			psmi_mtucpy_fn
+#else
+			psmi_mq_mtucpy
+#endif
+				(buf, (const void *)req->buf,
 				       req->recv_msgoff);
 		}
 		/* What's "left" is no access */
 		VALGRIND_MAKE_MEM_NOACCESS((void *)((uintptr_t) buf +
 						    req->recv_msgoff),
 					   len - req->recv_msgoff);
-		psmi_sysbuf_free(req->buf);
+		psmi_mq_sysbuf_free(mq, req->buf);
 
 		req->state = MQ_STATE_MATCHED;
 		req->buf = buf;
@@ -860,7 +905,12 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 		 */
 		req->recv_msgoff = min(req->recv_msgoff, copysz);
 		if (req->recv_msgoff) {
-			psmi_mq_mtucpy(buf, (const void *)req->buf,
+#ifdef PSM_CUDA
+			psmi_mtucpy_fn
+#else
+			psmi_mq_mtucpy
+#endif
+				(buf, (const void *)req->buf,
 				       req->recv_msgoff);
 		}
 		/* What's "left" is no access */
@@ -868,7 +918,7 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 						    req->recv_msgoff),
 					   len - req->recv_msgoff);
 		if (req->send_msgoff) {
-			psmi_sysbuf_free(req->buf);
+			psmi_mq_sysbuf_free(mq, req->buf);
 		}
 
 		req->state = MQ_STATE_MATCHED;
@@ -898,10 +948,28 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 	psm2_error_t err = PSM2_OK;
 	psm2_mq_req_t req;
 
+#ifdef PSM_CUDA
+	int gpu_mem;
+	/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
+	 * when the buffer pointer received into PSM has been allocated
+	 * by the application. This guarantees the all memory operations
+	 * to this region of memory (used by multiple layers of the stack)
+	 * always synchronize
+	 */
+	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)buf)) {
+		int trueflag = 1;
+		PSMI_CUDA_CALL(cuPointerSetAttribute, &trueflag,
+			       CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
+			      (CUdeviceptr)buf);
+		gpu_mem = 1;
+	} else
+		gpu_mem = 0;
+#endif
+
 	PSM2_LOG_MSG("entering");
 	PSMI_ASSERT_INITIALIZED();
 
-	PSMI_PLOCK();
+	PSMI_LOCK(mq->progress_lock);
 
 	/* First check unexpected Queue and remove req if found */
 	req = mq_req_match_with_tagsel(mq, src, tag, tagsel, REMOVE_ENTRY);
@@ -924,6 +992,10 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 		req->recv_msgoff = 0;
 		req->context = context;
 
+#ifdef PSM_CUDA
+		req->is_buf_gpu_mem = gpu_mem;
+#endif
+
 		/* Nobody should touch the buffer after it's posted */
 		VALGRIND_MAKE_MEM_NOACCESS(buf, len);
 
@@ -937,6 +1009,9 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 			  " tagsel=%08x.%08x.%08x req=%p\n", buf, len,
 			  tag->tag[0], tag->tag[1], tag->tag[2],
 			  tagsel->tag[0], tagsel->tag[1], tagsel->tag[2], req);
+#ifdef PSM_CUDA
+		req->is_buf_gpu_mem = gpu_mem;
+#endif
 
 		req->context = context;
 
@@ -944,7 +1019,7 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 	}
 
 ret:
-	PSMI_PUNLOCK();
+	PSMI_UNLOCK(mq->progress_lock);
 	psmi_assert_req_not_internal(req);
 	*reqo = req;
 	PSM2_LOG_MSG("leaving");
@@ -999,9 +1074,26 @@ __psm2_mq_imrecv(psm2_mq_t mq, uint32_t flags, void *buf, uint32_t len,
 		   user's buffer. */
 		req->context = context;
 
-		PSMI_PLOCK();
+#ifdef PSM_CUDA
+	/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
+	 * when the buffer pointer received into PSM has been allocated
+	 * by the application. This guarantees the all memory operations
+	 * to this region of memory (used by multiple layers of the stack)
+	 * always synchronize
+	 */
+	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)buf)) {
+		int trueflag = 1;
+		PSMI_CUDA_CALL(cuPointerSetAttribute, &trueflag,
+			       CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
+			      (CUdeviceptr)buf);
+		req->is_buf_gpu_mem = 1;
+	} else
+		req->is_buf_gpu_mem = 0;
+#endif
+
+		PSMI_LOCK(mq->progress_lock);
 		psm2_mq_irecv_inner(mq, req, buf, len);
-		PSMI_PUNLOCK();
+		PSMI_UNLOCK(mq->progress_lock);
 	}
 
 	PSM2_LOG_MSG("leaving");
@@ -1025,13 +1117,13 @@ psmi_mq_ipeek_inner(psm2_mq_t mq, psm2_mq_req_t *oreq,
 	PSMI_ASSERT_INITIALIZED();
 
 	if ((req = mq->completed_q.first) == NULL) {
-		PSMI_PLOCK();
+		PSMI_LOCK(mq->progress_lock);
 		psmi_poll_internal(mq->ep, 1);
 		if ((req = mq->completed_q.first) == NULL) {
-			PSMI_PUNLOCK();
+			PSMI_UNLOCK(mq->progress_lock);
 			return PSM2_MQ_NO_COMPLETIONS;
 		}
-		PSMI_PUNLOCK();
+		PSMI_UNLOCK(mq->progress_lock);
 	}
 	/* something in the queue */
 	*oreq = req;
@@ -1168,6 +1260,12 @@ __psm2_mq_init(psm2_ep_t ep, uint64_t tag_order_mask,
 	if (err != PSM2_OK)	/* error already handled */
 		goto fail;
 
+	/* Initialize the unexpected system buffer allocator */
+	psmi_mq_sysbuf_init(mq);
+	char buf[128];
+	psmi_mq_sysbuf_getinfo(mq, buf, sizeof buf);
+	_HFI_VDBG("%s", buf);
+
 	*mqo = mq;
 
 fail:
@@ -1254,15 +1352,20 @@ psm2_error_t psmi_mq_malloc(psm2_mq_t *mqo)
 
 	/* The values are overwritten in initialize_defaults, they're just set to
 	 * sensible defaults until then */
-	if(psmi_cpu_model == CPUID_MODEL_PHI_GEN2)
+	if(psmi_cpu_model == CPUID_MODEL_PHI_GEN2 || psmi_cpu_model == CPUID_MODEL_PHI_GEN2M)
 	{
-		mq->hfi_thresh_rv = 200000; /* 200k, splitting diff 128K & 256K */
-		mq->hfi_window_rv = 4*1024*1024; /* 4MB */
+		mq->hfi_thresh_rv = MQ_HFI_THRESH_RNDV_PHI2;
+		mq->hfi_base_window_rv = MQ_HFI_WINDOW_RNDV_PHI2;
 	} else {
-		mq->hfi_thresh_rv = 64000;
-		mq->hfi_window_rv = 131072;
+		mq->hfi_thresh_rv = MQ_HFI_THRESH_RNDV_XEON;
+		mq->hfi_base_window_rv = MQ_HFI_WINDOW_RNDV_XEON;
 	}
-	mq->shm_thresh_rv = 16000;
+	mq->hfi_thresh_tiny = MQ_HFI_THRESH_TINY;
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED)
+		mq->hfi_base_window_rv = MQ_HFI_THRESH_RNDV_CUDA;
+#endif
+	mq->shm_thresh_rv = MQ_SHM_THRESH_RNDV;
 
 	memset(&mq->stats, 0, sizeof(psm2_mq_stats_t));
 	err = psmi_mq_req_init(mq);
@@ -1280,7 +1383,14 @@ fail:
 
 psm2_error_t psmi_mq_initialize_defaults(psm2_mq_t mq)
 {
-	union psmi_envvar_val env_rvwin, env_hfirv, env_shmrv, env_stats;
+	union psmi_envvar_val env_hfitiny, env_rvwin, env_hfirv,
+		env_shmrv, env_stats;
+
+	psmi_getenv("PSM2_MQ_TINY_HFI_THRESH",
+		    "hfi tiny packet switchover (max 8, default 8)",
+		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
+		    (union psmi_envvar_val)mq->hfi_thresh_tiny, &env_hfitiny);
+	mq->hfi_thresh_tiny = min(env_hfitiny.e_uint, 8);
 
 	psmi_getenv("PSM2_MQ_RNDV_HFI_THRESH",
 		    "hfi eager-to-rendezvous switchover",
@@ -1291,8 +1401,8 @@ psm2_error_t psmi_mq_initialize_defaults(psm2_mq_t mq)
 	psmi_getenv("PSM2_MQ_RNDV_HFI_WINDOW",
 		    "hfi rendezvous window size, max 4M",
 		    PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_UINT,
-		    (union psmi_envvar_val)mq->hfi_window_rv, &env_rvwin);
-	mq->hfi_window_rv = min(4 * 1024 * 1024, env_rvwin.e_uint);
+		    (union psmi_envvar_val)mq->hfi_base_window_rv, &env_rvwin);
+	mq->hfi_base_window_rv = min(4 * 1024 * 1024, env_rvwin.e_uint);
 
 	/* Re-evaluate this since it may have changed after initializing the shm
 	 * device */
@@ -1313,9 +1423,11 @@ psm2_error_t psmi_mq_initialize_defaults(psm2_mq_t mq)
 	return PSM2_OK;
 }
 
-psm2_error_t psmi_mq_free(psm2_mq_t mq)
+psm2_error_t MOCKABLE(psmi_mq_free)(psm2_mq_t mq)
 {
 	psmi_mq_req_fini(mq);
+	psmi_mq_sysbuf_fini(mq);
 	psmi_free(mq);
 	return PSM2_OK;
 }
+MOCK_DEF_EPILOGUE(psmi_mq_free);

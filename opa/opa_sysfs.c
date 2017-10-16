@@ -257,6 +257,28 @@ int hfi_sysfs_unit_open(uint32_t unit, const char *attr, int flags)
 	return fd;
 }
 
+static int hfi_sysfs_unit_open_for_node(uint32_t unit, int flags)
+{
+	int saved_errno;
+	char buf[1024];
+	int fd;
+	char *path_copy = strdup(hfi_sysfs_path());
+
+	snprintf(buf, sizeof(buf), "%s/hfi1_%u/device/numa_node",
+		 dirname(path_copy), unit);
+	fd = open(buf, flags);
+	saved_errno = errno;
+
+	if (fd == -1) {
+		_HFI_DBG("Failed to open attribute numa_node of unit %d: %s\n",
+			 unit, strerror(errno));
+		_HFI_DBG("Offending file name: %s\n", buf);
+	}
+
+	errno = saved_errno;
+	return fd;
+}
+
 int hfi_sysfs_port_open(uint32_t unit, uint32_t port, const char *attr,
 			int flags)
 {
@@ -746,6 +768,55 @@ int hfi_sysfs_unit_read_s64(uint32_t unit, const char *attr,
 bail:
 	if (data)
 		free(data);
+	errno = saved_errno;
+	return ret;
+}
+
+static int hfi_sysfs_unit_read_node(uint32_t unit, char **datap)
+{
+	int fd = -1, ret = -1;
+	int saved_errno;
+
+	fd = hfi_sysfs_unit_open_for_node(unit, O_RDONLY);
+	saved_errno = errno;
+
+	if (fd == -1)
+		goto bail;
+
+	ret = read_page(fd, datap);
+	if (ret == -1)
+		*datap = NULL;
+
+	saved_errno = errno;
+	close(fd);
+bail:
+	errno = saved_errno;
+	return ret;
+}
+
+int64_t hfi_sysfs_unit_read_node_s64(uint32_t unit)
+{
+	char *data=NULL, *end;
+	int saved_errno;
+	long long val;
+	int64_t ret = -1;
+
+	saved_errno = errno;
+	if (hfi_sysfs_unit_read_node(unit, &data) == -1) {
+		goto bail;
+	}
+
+	val = strtoll(data, &end, 0);
+	saved_errno = errno;
+
+	if (!*data || !(*end == '\0' || isspace(*end))) {
+		ret = -1;
+		goto bail;
+	}
+
+	ret = (int64_t) val;
+bail:
+	free(data);
 	errno = saved_errno;
 	return ret;
 }

@@ -97,7 +97,7 @@ extern "C" {
  * of the PSM2 process. PSM2 ensures that its own state is protected against this
  * concurrent execution. However, a handler must make its own arrangements to
  * protect its own state. Alternatively, the PSM2 progress thread can be
- * disabled using the PSM_RCVTHREAD environment variable if this is too
+ * disabled using the PSM2_RCVTHREAD environment variable if this is too
  * onerous for the handler.
  *
  * PSM2 has an active progress model and requires that the PSM2 library is

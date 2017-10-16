@@ -87,7 +87,7 @@ BASECFLAGS += -fpic -fPIC
 ASFLAGS += -g3 -fpic
 
 ifeq (${CCARCH},icc)
-    BASECFLAGS += -O3 -g3 -fpic -fPIC,
+    BASECFLAGS += -O3 -g3
     CFLAGS += $(BASECFLAGS)
     LDFLAGS += -static-intel
 else

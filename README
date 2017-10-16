@@ -4,7 +4,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2016 Intel Corporation.
+  Copyright(c) 2017 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -20,7 +20,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2016 Intel Corporation.
+  Copyright(c) 2017 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -48,7 +48,7 @@
   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-  Copyright (c) 2003-2016 Intel Corporation. All rights reserved.
+  Copyright (c) 2003-2017 Intel Corporation. All rights reserved.
 
 ================================================================================
 
@@ -68,6 +68,7 @@ Contains the following sections:
   * INSTALLING USING MAKEFILE
   * INSTALLING USING EITHER YUM OR DNF
 - RELATED SOFTWARE TO PSM2
+- SUPPORTING DOCUMENTATION
 
 INTRODUCTION
 ============
@@ -81,9 +82,9 @@ SuSE SLES.
 
 Only the x86_64 architecture is supported.
 
-Building PSM2 is possible on RHEL 7.2 as it ships with hfi1 kernel driver.
+Building PSM2 is possible on RHEL 7.2+ as it ships with hfi1 kernel driver.
 For older RHEL 7.x versions and SuSE SLES, OPA is not natively supported
-in the kernel (yet) and therefore, building PSM2 is not possible unless
+in the kernel and therefore, building PSM2 is not possible unless
 you have the correct kernel-devel package or use latest versions of IFS.
 
 There are two mechanisms for building and installing the PSM2 library:
@@ -103,7 +104,9 @@ gcc-4.8.2
 glibc-devel
 glibc-headers
 kernel-headers
-libuuid-devel
+
+Additional packages for GPU Direct support include:
+NVIDIA CUDA toolkit 8.0 or greater. Older versions are not supported.
 
 In addition to depending on these packages, root privileges are required to
 install the runtime libraries and development header files into standard
@@ -120,7 +123,8 @@ The base name of the RPM changes depending on which version/branch
 of code you derive the tar file from.
 
 Up until v10.2 of PSM2, the base name for the RPM is hfi1-psm.
-From v10.2 onwards, the base name will be libpsm2.
+From v10.2 onwards, the base name will be libpsm2. The internal
+library remains unchanged and is still libpsm2.so.2.
 
 BUILDING USING MAKEFILES
 ------------------------
@@ -131,6 +135,9 @@ BUILDING USING MAKEFILES
 	$ cd $BASENAME-$PRODUCT-$RELEASE
 3. Run make on the command line. This will build the PSM2 library.
 	$ make
+  3.1. Optionally to build PSM2 library with GPU Direct support, Run make
+       PSM_CUDA=1 instead of make on the command line.
+      $ make PSM_CUDA=1
 
 BUILDING USING RPMBUILD
 -----------------------
@@ -138,15 +145,34 @@ BUILDING USING RPMBUILD
 1. Run this command from your $PWD to generate rpm, srpm files
 	$ ./makesrpm.sh a
 
-As of this writing (June 30, 2016), this command results in the following
-collection of rpm's and source code rpm's under your $PWD/temp.X/ directory.
-("X" is the pid of the bash script that created the srpm and rpm files)
+  This command results in the following collection of rpm's and source
+  code rpm's under your $PWD/temp.X/ directory.
+  ("X" is the pid of the bash script that created the srpm and rpm files)
+  (Result shown here for RHEL systems.)
 
-RPMS/x86_64/libpsm2-compat-10.2.25-1x86_64.rpm
-RPMS/x86_64/libpsm2-devel-10.2.25-1x86_64.rpm
-RPMS/x86_64/libpsm2-10.2.25-1x86_64.rpm
-RPMS/x86_64/libpsm2-debuginfo-10.2.25-1x86_64.rpm
-SRPMS/libpsm2-10.2.25-1.src.rpm
+  RPMS/x86_64/libpsm2-compat-10.3.7-1x86_64.rpm
+  RPMS/x86_64/libpsm2-devel-10.3.7-1x86_64.rpm
+  RPMS/x86_64/libpsm2-10.3.7-1x86_64.rpm
+  RPMS/x86_64/libpsm2-debuginfo-10.3.7-1x86_64.rpm
+  SRPMS/libpsm2-10.3.7-1.src.rpm
+
+  1.1. Optionally for GPU Direct support run this command from your $PWD to
+       generate rpm, srpm files
+       $ ./makesrpm.sh a -cuda
+
+      This command results in the following collection of rpm's and source code
+      rpm's under your $PWD/temp.X/ directory. ("X" is the pid of the bash
+      script that created the srpm and rpm files):
+      RPMS/x86_64/libpsm2-10.3.7-1cuda.x86_64.rpm
+      RPMS/x86_64/libpsm2-compat-10.3.7-1cuda.x86_64.rpm
+      RPMS/x86_64/libpsm2-devel-10.3.7-1cuda.x86_64.rpm
+      SRPMS/x86_64/libpsm2-10.3.7-1cuda.src.rpm
+
+  On systems with SLES 12.3 or newer, the package name for the base libpsm2
+  RPM will be:
+  	libpsm2-2-10.3.7-1.x86_64.rpm
+
+  Other supporting RPM package names will be as listed above.
 
 INSTALLING
 ==========
@@ -188,31 +214,37 @@ RELATED SOFTWARE TO PSM2
 MPI Libraries supported
 -----------------------
 A large number of open source (OpenMPI, MVAPICH2) and Vendor MPI
-implementations support PSM for optimized communication on HCAs. Vendor MPI
+implementations support PSM2 for optimized communication on HCAs. Vendor MPI
 implementations (HP-MPI, Intel MPI 4.0 with PMI, Platform/Scali MPI)
-require that the PSM runtime libraries be installed and available on
+require that the PSM2 runtime libraries be installed and available on
 each node. Usually a configuration file or a command line switch to mpirun
-needs to be specified to utilize the PSM transport.
+needs to be specified to utilize the PSM2 transport.
 
 OpenMPI support
 ---------------
-It is recommended to use the v1.10.2 or newer version of OpenMPI.
+It is recommended to use the v1.10.4 or newer version of OpenMPI.
 Prior versions of OpenMPI have an issue with support PSM2 network transports
 mixed with standard Verbs transport (BTL openib). This prevents an OpenMPI
-installation with network modules available for PSM and Verbs to work
+installation with network modules available for PSM2 and Verbs to work
 correctly on nodes with no HFI hardware. This has been fixed in the
 latest development branch allowing a single OpenMPI installation to target
-HFI hardware via PSM or Verbs as well as alternate transports seamlessly.
+HFI hardware via PSM2 or Verbs as well as alternate transports seamlessly.
 
-PSM header and runtime files need to be installed on a node where the OpenMPI
-build is performed. All compute nodes additionally should have the PSM runtime
+If NVIDIA CUDA support is desired, you can use the OpenMPI build
+(v1.10.4-cuda-hfi) provided by Intel in the IFS installer v10.4.X or newer.
+The changes have also been accepted into v3.0.x branch of upstream OpenMPI
+repository. Therefore subsequent v3.0.x versions of OpenMPI should carry the
+required OpenMPI support for PSM2 GPUDirect feature.
+
+PSM2 header and runtime files need to be installed on a node where the OpenMPI
+build is performed. All compute nodes additionally should have the PSM2 runtime
 libraries available on them. OpenMPI provides a standard configure, make and
-make install mechanism which will detect and build the relevant PSM network
+make install mechanism which will detect and build the relevant PSM2 network
 modules for OpenMPI once the header and runtime files are detected.
 
 MVAPICH2 support
 ----------------
-MVAPICH2 supports PSM transport for optimized communication on HFI hardware.
+MVAPICH2 supports PSM2 transport for optimized communication on HFI hardware.
 OPA IFS supports MVAPICH2 v2.1 (or later). PSM2 header and runtime files
 need to be installed on a node where MVAPICH2 builds are performed. All
 compute nodes should also have the PSM2 runtime libraries available on them.
@@ -230,6 +262,19 @@ Intel OPA is not yet included within OFED. But the hfi1 driver is available
 publicly at kernel.org. Please do pull the driver from either kernel.org or
 the github page for opa-hfi1 driver (https://github.com/01org/opa-hfi1)
 
+SUPPORTING DOCUMENTATION
+------------------------
+PSM2 Programmer's Guide is published along with documentation for "Intel® Omni-Path
+Host Fabric Interface PCIe Adapter 100 Series"
+(http://www.intel.com/content/www/us/en/support/network-and-i-o/fabric-products/000016242.html)
+
+Refer to this document for description on APIs and environment variables that
+are available for use. For sample code on writing applications leveraging the
+PSM2 APIs, refer to Section 5.
+
+Link to latest (as of Sep 2017) PSM2 Programmer's Guide:
+https://www.intel.com/content/dam/support/us/en/documents/network-and-i-o/fabric-products/Intel_PSM2_PG_H76473_v7_0.pdf
+
 PSM Compatibility Support
 ------------
 
@@ -241,14 +286,15 @@ If the system has an application that is coded to use PSM and has requirements
 to use PSM2 (i.e. the host has Omni-Path hardware), the compatibility library
 must be used.
 
-The compatibility library is enabled through ldconfig. The system
-administrator must add the following configuration in order to use PSM2
-compatibility over PSM:
-
-File:  /etc/ld.so.conf.d/psm2-compat.conf
-/usr/lib/psm2-compat/
-
-After adding this configuration, the superuser must execute ldconfig.
-This puts the libpsm2-compat version of libpsm_infinipath.so.1 in preference
-to that of libpsm-infinipath. Doing so allows applications coded to PSM
+Please refer to your operating system's documentation to find how to modify the
+order in which system directories are searched for dynamic libraries. The
+libpsm2-compat version of libpsm_infinipath.so.1 must be earlier on the search
+path than that of libpsm-infinipath. Doing so allows applications coded to PSM
 to transparently use the PSM2 API and devices which require it.
+
+Please note that the installation path for the libpsm2-compat version of
+libpsm_infinipath.so.1 will differ depending on your operating system
+specifics. Common locations include:
+- /usr/lib64/psm2-compat/
+- /usr/lib/psm2-compat/
+

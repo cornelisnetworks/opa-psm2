@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #ifndef _IPS_PROTO_PARAMS_H
 #define _IPS_PROTO_PARAMS_H
@@ -106,7 +106,7 @@
 #define BYTE2DWORD_SHIFT 2
 #define LOWER_16_BITS 0xFFFF
 #define PSM_CACHE_LINE_BYTES 64
-#define PSM_FLOW_CREDITS 64
+#define PSM2_FLOW_CREDITS 64
 #define PSM_CRC_SIZE_IN_BYTES 8
 
 /*
@@ -134,6 +134,7 @@
 #define IPS_FLOW_FLAG_PENDING_NAK   0x04
 #define IPS_FLOW_FLAG_GEN_BECN      0x08
 #define IPS_FLOW_FLAG_CONGESTED     0x10
+#define IPS_FLOW_FLAG_SKIP_CTS      0x20
 
 /* tid session expected send flags  */
 #define EXP_SEND_FLAG_CLEAR_ALL 0x00
@@ -149,6 +150,18 @@
 #define IPS_SEND_FLAG_BLOCKING		0x01	/* blocking send */
 #define IPS_SEND_FLAG_PKTCKSUM          0x02	/* Has packet checksum */
 #define IPS_SEND_FLAG_AMISTINY		0x04	/* AM is tiny, exclusive */
+
+#ifdef PSM_CUDA
+/* This flag is used to indicate to the reciever when
+ * the send is issued on a device buffer. This helps in
+ * selecting TID path on the recieve side regardless of
+ * the receive buffers locality. It is used
+ * in a special case where the send is on a device
+ * buffer and the receive is on a host buffer.
+ */
+#define IPS_SEND_FLAG_GPU_BUF           0x08
+#endif
+
 #define IPS_SEND_FLAG_PROTO_OPTS        0x3f	/* only 6bits wire flags */
 
 /* scb flags */
@@ -202,11 +215,22 @@
 #define IPS_PROTO_FLAG_CCA 0x2000
 #define IPS_PROTO_FLAG_CCA_PRESCAN 0x4000	/* Enable RAPID CCA prescanning */
 
+#ifdef PSM_CUDA
+/* Use RNDV (TID) for all message sizes */
+#define IPS_PROTO_FLAG_ALWAYS_RNDV		0x10000
+/* Use GPUDirect RDMA for SDMA */
+#define IPS_PROTO_FLAG_GPUDIRECT_RDMA_SEND	0x20000
+/* Use GPUDirect RDMA for TID */
+#define IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV	0x40000
+#endif
+
 #define IPS_PROTOEXP_FLAG_ENABLED	     0x01	/* default */
 #define IPS_PROTOEXP_FLAG_HDR_SUPP           0x02	/* Header suppression enabled */
 #define IPS_PROTOEXP_FLAG_TID_DEBUG	     0x04	/* *not* default */
 #define IPS_PROTOEXP_FLAG_RTS_CTS_INTERLEAVE 0x08	/* Interleave RTS handling. */
+#define IPS_PROTOEXP_FLAG_CTS_SERIALIZED 0x10	/* CTS serialized */
 #define IPS_PROTOEXP_FLAGS_DEFAULT	     IPS_PROTOEXP_FLAG_ENABLED
+
 
 /* We have to get an MTU of at least 2K, or else this breaks some assumptions
  * in the packets that handle tid descriptors
@@ -220,7 +244,7 @@
  * The defines set 'denum' and assume that num is set to 1
  *
  * These values are all defaults, each is overridable via
- * PSM_FI_<spec_name> in the environment (and yes, spec_name is in lowercase
+ * PSM2_FI_<spec_name> in the environment (and yes, spec_name is in lowercase
  * *in the environment* just to minimize it appearing in the wild).  The format
  * there is <num:denom:initial_seed> so the same thing except that one can set
  * a specific seed to the random number generator.

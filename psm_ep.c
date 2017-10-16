@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -135,12 +135,29 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
 	char *env;
 	psm2_error_t err = PSM2_OK;
 	uint64_t gidh[HFI_MAX_RAILS][3];
+	union psmi_envvar_val env_multirail;
+	int multirail_within_socket_used = 0;
+	int node_id = -1, found = 0;
 
-	env = getenv("PSM2_MULTIRAIL");
-	if (!env || atoi(env) == 0) {
+	psmi_getenv("PSM2_MULTIRAIL",
+			"Use all available HFIs in the system for communication.\n"
+			 "0: Disabled (default),\n"
+			 "1: Enable multirail across all available HFIs,\n"
+			 "2: Enable multirail within socket.\n"
+			 "\t For multirail within a socket, we try to find at\n"
+			 "\t least one HFI on the same socket as current task.\n"
+			 "\t If none found, we continue to use other HFIs within\n"
+			 "\t the system.",
+			PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
+			(union psmi_envvar_val)0,
+			&env_multirail);
+	if (!env_multirail.e_int) {
 		*num_rails = 0;
 		return err;
 	}
+
+	if (env_multirail.e_int == 2)
+		multirail_within_socket_used = 1;
 
 /*
  * map is in format: unit:port,unit:port,...
@@ -213,10 +230,34 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
 		num_units = HFI_MAX_RAILS;
 	}
 
+	/*
+	 * PSM2_MULTIRAIL=2 functionality-
+	 *   - Try to find at least find one HFI in the same root
+	 *     complex. If none found, continue to run and
+	 *     use remaining HFIs in the system.
+	 *   - If we do find at least one HFI in same root complex, we
+	 *     go ahead and add to list.
+	 */
+	if (multirail_within_socket_used) {
+		node_id = psmi_get_current_proc_location();
+		for (i = 0; i < num_units; i++) {
+			if (hfi_get_unit_active(i) <= 0)
+				continue;
+
+			if (hfi_sysfs_unit_read_node_s64(i) == node_id) {
+				found = 1;
+				break;
+			}
+		}
+	}
 /*
  * Get all the ports with a valid lid and gid, one per unit.
  */
 	for (i = 0; i < num_units; i++) {
+		if (multirail_within_socket_used &&
+			found && (hfi_sysfs_unit_read_node_s64(i) != node_id))
+			continue;
+
 		for (j = HFI_MIN_PORT; j <= HFI_MAX_PORT; j++) {
 			ret = hfi_get_port_lid(i, j);
 			if (ret <= 0)
@@ -343,7 +384,7 @@ psmi_ep_verify_pkey(psm2_ep_t ep, uint16_t pkey, uint16_t *opkey)
 	/* if pkey does not match */
 	if (i == 16) {
 		err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
-					"Wrong pkey 0x%x, please use PSM_PKEY to specify a valid pkey\n",
+					"Wrong pkey 0x%x, please use PSM2_PKEY to specify a valid pkey\n",
 					pkey);
 		return err;
 	}
@@ -373,12 +414,12 @@ uint64_t psmi_epid_subcontext(psm2_epid_t epid)
 }
 
 /* Currently not exposed to users, we don't acknowledge the existence of
- * service levels and HFI types encoding within epids. This may require
+ * service levels encoding within epids. This may require
  * changing to expose SLs
  */
-uint64_t psmi_epid_hfi_type(psm2_epid_t epid)
+uint64_t psmi_epid_version(psm2_epid_t epid)
 {
-	return (uint64_t) PSMI_EPID_GET_HFITYPE(epid);
+	return (uint64_t) PSMI_EPID_GET_EPID_VERSION(epid);
 }
 
 uint64_t __psm2_epid_context(psm2_epid_t epid)
@@ -484,6 +525,62 @@ psm2_error_t __psm2_ep_epid_lookup(psm2_epid_t epid, psm2_epconn_t *epconn)
 }
 PSMI_API_DECL(psm2_ep_epid_lookup);
 
+psm2_error_t __psm2_ep_epid_lookup2(psm2_ep_t ep, psm2_epid_t epid, psm2_epconn_t *epconn)
+{
+	psm2_error_t err = PSM2_OK;
+
+	PSM2_LOG_MSG("entering");
+	PSMI_ERR_UNLESS_INITIALIZED(NULL);
+
+	/* Need to have an opened endpoint before we can resolve epids */
+	if (ep == NULL) {
+		err = psmi_handle_error(NULL, PSM2_EP_WAS_CLOSED,
+					"PSM Endpoint is closed or does not exist");
+		PSM2_LOG_MSG("leaving");
+		return err;
+	}
+
+	if (epconn == NULL) {
+		err = psmi_handle_error(NULL, PSM2_PARAM_ERR,
+					"Invalid output parameter");
+		PSM2_LOG_MSG("leaving");
+		return err;
+	}
+
+	psm2_epaddr_t epaddr = psmi_epid_lookup(ep, epid);
+	if (epaddr) {
+		/* Found connection for epid. Return info about endpoint to caller. */
+		psmi_assert_always(epaddr->ptlctl->ep == ep);
+		epconn->addr = epaddr;
+		epconn->ep = ep;
+		epconn->mq = ep->mq;
+		PSM2_LOG_MSG("leaving");
+		return err;
+	}
+
+	err = psmi_handle_error(NULL, PSM2_EPID_UNKNOWN,
+				"Endpoint connection status unknown");
+	PSM2_LOG_MSG("leaving");
+	return err;
+}
+PSMI_API_DECL(psm2_ep_epid_lookup2);
+
+psm2_error_t __psm2_epaddr_to_epid(psm2_epaddr_t epaddr, psm2_epid_t *epid)
+{
+	psm2_error_t err = PSM2_OK;
+	PSM2_LOG_MSG("entering");
+	if (epaddr && epid) {
+		*epid = epaddr->epid;
+	}
+	else {
+		err = psmi_handle_error(NULL, PSM2_PARAM_ERR,
+					"Invalid input epaddr or output epid parameter");
+	}
+	PSM2_LOG_MSG("leaving");
+	return err;
+}
+PSMI_API_DECL(psm2_epaddr_to_epid);
+
 psm2_error_t
 __psm2_ep_epid_share_memory(psm2_ep_t ep, psm2_epid_t epid, int *result_o)
 {
@@ -499,7 +596,7 @@ __psm2_ep_epid_share_memory(psm2_ep_t ep, psm2_epid_t epid, int *result_o)
 	PSMI_ERR_UNLESS_INITIALIZED(ep);
 
 	if ((!psmi_ep_device_is_enabled(ep, PTL_DEVID_IPS)) ||
-	    (psmi_epid_hfi_type(epid) == PSMI_HFI_TYPE_DEFAULT)) {
+		(psmi_epid_version(epid) == PSMI_EPID_VERSION_SHM)) {
 		/* If we are in the no hfi-mode, or the other process is,
 		 * the epid doesn't help us - so assume both we're on the same
 		 * machine and try to connect.
@@ -922,7 +1019,7 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 	int i, num_rails = 0;
 	char *uname = "HFI_UNIT";
 	char *pname = "HFI_PORT";
-	char uvalue[4], pvalue[4];
+	char uvalue[6], pvalue[6];
 	int devid_enabled[PTL_MAX_INIT];
 	union psmi_envvar_val devs;
 
@@ -932,20 +1029,28 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 	if (!epo || !epido)
 		return PSM2_PARAM_ERR;
 
-	/* Currently only one endpoint is supported. */
-	if (psmi_opened_endpoint_count > 0) {
+	/* Allowing only one EP (unless explicitly enabled). */
+	if (psmi_opened_endpoint_count > 0 && !psmi_multi_ep_enabled) {
 		PSM2_LOG_MSG("leaving");
 		return PSM2_TOO_MANY_ENDPOINTS;
 	}
-
-	PSMI_PLOCK();
 
 	/* Matched Queue initialization.  We do this early because we have to
 	 * make sure ep->mq exists and is valid before calling ips_do_work.
 	 */
 	err = psmi_mq_malloc(&mq);
+	PSMI_LOCK(psmi_creation_lock);
 	if (err != PSM2_OK)
 		goto fail;
+
+	/* Set some of the MQ thresholds from the environment.
+	   Do this before ptl initialization - the ptl may have other
+	   constraints that will limit the MQ's settings. */
+	err = psmi_mq_initialize_defaults(mq);
+	if (err != PSM2_OK)
+		goto fail;
+
+	psmi_init_lock(&(mq->progress_lock));
 
 	/* See which ptl devices we want to use for this ep to be opened */
 	psmi_getenv("PSM2_DEVICES",
@@ -964,8 +1069,8 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 
 		/* If multi-rail is used, set the first ep unit/port */
 		if (num_rails > 0) {
-			snprintf(uvalue, 4, "%1d", units[0]);
-			snprintf(pvalue, 4, "%1d", ports[0]);
+			snprintf(uvalue, 6, "%1d", units[0]);
+			snprintf(pvalue, 6, "%1d", ports[0]);
 			setenv(uname, uvalue, 1);
 			setenv(pname, pvalue, 1);
 		}
@@ -999,8 +1104,8 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 
 	if (psmi_device_is_enabled(devid_enabled, PTL_DEVID_IPS)) {
 		for (i = 1; i < num_rails; i++) {
-			snprintf(uvalue, 4, "%1d", units[i]);
-			snprintf(pvalue, 4, "%1d", ports[i]);
+			snprintf(uvalue, 6, "%1d", units[i]);
+			snprintf(pvalue, 6, "%1d", ports[i]);
 			setenv(uname, uvalue, 1);
 			setenv(pname, pvalue, 1);
 
@@ -1019,15 +1124,10 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 		}
 	}
 
-	/* Once we've initialized all devices, we can update the MQ with its
-	 * default values */
-	if (err == PSM2_OK)
-		err = psmi_mq_initialize_defaults(mq);
-
 	_HFI_VDBG("psm2_ep_open() OK....\n");
 
 fail:
-	PSMI_PUNLOCK();
+	PSMI_UNLOCK(psmi_creation_lock);
 	PSM2_LOG_MSG("leaving");
 	return err;
 }
@@ -1036,21 +1136,27 @@ PSMI_API_DECL(psm2_ep_open)
 psm2_error_t __psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout_in)
 {
 	psm2_error_t err = PSM2_OK;
-	uint64_t t_start = get_cycles();
+#if _HFI_DEBUGGING
+	uint64_t t_start = 0;
+	if (_HFI_PRDBG_ON) {
+		t_start = get_cycles();
+	}
+#endif
 	union psmi_envvar_val timeout_intval;
-	psm2_ep_t tmp, mep;
-	psm2_mq_t mq;
+	psm2_ep_t tmp;
+	psm2_mq_t mmq;
 
 	PSM2_LOG_MSG("entering");
 	PSMI_ERR_UNLESS_INITIALIZED(ep);
 	psmi_assert_always(ep->mctxt_master == ep);
 
-	PSMI_PLOCK();
+	PSMI_LOCK(psmi_creation_lock);
 
 	if (psmi_opened_endpoint == NULL) {
 		err = psmi_handle_error(NULL, PSM2_EP_WAS_CLOSED,
 					"PSM Endpoint is closed or does not exist");
 		PSM2_LOG_MSG("leaving");
+		PSMI_UNLOCK(psmi_creation_lock);
 		return err;
 	}
 
@@ -1062,6 +1168,7 @@ psm2_error_t __psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout_in)
 		err = psmi_handle_error(NULL, PSM2_EP_WAS_CLOSED,
 					"PSM Endpoint is closed or does not exist");
 		PSM2_LOG_MSG("leaving");
+		PSMI_UNLOCK(psmi_creation_lock);
 		return err;
 	}
 
@@ -1097,11 +1204,79 @@ psm2_error_t __psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout_in)
 	 * timeout.  There's no good way to do this until we change the PTL
 	 * interface to allow asynchronous finalization
 	 */
-	mep = ep;
+
+
+	/* Check if transfer ownership of receive thread is needed before closing ep.
+	 * In case of PSM2_MULTI_EP support receive thread is created and assigned
+	 * to first opened endpoint. Receive thread is killed when closing this
+	 * endpoint.
+	 */
+	if (ep->user_ep_next != NULL) {
+		/* Receive thread will be transfered and assigned to ep->user_ep_next
+		 * only if currently working receive thread (which will be killed) is
+		 * assigned to ep and there isn't any assigned to ep->user_ep_next.
+		 */
+		if ((psmi_ptl_ips_rcvthread.is_enabled(ep->ptl_ips.ptl)) &&
+		    (!psmi_ptl_ips_rcvthread.is_enabled(ep->user_ep_next->ptl_ips.ptl)))
+			psmi_ptl_ips_rcvthread.transfer_ownership(ep->ptl_ips.ptl, ep->user_ep_next->ptl_ips.ptl);
+	}
+
+	/*
+	 * Before freeing the master ep itself,
+	 * remove it from the global linklist.
+	 * We do it here to let atexit handler in ptl_am directory
+	 * to search the global linklist and free the shared memory file.
+	 */
+	if (psmi_opened_endpoint == ep) {
+		/* Removing ep from global endpoint list. */
+		psmi_opened_endpoint = ep->user_ep_next;
+	} else {
+		tmp = psmi_opened_endpoint;
+		while (tmp->user_ep_next != ep) {
+			tmp = tmp->user_ep_next;
+		}
+		/* Removing ep from global endpoint list. */
+		tmp->user_ep_next = ep->user_ep_next;
+	}
+	psmi_opened_endpoint_count--;
+
+	/*
+	 * This do/while loop is used to close and free memory of endpoints.
+	 *
+	 * If MULTIRAIL feature is disable this loop will be passed only once
+	 * and only endpoint passed in psm2_ep_close will be closed/removed.
+	 *
+	 * If MULTIRAIL feature is enabled then this loop will be passed
+	 * multiple times (depending on number of rails). The order in which
+	 * endpoints will be closed is shown below:
+	 *
+	 *                      |--this is master endpoint in case of multirail
+	 *	                |  this endpoint is passed to psm2_ep_close and
+	 *			V  this is only endpoint known to user.
+	 *   +<-Ep0<-Ep1<-Ep2<-Ep3
+	 *   |__________________|	Ep3->mctxt_prev points to Ep2
+	 *	(3)  (2)  (1)  (4)	Ep2->mctxt_prev points to Ep1
+	 *	 ^			Ep1->mctxt_prev points to Ep0
+	 *	 |			Ep0->mctxt_prev points to Ep3 (master ep)
+	 *	 |
+	 *       |---- order in which endpoints will be closed.
+	 *
+	 * Closing MULTIRAILs starts by closing slaves (Ep2, Ep1, Ep0)
+	 * If MULTIRAIL is enabled then Ep3->mctxt_prev will point to Ep2, if
+	 * feature is disabled then Ep3->mctxt_prev will point to Ep3 and
+	 * do/while loop will have one pass.
+	 *
+	 * In case of MULTIRAIL enabled Ep3 which is master endpoint will be
+	 * closed as the last one.
+	 */
+	mmq = ep->mq;
 	tmp = ep->mctxt_prev;
 	do {
 		ep = tmp;
 		tmp = ep->mctxt_prev;
+
+		PSMI_LOCK(ep->mq->progress_lock);
+
 		PSM_MCTXT_REMOVE(ep);
 		if (psmi_ep_device_is_enabled(ep, PTL_DEVID_AMSH))
 			err =
@@ -1122,37 +1297,25 @@ psm2_error_t __psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout_in)
 
 		psmi_free(ep->epaddr);
 		psmi_free(ep->context_mylabel);
-		mq = ep->mq;
+
+		PSMI_UNLOCK(ep->mq->progress_lock);
+
 		ep->mq = NULL;
-		/*
-		 * Before freeing the master ep itself,
-		 * remove it from the global linklist.
-		 * We do it here to let atexit handler in ptl_am directory
-		 * to search the global linklist and free the shared memory file.
-		 */
-		if (ep == mep) {
-			if (psmi_opened_endpoint == ep) {
-				psmi_opened_endpoint = ep->user_ep_next;
-			} else {
-				tmp = psmi_opened_endpoint;
-				while (tmp->user_ep_next != ep) {
-					tmp = tmp->user_ep_next;
-				}
-				tmp->user_ep_next = ep->user_ep_next;
-			}
-			psmi_opened_endpoint_count--;
-			if (mq)
-			        err = psmi_mq_free(mq);
-		}
 		psmi_free(ep);
 
 	} while ((err == PSM2_OK || err == PSM2_TIMEOUT) && tmp != ep);
 
-	PSMI_PUNLOCK();
+	if (mmq)
+	        err = psmi_mq_free(mmq);
 
-	_HFI_PRDBG("Closed endpoint in %.3f secs\n",
-		   (double)cycles_to_nanosecs(get_cycles() -
-					      t_start) / SEC_ULL);
+
+	PSMI_UNLOCK(psmi_creation_lock);
+
+	if (_HFI_PRDBG_ON) {
+		_HFI_PRDBG_ALWAYS("Closed endpoint in %.3f secs\n",
+				 (double)cycles_to_nanosecs(get_cycles() -
+				 t_start) / SEC_ULL);
+	}
 	PSM2_LOG_MSG("leaving");
 	return err;
 }
@@ -1250,14 +1413,40 @@ psmi_ep_open_device(const psm2_ep_t ep,
 		 * Since a jobkey is not available from IPS, pull the
 		 * first 16 bits from the UUID.
 		 */
-
-		*epid = PSMI_EPID_PACK(((uint16_t *) unique_job_key)[0],
-				       (rank >> 3), rank, 0,
-				       PSMI_HFI_TYPE_DEFAULT, rank);
+		switch (PSMI_EPID_VERSION) {
+			case PSMI_EPID_V1:
+				*epid = PSMI_EPID_PACK_V1(((uint16_t *) unique_job_key)[0],
+					   (rank >> 3), rank, 0,
+					   PSMI_EPID_VERSION_SHM, rank);
+				break;
+			case PSMI_EPID_V2:
+				/* Construct epid for this Endpoint */
+				*epid = PSMI_EPID_PACK_V2_SHM(getpid(),
+								PSMI_EPID_SHM_ONLY, /*is a only-shm epid */
+								PSMI_EPID_VERSION);
+				break;
+			default:
+				/* Epid version is greater than max supportd version. */
+				psmi_assert_always(PSMI_EPID_VERSION <= PSMI_EPID_V2);
+				break;
+		}
 	} else {
 		/* Self-only, meaning only 1 proc max */
-		*epid = PSMI_EPID_PACK(
-		    0, 0, 0, 0, PSMI_HFI_TYPE_DEFAULT, 0x3ffffff);
+		switch (PSMI_EPID_VERSION) {
+			case PSMI_EPID_V1:
+				*epid = PSMI_EPID_PACK_V1(
+					0, 0, 0, 0, PSMI_EPID_VERSION_SHM, 0x3ffffff);
+				break;
+			case PSMI_EPID_V2:
+				*epid = PSMI_EPID_PACK_V2_SHM(0,
+								PSMI_EPID_SHM_ONLY, /*is a only-shm epid */
+								PSMI_EPID_VERSION);
+				break;
+			default:
+				/* Epid version is greater than max supportd version. */
+				psmi_assert_always(PSMI_EPID_VERSION <= PSMI_EPID_V2);
+				break;
+		}
 	}
 
 fail:

@@ -292,6 +292,9 @@ ips_scb_t *MOCKABLE(ips_scbctrl_alloc)(struct ips_scbctrl *scbc, int scbnum, int
 		scb->tidctrl = 0;
 		scb->nfrag = 1;
 		scb->frag_size = 0;
+#ifdef PSM_CUDA
+		scb->mq_req = NULL;
+#endif
 
 		scbc->scb_num_cur--;
 		if (scbc->scb_num_cur < (scbc->scb_num >> 1))
@@ -349,6 +352,9 @@ ips_scb_t *MOCKABLE(ips_scbctrl_alloc_tiny)(struct ips_scbctrl *scbc)
 	scb->tidctrl = 0;
 	scb->nfrag = 1;
 	scb->frag_size = 0;
+#ifdef PSM_CUDA
+	scb->mq_req = NULL;
+#endif
 
 	scbc->scb_num_cur--;
 	if (scbc->scb_num_cur < (scbc->scb_num >> 1))

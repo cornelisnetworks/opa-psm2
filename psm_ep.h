@@ -75,7 +75,6 @@
 #define PSMI_HFI_TYPE_UNKNOWN 0
 #define PSMI_HFI_TYPE_OPA1    1
 #define PSMI_HFI_TYPE_OPA2    2
-#define PSMI_HFI_TYPE_DEFAULT PSMI_HFI_TYPE_UNKNOWN
 
 #define PSMI_SL_DEFAULT 0
 #define PSMI_SC_DEFAULT 0
@@ -85,20 +84,37 @@
 #define PSMI_SC_ADMIN	15
 #define PSMI_VL_ADMIN	15
 
-#define PSMI_EPID_PACK(lid, context, subcontext, hfiunit, hfitype, rank) \
-	(((((uint64_t)lid)&0xffff)<<16)		|      			\
-	 ((((uint64_t)context)&0xff)<<8)	|			\
-	 ((((uint64_t)subcontext)&0x7)<<5)	|			\
-	 ((((uint64_t)hfiunit)&0x3)<<3)		|			\
-	 ((((uint64_t)hfitype)&0x7)<<0)	|				\
+#define PSMI_EPID_PACK_V1(lid, context, subcontext, hfiunit, epid_version, rank) \
+	(((((uint64_t)lid)&0xffff)<<16)			|								\
+	 ((((uint64_t)context)&0xff)<<8)		|			  					\
+	 ((((uint64_t)subcontext)&0x7)<<5)		|								\
+	 ((((uint64_t)hfiunit)&0x3)<<3)			|								\
+	 ((((uint64_t)epid_version)&0x7)<<0)	|								\
 	 ((((uint64_t)rank)&0x3ffffff)<<32))
 
-#define PSMI_EPID_GET_LID(epid)		(((epid)>>16)&0xffff)
-#define PSMI_EPID_GET_CONTEXT(epid)	(((epid)>>8)&0xff)
-#define PSMI_EPID_GET_SUBCONTEXT(epid)	(((epid)>>5)&0x7)
-#define PSMI_EPID_GET_HFIUNIT(epid)	(((epid)>>3)&0x3)
-#define PSMI_EPID_GET_HFITYPE(epid)	(((epid)>>0)&0x7)
-#define PSMI_EPID_GET_RANK(epid)	(((epid)>>32)&0x3ffffff)
+#define PSMI_EPID_PACK_V2(lid, context, subcontext, shmbool, epid_version, subnet_id) \
+	(((((uint64_t)lid)&0xffffff)<<16)			|								\
+	 ((((uint64_t)context)&0xff)<<8)		|			  					\
+	 ((((uint64_t)subcontext)&0x7)<<5)		|								\
+	 ((((uint64_t)shmbool)&0x1)<<3)			|								\
+	 ((((uint64_t)epid_version)&0x7)<<0)	|								\
+	 ((((uint64_t)subnet_id)&0xffff)<<48))
+
+#define PSMI_EPID_PACK_V2_SHM(process_id, shmbool, epid_version) \
+	(((((uint64_t)process_id)&0xffffffff)<<32)			|								\
+	 ((((uint64_t)shmbool)&0x1)<<3)		|			  					\
+	 ((((uint64_t)epid_version)&0x7)<<0))
+
+#define PSMI_EPID_GET_LID_V1(epid)			(((epid)>>16)&0xffff)
+#define PSMI_EPID_GET_LID_V2(epid)			(((epid)>>16)&0xffffff)
+#define PSMI_EPID_GET_CONTEXT(epid)			(((epid)>>8)&0xff)
+#define PSMI_EPID_GET_SUBCONTEXT(epid)		(((epid)>>5)&0x7)
+#define PSMI_EPID_GET_HFIUNIT(epid)			(((epid)>>3)&0x3)
+#define PSMI_EPID_GET_EPID_VERSION(epid)	(((epid)>>0)&0x7)
+#define PSMI_EPID_GET_RANK(epid)			(((epid)>>32)&0x3ffffff)
+#define PSMI_EPID_GET_SHMBOOL(epid)			(((epid)>>3)&0x1)
+#define PSMI_EPID_GET_SUBNET_ID(epid)		(((epid)>>48)&0xffff)
+#define PSMI_EPID_GET_PROCESS_ID(epid)		(((epid)>>32)&0xffffffff)
 
 #define PSMI_MIN_EP_CONNECT_TIMEOUT (2 * SEC_ULL)
 #define PSMI_MIN_EP_CLOSE_TIMEOUT   (1 * SEC_ULL)
@@ -213,7 +229,7 @@ struct psm2_epaddr {
 			PSMI_PROFILE_REBLOCK(1);			\
 			if (++spin_cnt == (ep)->yield_spin_cnt) {	\
 				spin_cnt = 0;				\
-				PSMI_PYIELD();				\
+				PSMI_YIELD((ep)->mq->progress_lock);	\
 			}						\
 		}							\
 		else if (err == PSM2_OK) {				\

@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2015 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2016 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
 #include "ipserror.h"
@@ -106,8 +106,22 @@ extern int ips_ptl_recvq_isempty(const struct ptl *ptl);
 static psm2_error_t ips_tid_recv_free(struct ips_tid_recv_desc *tidrecvc);
 static psm2_error_t ips_tid_send_exp(struct ips_tid_send_desc *tidsendc);
 
+#ifdef PSM_CUDA
+static
+void psmi_cuda_run_prefetcher(struct ips_protoexp *protoexp,
+			      struct ips_tid_send_desc *tidsendc);
+static void psmi_attach_chb_to_tidsendc(struct ips_protoexp *protoexp,
+					psm2_mq_req_t req,
+					struct ips_tid_send_desc *tidsendc,
+					struct ips_cuda_hostbuf *chb_prev,
+					uint32_t tsess_srcoff,
+					uint32_t tsess_length,
+					uint32_t tsess_unaligned_start,
+					psm2_chb_match_type_t type);
+#endif
+
 psm2_error_t
-ips_protoexp_init(const psmi_context_t *context,
+MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 		  const struct ips_proto *proto,
 		  uint32_t protoexp_flags,
 		  int num_of_send_bufs,
@@ -144,6 +158,34 @@ ips_protoexp_init(const psmi_context_t *context,
 		else
 			/* user wants to turn off header suppression */
 			context->ctrl->__hfi_tfvalid = 0;
+	}
+
+	if (context->ep->memmode == PSMI_MEMMODE_MINIMAL) {
+		protoexp->tid_flags |= IPS_PROTOEXP_FLAG_CTS_SERIALIZED;
+	}
+
+	{
+		/*
+		 * Adjust the session window size so that tid-grant message can
+		 * fit into a single frag size packet for single transfer, PSM
+		 * must send tid-grant message with a single packet.
+		 */
+		uint32_t fragsize, winsize;
+
+		if (proto->flags & IPS_PROTO_FLAG_SDMA)
+			fragsize = proto->epinfo.ep_mtu;
+		else
+			fragsize = proto->epinfo.ep_piosize;
+
+		winsize = 2 * PSMI_PAGESIZE	/* bytes per tid-pair */
+			/* space in packet */
+			* min((fragsize - sizeof(ips_tid_session_list)),
+			/* space in tidsendc/tidrecvc descriptor */
+			PSM_TIDLIST_BUFSIZE)
+			/ sizeof(uint32_t);	/* convert to tid-pair */
+
+		if (proto->mq->hfi_base_window_rv > winsize)
+			proto->mq->hfi_base_window_rv = winsize;
 	}
 
 	/* Must be initialized already */
@@ -197,34 +239,10 @@ ips_protoexp_init(const psmi_context_t *context,
 		goto fail;
 
 	{
-		/*
-		 * Adjust the session window size so that tid-grant message can
-		 * fit into a single frag size packet for single transfer, PSM
-		 * must send tid-grant message with a single packet.
-		 */
-		uint32_t fragsize, winsize;
-
-		if (proto->flags & IPS_PROTO_FLAG_SDMA)
-			fragsize = proto->epinfo.ep_mtu;
-		else
-			fragsize = proto->epinfo.ep_piosize;
-
-		winsize = 2 * PSMI_PAGESIZE	/* bytes per tid-pair */
-			/* space in packet */
-			* min((fragsize - sizeof(ips_tid_session_list)),
-			/* space in tidsendc/tidrecvc descriptor */
-			PSM_TIDLIST_BUFSIZE)
-			/ sizeof(uint32_t);	/* convert to tid-pair */
-
-		if (proto->mq->hfi_window_rv > winsize)
-			proto->mq->hfi_window_rv = winsize;
-	}
-
-	{
 		/* Determine interval to generate headers (relevant only when header
 		 * suppression is enabled) else headers will always be generated.
 		 *
-		 * The PSM_EXPECTED_HEADERS environment variable can specify the
+		 * The PSM2_EXPECTED_HEADERS environment variable can specify the
 		 * packet interval to generate headers at. Else a header packet is
 		 * generated every
 		 * min(PSM_DEFAULT_EXPECTED_HEADER, window_size/tid_send_fragsize).
@@ -233,7 +251,7 @@ ips_protoexp_init(const psmi_context_t *context,
 
 		union psmi_envvar_val env_exp_hdr;
 		uint32_t defval = min(PSM_DEFAULT_EXPECTED_HEADER,
-				      proto->mq->hfi_window_rv /
+				      proto->mq->hfi_base_window_rv /
 				      protoexp->tid_send_fragsize);
 
 		psmi_getenv("PSM2_EXPECTED_HEADERS",
@@ -252,7 +270,7 @@ ips_protoexp_init(const psmi_context_t *context,
 
 		if (protoexp->hdr_pkt_interval != env_exp_hdr.e_uint) {
 			_HFI_VDBG
-			    ("Overriding PSM_EXPECTED_HEADERS=%u to be '%u'\n",
+			    ("Overriding PSM2_EXPECTED_HEADERS=%u to be '%u'\n",
 			     env_exp_hdr.e_uint, protoexp->hdr_pkt_interval);
 		}
 
@@ -356,10 +374,80 @@ ips_protoexp_init(const psmi_context_t *context,
 	} else
 		protoexp->tid_info = NULL;
 
+#ifdef PSM_CUDA
+	{
+		if (PSMI_IS_CUDA_ENABLED &&
+			 !(proto->flags & IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV)) {
+			struct psmi_rlimit_mpool rlim = CUDA_HOSTBUFFER_LIMITS;
+			uint32_t maxsz, chunksz, max_elements;
+
+			if ((err = psmi_parse_mpool_env(protoexp->proto->mq, 1,
+							&rlim, &maxsz, &chunksz)))
+				goto fail;
+
+			/* the maxsz is the amount in MB, not the number of entries,
+			 * since the element size depends on the window size */
+			max_elements = (maxsz*1024*1024) / proto->mq->hfi_base_window_rv;
+			/* mpool requires max_elements to be power of 2. round down. */
+			max_elements = 1 << (31 - __builtin_clz(max_elements));
+			protoexp->cuda_hostbuf_recv_cfg.bufsz =
+				proto->mq->hfi_base_window_rv;
+
+			protoexp->cuda_hostbuf_pool_recv =
+				psmi_mpool_create_for_cuda(sizeof(struct ips_cuda_hostbuf),
+							   chunksz, max_elements, 0,
+							   UNDEFINED, NULL, NULL,
+							   psmi_cuda_hostbuf_alloc_func,
+							   (void *)
+							   &protoexp->cuda_hostbuf_recv_cfg);
+
+			if (protoexp->cuda_hostbuf_pool_recv == NULL) {
+				err = psmi_handle_error(proto->ep, PSM2_NO_MEMORY,
+							"Couldn't allocate CUDA host receive buffer pool");
+				goto fail;
+			}
+
+			protoexp->cuda_hostbuf_small_recv_cfg.bufsz =
+				CUDA_SMALLHOSTBUF_SZ;
+			protoexp->cuda_hostbuf_pool_small_recv =
+				psmi_mpool_create_for_cuda(sizeof(struct ips_cuda_hostbuf),
+							   chunksz, max_elements, 0,
+							   UNDEFINED, NULL, NULL,
+							   psmi_cuda_hostbuf_alloc_func,
+							   (void *)
+							   &protoexp->cuda_hostbuf_small_recv_cfg);
+
+			if (protoexp->cuda_hostbuf_pool_small_recv == NULL) {
+				err = psmi_handle_error(proto->ep, PSM2_NO_MEMORY,
+							"Couldn't allocate CUDA host small receive buffer pool");
+				goto fail;
+			}
+
+			if (cuda_runtime_version >= 7000) {
+				PSMI_CUDA_CALL(cudaStreamCreateWithFlags,
+					&protoexp->cudastream_recv,
+					cudaStreamNonBlocking);
+			} else {
+				PSMI_CUDA_CALL(cudaStreamCreate,
+					&protoexp->cudastream_recv);
+			}
+			STAILQ_INIT(&protoexp->cudapend_getreqsq);
+		} else {
+			protoexp->cuda_hostbuf_pool_recv = NULL;
+			protoexp->cuda_hostbuf_pool_small_recv = NULL;
+		}
+	}
+#endif
 	psmi_assert(err == PSM2_OK);
 	return err;
 
 fail:
+#ifdef PSM_CUDA
+	if (protoexp != NULL && protoexp->cuda_hostbuf_pool_recv != NULL)
+		psmi_mpool_destroy(protoexp->cuda_hostbuf_pool_recv);
+	if (protoexp != NULL && protoexp->cuda_hostbuf_pool_small_recv != NULL)
+		psmi_mpool_destroy(protoexp->cuda_hostbuf_pool_small_recv);
+#endif
 	if (protoexp != NULL && protoexp->tid_getreq_pool != NULL)
 		psmi_mpool_destroy(protoexp->tid_getreq_pool);
 	if (protoexp != NULL && protoexp->tid_desc_send_pool != NULL)
@@ -370,11 +458,19 @@ fail:
 		psmi_free(protoexp);
 	return err;
 }
+MOCK_DEF_EPILOGUE(ips_protoexp_init);
 
 psm2_error_t ips_protoexp_fini(struct ips_protoexp *protoexp)
 {
 	psm2_error_t err = PSM2_OK;
 
+#ifdef PSM_CUDA
+	if(PSMI_IS_CUDA_ENABLED &&
+		 !(protoexp->proto->flags & IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV)) {
+		psmi_mpool_destroy(protoexp->cuda_hostbuf_pool_small_recv);
+		psmi_mpool_destroy(protoexp->cuda_hostbuf_pool_recv);
+	}
+#endif
 	psmi_mpool_destroy(protoexp->tid_getreq_pool);
 	psmi_mpool_destroy(protoexp->tid_desc_send_pool);
 
@@ -462,7 +558,7 @@ ips_protoexp_tid_get_from_token(struct ips_protoexp *protoexp,
 	int count, nbytes, tids, tidflows;
 
 	PSM2_LOG_MSG("entering");
-	psmi_assert((epaddr->proto->mq->hfi_window_rv % PSMI_PAGESIZE) == 0);
+	psmi_assert((((ips_epaddr_t *) epaddr)->window_rv % PSMI_PAGESIZE) == 0);
 	getreq = (struct ips_tid_get_request *)
 	    psmi_mpool_get(protoexp->tid_getreq_pool);
 
@@ -486,11 +582,31 @@ ips_protoexp_tid_get_from_token(struct ips_protoexp *protoexp,
 	getreq->tidgr_bytesdone = 0;
 	getreq->tidgr_flags = flags;
 
+#ifdef PSM_CUDA
+	psm2_mq_req_t req = (psm2_mq_req_t)context;
+	if ((req->is_buf_gpu_mem &&
+	    !(protoexp->proto->flags & IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV)) ||
+	    ((req->is_buf_gpu_mem &&
+	     (protoexp->proto->flags & IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV) &&
+	     gpudirect_recv_threshold &&
+	     length > gpudirect_recv_threshold))) {
+		getreq->cuda_hostbuf_used = 1;
+		getreq->tidgr_cuda_bytesdone = 0;
+		STAILQ_INIT(&getreq->pend_cudabuf);
+	} else
+		getreq->cuda_hostbuf_used = 0;
+#endif
+
 	/* nbytes is the bytes each channel should transfer. */
 	count = ((ips_epaddr_t *) epaddr)->msgctl->ipsaddr_count;
-	nbytes = PSMI_ALIGNUP((length + count - 1) / count, PSMI_PAGESIZE);
+#ifdef PSM_CUDA
+	if (req->is_buf_gpu_mem)
+		nbytes = PSMI_ALIGNUP((length + count - 1) / count, PSMI_GPU_PAGESIZE);
+	else
+#endif
+		nbytes = PSMI_ALIGNUP((length + count - 1) / count, PSMI_PAGESIZE);
 	getreq->tidgr_rndv_winsz =
-	    min(nbytes, epaddr->proto->mq->hfi_window_rv);
+	    min(nbytes, ((ips_epaddr_t *) epaddr)->window_rv);
 	/* must be within the tid window size */
 	if (getreq->tidgr_rndv_winsz > PSM_TID_WINSIZE)
 		getreq->tidgr_rndv_winsz = PSM_TID_WINSIZE;
@@ -621,7 +737,23 @@ ips_protoexp_send_tid_completion(struct ips_tid_recv_desc *tidrecvc,
 
 	ips_proto_flow_enqueue(flow, scb);
 	flow->flush(flow, NULL);
+
+	if (tidrecvc->protoexp->tid_flags & IPS_PROTOEXP_FLAG_CTS_SERIALIZED) {
+		flow->flags &= ~IPS_FLOW_FLAG_SKIP_CTS;                                  /* Let the next CTS be processed */
+		ips_tid_pendtids_timer_callback(&tidrecvc->protoexp->timer_getreqs, 0);  /* and make explicit progress for it. */
+	}
 }
+
+#ifdef PSM_CUDA
+static
+void psmi_deallocate_chb(struct ips_cuda_hostbuf* chb)
+{
+	PSMI_CUDA_CALL(cudaFreeHost, chb->host_buf);
+	PSMI_CUDA_CALL(cudaEventDestroy, chb->copy_status);
+	psmi_free(chb);
+	return;
+}
+#endif
 
 int
 ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
@@ -704,6 +836,31 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 	psm2_mq_req_t req = tidsendc->mqreq;
 	/* Check if we can complete the send request. */
 	req->send_msgoff += tidsendc->length;
+
+#ifdef PSM_CUDA
+	if (req->cuda_hostbuf_used) {
+		if (tidsendc->cuda_num_buf == 1) {
+			tidsendc->cuda_hostbuf[0]->bytes_read +=
+				tidsendc->tid_list.tsess_length;
+			if(tidsendc->cuda_hostbuf[0]->bytes_read ==
+				tidsendc->cuda_hostbuf[0]->size){
+				STAILQ_REMOVE(&req->sendreq_prefetch,
+					      tidsendc->cuda_hostbuf[0],
+					      ips_cuda_hostbuf, req_next);
+				if (tidsendc->cuda_hostbuf[0]->is_tempbuf)
+					psmi_deallocate_chb(tidsendc->cuda_hostbuf[0]);
+				else {
+					tidsendc->cuda_hostbuf[0]->req = NULL;
+					tidsendc->cuda_hostbuf[0]->offset = 0;
+					tidsendc->cuda_hostbuf[0]->bytes_read = 0;
+					psmi_mpool_put(tidsendc->cuda_hostbuf[0]);
+				}
+				psmi_cuda_run_prefetcher(protoexp, tidsendc);
+			}
+		} else
+			psmi_free(tidsendc->userbuf);
+	}
+#endif
 	if (req->send_msgoff == req->send_msglen) {
 		psmi_mq_handle_rts_complete(req);
 	}
@@ -887,8 +1044,15 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 		if (tidrecvc->tid_list.tsess_unaligned_start) {
 			dst = (uint8_t *)tidrecvc->buffer;
 			src = (uint8_t *)p_hdr->exp_ustart;
-			ips_protoexp_unaligned_copy(dst, src,
-				tidrecvc->tid_list.tsess_unaligned_start);
+#ifdef PSM_CUDA
+			if (tidrecvc->is_ptr_gpu_backed) {
+				PSMI_CUDA_CALL(cudaMemcpy, dst, src,
+					       tidrecvc->tid_list.tsess_unaligned_start,
+					       cudaMemcpyHostToDevice);
+			} else
+#endif
+				ips_protoexp_unaligned_copy(dst, src,
+							    tidrecvc->tid_list.tsess_unaligned_start);
 		}
 
 		if (tidrecvc->tid_list.tsess_unaligned_end) {
@@ -896,8 +1060,15 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 				tidrecvc->recv_msglen -
 				tidrecvc->tid_list.tsess_unaligned_end;
 			src = (uint8_t *)p_hdr->exp_uend;
-			ips_protoexp_unaligned_copy(dst, src,
-				tidrecvc->tid_list.tsess_unaligned_end);
+#ifdef PSM_CUDA
+			if (tidrecvc->is_ptr_gpu_backed) {
+				PSMI_CUDA_CALL(cudaMemcpy, dst, src,
+					       tidrecvc->tid_list.tsess_unaligned_end,
+					       cudaMemcpyHostToDevice);
+			} else
+#endif
+			  ips_protoexp_unaligned_copy(dst, src,
+						      tidrecvc->tid_list.tsess_unaligned_end);
 		}
 
 		/* reply tid transfer completion packet to sender */
@@ -959,6 +1130,243 @@ void ips_expsend_tiderr(struct ips_tid_send_desc *tidsendc)
 	return;
 }
 
+#ifdef PSM_CUDA
+static
+psm2_error_t
+psmi_cuda_reclaim_hostbufs(struct ips_tid_get_request *getreq)
+{
+	struct ips_protoexp *protoexp = getreq->tidgr_protoexp;
+	struct ips_tid_getreq_cuda_hostbuf_pend *cmemcpyhead =
+		&getreq->pend_cudabuf;
+	struct ips_cuda_hostbuf *chb;
+	cudaError_t status;
+
+	/* Get the getreq's first memcpy op */
+	while (!STAILQ_EMPTY(cmemcpyhead)) {
+		chb = STAILQ_FIRST(cmemcpyhead);
+		PSMI_CUDA_CHECK_EVENT(chb->copy_status, status);
+		if (status != cudaSuccess) {
+			/* At least one of the copies is still
+			 * in progress. Schedule the timer,
+			 * then leave the CUDA progress phase
+			 * and check for other pending TID work.
+			 */
+			psmi_timer_request(protoexp->timerq,
+					   &protoexp->timer_getreqs,
+					   PSMI_TIMER_PRIO_1);
+			return PSM2_OK_NO_PROGRESS;
+		}
+		/* The getreq's oldest cudabuf is done. Reclaim it. */
+		getreq->tidgr_cuda_bytesdone += chb->size;
+		STAILQ_REMOVE_HEAD(cmemcpyhead, next);
+		psmi_mpool_put(chb);
+	}
+	return PSM2_OK;
+}
+
+static
+struct ips_cuda_hostbuf* psmi_allocate_chb(uint32_t window_len)
+{
+	struct ips_cuda_hostbuf* chb = (struct ips_cuda_hostbuf*)
+						psmi_calloc(PSMI_EP_NONE,
+							    UNDEFINED, 1,
+							    sizeof(struct ips_cuda_hostbuf));
+	if (chb == NULL) {
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_NO_MEMORY,
+						"Couldn't allocate cuda host buffers ");
+	}
+	PSMI_CUDA_CALL(cudaHostAlloc,
+			       (void **) &chb->host_buf,
+			       window_len,
+			       cudaHostAllocPortable);
+	PSMI_CUDA_CALL(cudaEventCreate, &chb->copy_status);
+	return chb;
+}
+
+static
+void psmi_cuda_run_prefetcher(struct ips_protoexp *protoexp,
+			      struct ips_tid_send_desc *tidsendc)
+{
+	struct ips_proto *proto = protoexp->proto;
+	struct ips_cuda_hostbuf *chb = NULL;
+	psm2_mq_req_t req = tidsendc->mqreq;
+	uint32_t offset, window_len;
+
+	/* try to push the prefetcher forward */
+	if (req->prefetch_send_msgoff < req->send_msglen) {
+		/* some data remains to be sent */
+		offset = req->prefetch_send_msgoff;
+		window_len =
+			ips_cuda_next_window(tidsendc->ipsaddr->window_rv,
+					     offset, req->buf_len);
+		if (window_len <= CUDA_SMALLHOSTBUF_SZ)
+			chb = (struct ips_cuda_hostbuf *) psmi_mpool_get(
+				proto->cuda_hostbuf_pool_small_send);
+		if (chb == NULL)
+			chb = (struct ips_cuda_hostbuf *) psmi_mpool_get(
+				proto->cuda_hostbuf_pool_send);
+		/* were any buffers available for the prefetcher? */
+		if (chb == NULL)
+			return;
+		req->prefetch_send_msgoff += window_len;
+		chb->offset = offset;
+		chb->size = window_len;
+		chb->req = req;
+		chb->gpu_buf = (void *) req->buf + offset;
+		chb->bytes_read = 0;
+		PSMI_CUDA_CALL(cudaMemcpyAsync,
+			       chb->host_buf, chb->gpu_buf,
+			       window_len,
+			       cudaMemcpyDeviceToHost,
+			       proto->cudastream_send);
+		PSMI_CUDA_CALL(cudaEventRecord, chb->copy_status,
+			       proto->cudastream_send);
+
+		STAILQ_INSERT_TAIL(&req->sendreq_prefetch, chb, req_next);
+		return;
+	}
+	return;
+}
+
+static
+void psmi_attach_chb_to_tidsendc(struct ips_protoexp *protoexp,
+				 psm2_mq_req_t req,
+				 struct ips_tid_send_desc *tidsendc,
+				 struct ips_cuda_hostbuf *chb_prev,
+				 uint32_t tsess_srcoff,
+				 uint32_t tsess_length,
+				 uint32_t tsess_unaligned_start,
+				 psm2_chb_match_type_t type)
+{
+	struct ips_proto *proto = protoexp->proto;
+	struct ips_cuda_hostbuf *chb = NULL;
+	uint32_t offset, window_len, attached=0;
+
+	/* try to push the prefetcher forward */
+	while (req->prefetch_send_msgoff < tsess_srcoff + tsess_length) {
+		/* some data remains to be sent */
+		offset = req->prefetch_send_msgoff;
+		window_len =
+			ips_cuda_next_window(tidsendc->ipsaddr->window_rv,
+					     offset, req->buf_len);
+		if (window_len <= CUDA_SMALLHOSTBUF_SZ)
+			chb = (struct ips_cuda_hostbuf *) psmi_mpool_get(
+				proto->cuda_hostbuf_pool_small_send);
+		if (chb == NULL)
+			chb = (struct ips_cuda_hostbuf *) psmi_mpool_get(
+				proto->cuda_hostbuf_pool_send);
+
+		/* were any buffers available? If not force allocate */
+		if (chb == NULL) {
+			chb = psmi_allocate_chb(window_len);
+			chb->is_tempbuf = 1;
+		}
+		req->prefetch_send_msgoff += window_len;
+		chb->offset = offset;
+		chb->size = window_len;
+		chb->req = req;
+		chb->gpu_buf = (void *) req->buf + offset;
+		chb->bytes_read = 0;
+		PSMI_CUDA_CALL(cudaMemcpyAsync,
+			       chb->host_buf, chb->gpu_buf,
+			       window_len,
+			       cudaMemcpyDeviceToHost,
+			       proto->cudastream_send);
+		PSMI_CUDA_CALL(cudaEventRecord, chb->copy_status,
+			       proto->cudastream_send);
+
+		STAILQ_INSERT_TAIL(&req->sendreq_prefetch, chb, req_next);
+		if (type == PSMI_CUDA_PARTIAL_MATCH_FOUND) {
+			if ((tsess_srcoff < chb->offset)
+			     && ((tsess_srcoff + tsess_length) > chb->offset)) {
+				tidsendc->cuda_hostbuf[0] = chb_prev;
+				tidsendc->cuda_hostbuf[1] = chb;
+				tidsendc->cuda_num_buf = 2;
+				void *buffer = psmi_malloc(PSMI_EP_NONE, UNDEFINED,
+						tsess_length);
+				tidsendc->userbuf =
+					(void *)((uintptr_t) buffer);
+				tidsendc->buffer =
+					(void *)((uintptr_t)tidsendc->userbuf +
+						tsess_unaligned_start);
+				return;
+			}
+		} else {
+			if (attached) {
+				tidsendc->cuda_hostbuf[0] = chb_prev;
+				tidsendc->cuda_hostbuf[1] = chb;
+				tidsendc->cuda_num_buf = 2;
+				void *buffer = psmi_malloc(PSMI_EP_NONE, UNDEFINED,
+						tsess_length);
+				tidsendc->userbuf =
+					(void *)((uintptr_t) buffer);
+				tidsendc->buffer =
+					(void *)((uintptr_t)tidsendc->userbuf +
+						tsess_unaligned_start);
+				attached = 0;
+				return;
+			}
+			if ((tsess_srcoff > chb->offset)
+			    && (tsess_srcoff < (chb->offset + chb->size))
+			     && ((tsess_srcoff + tsess_length) > (chb->offset + chb->size))) {
+				chb_prev = chb;
+				attached = 1;
+				chb = NULL;
+				continue;
+			} else if ((chb->offset <= tsess_srcoff) &&
+				  ((tsess_srcoff + tsess_length) <=
+				   (chb->offset+chb->size))) {
+				tidsendc->cuda_hostbuf[0] = chb;
+				tidsendc->cuda_hostbuf[1] = NULL;
+				tidsendc->cuda_num_buf = 1;
+				tidsendc->userbuf =
+					(void *)((uintptr_t) chb->host_buf +
+						tsess_srcoff - chb->offset);
+				tidsendc->buffer =
+					(void *)((uintptr_t)tidsendc->userbuf +
+							tsess_unaligned_start );
+				return;
+			} else
+				chb = NULL;
+		}
+	}
+}
+
+
+static
+psm2_chb_match_type_t psmi_find_match_in_prefeteched_chb(struct ips_cuda_hostbuf* chb,
+				       ips_tid_session_list *tid_list,
+				       uint32_t prefetch_send_msgoff)
+{
+	/* To get a match:
+	 * 1. Tid list offset + length is contained within a chb
+	 * 2. Tid list offset + length is contained within
+	 * the prefetched offset of this req.
+	 * 3. Tid list offset + length is partially prefetched
+	 * within one chb. (A partial match)
+	 */
+	if (chb->offset <= tid_list->tsess_srcoff) {
+		if ((chb->offset + chb->size) >=
+		    (tid_list->tsess_srcoff + tid_list->tsess_length)) {
+			return PSMI_CUDA_FULL_MATCH_FOUND;
+		} else {
+			if((chb->offset + chb->size) > tid_list->tsess_srcoff){
+				if(((chb->offset + (2 * chb->size)) >
+				   (tid_list->tsess_srcoff + tid_list->tsess_length)) &&
+						  ((prefetch_send_msgoff) >=
+						   (tid_list->tsess_srcoff + tid_list->tsess_length))){
+					return PSMI_CUDA_SPLIT_MATCH_FOUND;
+				} else if((tid_list->tsess_srcoff + tid_list->tsess_length)
+					> prefetch_send_msgoff) {
+					return PSMI_CUDA_PARTIAL_MATCH_FOUND;
+				}
+			}
+		}
+	}
+	return PSMI_CUDA_CONTINUE;
+}
+#endif
+
 psm2_error_t
 ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 			   ips_epaddr_t *ipsaddr,
@@ -1014,8 +1422,8 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 	 *     (with 64-byte offset mode or KDETH.OM = 1)
 	 *   - Assuming a 4KB page size, 2MB/4KB = 512 pages.
 	 */
-	psmi_mq_mtucpy(&tidsendc->tid_list, tid_list,
-			sizeof(ips_tid_session_list));
+	psmi_mq_mtucpy_host_mem(&tidsendc->tid_list, tid_list,
+				sizeof(ips_tid_session_list));
 	ips_dump_tids(tid_list, "Received %d tids: ",
 				tid_list->tsess_tidcount);
 
@@ -1064,9 +1472,75 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 	tidsendc->frag_size = min(protoexp->tid_send_fragsize,
 		tidsendc->tidflow.frag_size);
 
+#ifdef PSM_CUDA
+	/* Matching on previous prefetches and initiating next prefetch */
+	struct ips_cuda_hostbuf *chb = NULL, *chb_next = NULL;
+	psm2_chb_match_type_t rc = PSMI_CUDA_CONTINUE;
+
+	/* check if the prefetcher has a buffer ready to use */
+	tidsendc->cuda_hostbuf[0] = NULL;
+	tidsendc->cuda_hostbuf[1] = NULL;
+	tidsendc->cuda_num_buf = 0;
+	if (req->cuda_hostbuf_used) {
+		/* To get a match:
+		 * 1. Tid list offset + length is contained within a chb
+		 * 2. Tid list offset + length is contained within
+		 * the prefetched offset of this req.
+		 * 3. Tid list offset + length is partially prefetched
+		 * within one chb. (A partial match)
+		 */
+		STAILQ_FOREACH(chb, &req->sendreq_prefetch, req_next) {
+			rc = psmi_find_match_in_prefeteched_chb(chb,
+								tid_list,
+								req->prefetch_send_msgoff);
+			if (rc < PSMI_CUDA_CONTINUE)
+				break;
+		}
+		if (rc == PSMI_CUDA_FULL_MATCH_FOUND) {
+			tidsendc->userbuf =
+				(void *)((uintptr_t) chb->host_buf+
+					 tid_list->tsess_srcoff - chb->offset);
+			tidsendc->buffer =
+				(void *)((uintptr_t)tidsendc->userbuf +
+					 tid_list->tsess_unaligned_start);
+			/* now associate the buffer with the tidsendc */
+			tidsendc->cuda_hostbuf[0] = chb;
+			tidsendc->cuda_hostbuf[1] = NULL;
+			tidsendc->cuda_num_buf = 1;
+		} else if (rc == PSMI_CUDA_SPLIT_MATCH_FOUND){
+			void *buffer = psmi_malloc(PSMI_EP_NONE, UNDEFINED,
+					tid_list->tsess_length);
+			tidsendc->userbuf =
+				(void *)((uintptr_t) buffer);
+			tidsendc->buffer =
+				(void *)((uintptr_t)tidsendc->userbuf +
+				tid_list->tsess_unaligned_start);
+			chb_next = STAILQ_NEXT(chb, req_next);
+			tidsendc->cuda_hostbuf[0] = chb;
+			tidsendc->cuda_hostbuf[1] = chb_next;
+			tidsendc->cuda_num_buf = 2;
+		} else if (rc == PSMI_CUDA_PARTIAL_MATCH_FOUND) {
+			psmi_attach_chb_to_tidsendc(protoexp, req,
+						    tidsendc,
+						    chb,
+						    tid_list->tsess_srcoff,
+						    tid_list->tsess_length,
+						    tid_list->tsess_unaligned_start,
+						    rc);
+		} else {
+			psmi_attach_chb_to_tidsendc(protoexp, req,
+						    tidsendc,
+						    NULL,
+						    tid_list->tsess_srcoff,
+						    tid_list->tsess_length,
+						    tid_list->tsess_unaligned_start,
+						    PSMI_CUDA_CONTINUE);
+		}
+	}
+#endif
+
 	/* frag size must be 64B multiples */
 	tidsendc->frag_size &= (~63);
-
 	tidsendc->is_complete = 0;
 	tidsendc->tid_idx = 0;
 	tidsendc->frame_send = 0;
@@ -1254,8 +1728,16 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 		if (tidsendc->tid_list.tsess_unaligned_start) {
 			dst = (uint8_t *)scb->ips_lrh.exp_ustart;
 			src = (uint8_t *)tidsendc->userbuf;
-			ips_protoexp_unaligned_copy(dst, src,
-				tidsendc->tid_list.tsess_unaligned_start);
+#ifdef PSM_CUDA
+			if (!tidsendc->mqreq->cuda_hostbuf_used) {
+				PSMI_CUDA_CALL(cudaMemcpy, dst, src,
+					       tidsendc->tid_list.tsess_unaligned_start,
+					       cudaMemcpyDeviceToHost);
+			} else
+#endif
+				ips_protoexp_unaligned_copy(dst, src,
+							    tidsendc->tid_list.tsess_unaligned_start);
+
 		}
 
 		if (tidsendc->tid_list.tsess_unaligned_end) {
@@ -1263,8 +1745,15 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 			src = (uint8_t *)tidsendc->userbuf +
 				tidsendc->length -
 				tidsendc->tid_list.tsess_unaligned_end;
-			ips_protoexp_unaligned_copy(dst, src,
-				tidsendc->tid_list.tsess_unaligned_end);
+#ifdef PSM_CUDA
+			if (!tidsendc->mqreq->cuda_hostbuf_used) {
+				PSMI_CUDA_CALL(cudaMemcpy, dst, src,
+					       tidsendc->tid_list.tsess_unaligned_end,
+					       cudaMemcpyDeviceToHost);
+			} else
+#endif
+				ips_protoexp_unaligned_copy(dst, src,
+							    tidsendc->tid_list.tsess_unaligned_end);
 		}
 		/*
 		 * If the number of fragments is greater then one and
@@ -1291,6 +1780,13 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 		/* assert only single packet per scb */
 		psmi_assert(scb->nfrag == 1);
 	}
+
+#ifdef PSM_CUDA
+	if (tidsendc->mqreq->is_buf_gpu_mem &&		/* request's buffer comes from GPU realm */
+	   !tidsendc->mqreq->cuda_hostbuf_used) {	/* and it was NOT moved to HOST memory */
+		scb->mq_req = tidsendc->mqreq;		/* so let's mark it per scb, not to check its locality again */
+	}
+#endif
 
 	return scb;
 }
@@ -1320,6 +1816,68 @@ psm2_error_t ips_tid_send_exp(struct ips_tid_send_desc *tidsendc)
 	struct ips_proto *proto = protoexp->proto;
 	struct ips_flow *flow = &tidsendc->tidflow;
 
+#ifdef PSM_CUDA
+	struct ips_cuda_hostbuf *chb, *chb_next;
+	cudaError_t chb_status;
+	uint32_t offset_in_chb, i;
+	for (i = 0; i < tidsendc->cuda_num_buf; i++) {
+		chb = tidsendc->cuda_hostbuf[i];
+		if (chb) {
+			PSMI_CUDA_CHECK_EVENT(chb->copy_status, chb_status);
+			if (chb_status != cudaSuccess) {
+				err = PSM2_OK_NO_PROGRESS;
+				PSM2_LOG_MSG("leaving");
+				return err;
+			}
+		}
+	}
+
+	if (tidsendc->cuda_num_buf == 2) {
+		chb = tidsendc->cuda_hostbuf[0];
+		chb_next = tidsendc->cuda_hostbuf[1];
+		offset_in_chb = tidsendc->tid_list.tsess_srcoff - chb->offset;
+		/* Copying data from multiple cuda
+		 * host buffers into a bounce buffer.
+		 */
+		memcpy(tidsendc->buffer, chb->host_buf +
+			offset_in_chb, chb->size-offset_in_chb);
+		memcpy(tidsendc->buffer+ chb->size -
+			offset_in_chb, chb_next->host_buf,
+			tidsendc->tid_list.tsess_srcoff +
+			tidsendc->tid_list.tsess_length - chb_next->offset);
+
+		chb->bytes_read += chb->size - offset_in_chb;
+		chb_next->bytes_read += tidsendc->tid_list.tsess_srcoff +
+				  tidsendc->tid_list.tsess_length -
+				  chb_next->offset;
+		if(chb->bytes_read == chb->size) {
+			STAILQ_REMOVE(&tidsendc->mqreq->sendreq_prefetch, chb,
+				       ips_cuda_hostbuf, req_next);
+			if (chb->is_tempbuf)
+				psmi_deallocate_chb(chb);
+			else {
+				chb->req = NULL;
+				chb->offset = 0;
+				chb->bytes_read = 0;
+				psmi_mpool_put(chb);
+			}
+			psmi_cuda_run_prefetcher(protoexp, tidsendc);
+		 }
+		if(chb_next->bytes_read == chb_next->size) {
+			STAILQ_REMOVE(&tidsendc->mqreq->sendreq_prefetch, chb_next,
+				       ips_cuda_hostbuf, req_next);
+			if (chb_next->is_tempbuf)
+				psmi_deallocate_chb(chb_next);
+			else{
+				chb_next->req = NULL;
+				chb_next->offset = 0;
+				chb_next->bytes_read = 0;
+				psmi_mpool_put(chb_next);
+			}
+			psmi_cuda_run_prefetcher(protoexp, tidsendc);
+		}
+	}
+#endif
 	/*
 	 * We aggressively try to grab as many scbs as possible, enqueue them to a
 	 * flow and flush them when either we're out of scbs our we've completely
@@ -1443,23 +2001,54 @@ ips_tid_recv_alloc_frag(struct ips_protoexp *protoexp,
 
 	psmi_assert(size > 0);
 
+#ifdef PSM_CUDA
+	/* Driver pins GPU pages when using GPU Direct RDMA for TID recieves,
+	 * to accomadate this change the calculations of pageaddr, pagelen
+	 * and pageoff have been modified to take GPU page size into
+	 * consideration.
+	 */
+	if (tidrecvc->is_ptr_gpu_backed) {
+		uint64_t page_mask = ~(PSMI_GPU_PAGESIZE -1);
+		uint32_t page_offset_mask = (PSMI_GPU_PAGESIZE -1);
+		pageaddr = bufptr & page_mask;
+		pagelen = (uint32_t) (PSMI_GPU_PAGESIZE +
+			  ((bufptr + size - 1) & page_mask) -
+			  (bufptr & page_mask));
+		tidoff = pageoff = (uint32_t) (bufptr & page_offset_mask);
+	} else {
+		pageaddr = bufptr & protoexp->tid_page_mask;
+		pagelen = (uint32_t) (PSMI_PAGESIZE +
+			  ((bufptr + size - 1) & protoexp->tid_page_mask) -
+			  (bufptr & protoexp->tid_page_mask));
+		tidoff = pageoff = (uint32_t) (bufptr & protoexp->tid_page_offset_mask);
+	}
+#else
 	pageaddr = bufptr & protoexp->tid_page_mask;
 	pagelen = (uint32_t) (PSMI_PAGESIZE +
-			    ((bufptr + size - 1) & protoexp->tid_page_mask) -
-			    (bufptr & protoexp->tid_page_mask));
+			     ((bufptr + size - 1) & protoexp->tid_page_mask) -
+			     (bufptr & protoexp->tid_page_mask));
 	tidoff = pageoff = (uint32_t) (bufptr & protoexp->tid_page_offset_mask);
+#endif
 
 	reglen = pagelen;
 	if (protoexp->tidc.tid_array) {
 		if ((err = ips_tidcache_acquire(&protoexp->tidc,
 			    (void *)pageaddr, &reglen,
 			    (uint32_t *) tid_list->tsess_list, &num_tids,
-			    &tidoff)))
+			    &tidoff
+#ifdef PSM_CUDA
+			    , tidrecvc->is_ptr_gpu_backed
+#endif
+			    )))
 			goto fail;
 	} else {
 		if ((err = ips_tid_acquire(&protoexp->tidc,
 			    (void *)pageaddr, &reglen,
-			    (uint32_t *) tid_list->tsess_list, &num_tids)))
+			    (uint32_t *) tid_list->tsess_list, &num_tids
+#ifdef PSM_CUDA
+			    , tidrecvc->is_ptr_gpu_backed
+#endif
+			)))
 			goto fail;
 	}
 
@@ -1548,11 +2137,62 @@ ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 		return err;
 	}
 
-	/* 4. allocate some tids from driver. */
+#ifdef PSM_CUDA
+       psm2_mq_req_t req = (psm2_mq_req_t)getreq->tidgr_ucontext;
+
+       if (req->is_buf_gpu_mem)
+               tidrecvc->is_ptr_gpu_backed = !getreq->cuda_hostbuf_used;
+       else
+               tidrecvc->is_ptr_gpu_backed = req->is_buf_gpu_mem;
+
+	/* 4. allocate a cuda bounce buffer, if required */
+	struct ips_cuda_hostbuf *chb = NULL;
+	if (getreq->cuda_hostbuf_used) {
+		if (nbytes_this <= CUDA_SMALLHOSTBUF_SZ)
+			chb = (struct ips_cuda_hostbuf *)
+				psmi_mpool_get(
+					protoexp->cuda_hostbuf_pool_small_recv);
+		if (chb == NULL)
+			chb = (struct ips_cuda_hostbuf *)
+				psmi_mpool_get(
+					protoexp->cuda_hostbuf_pool_recv);
+		if (chb == NULL) {
+			/* Unable to get a cudahostbuf for TID.
+			 * Release the resources we're holding and reschedule.*/
+			ips_tf_deallocate(&protoexp->tfc,
+					  tidrecvc->rdescid._desc_idx);
+			ips_scbctrl_free(completescb);
+			ips_scbctrl_free(grantscb);
+			psmi_timer_request(protoexp->timerq,
+					   &protoexp->timer_getreqs,
+					   PSMI_TIMER_PRIO_1);
+			PSM2_LOG_MSG("leaving");
+			return PSM2_EP_NO_RESOURCES;
+		}
+
+		tidrecvc->cuda_hostbuf = chb;
+		tidrecvc->buffer = chb->host_buf;
+		chb->size = 0;
+		chb->gpu_buf = (void *)((uintptr_t) getreq->tidgr_lbuf +
+					getreq->tidgr_offset);
+	} else {
+		chb = NULL;
+		tidrecvc->buffer = (void *)((uintptr_t) getreq->tidgr_lbuf +
+					    getreq->tidgr_offset);
+		tidrecvc->cuda_hostbuf = NULL;
+	}
+#else
 	tidrecvc->buffer =
 	    (void *)((uintptr_t) getreq->tidgr_lbuf + getreq->tidgr_offset);
+#endif
+
+	/* 5. allocate some tids from driver. */
 	err = ips_tid_recv_alloc_frag(protoexp, tidrecvc, nbytes_this);
 	if (err != PSM2_OK) {
+#ifdef PSM_CUDA
+		if (chb)
+			psmi_mpool_put(chb);
+#endif
 		ips_tf_deallocate(&protoexp->tfc, tidrecvc->rdescid._desc_idx);
 		ips_scbctrl_free(completescb);
 		ips_scbctrl_free(grantscb);
@@ -1597,9 +2237,8 @@ ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 
 	tidrecvc->tidflow_nswap_gen = 0;
 	tidrecvc->tidflow_genseq.psn_gen = tidrecvc->tidflow_active_gen;
-	long int rnum;
-	lrand48_r(&protoexp->tidflow_drand48_data, &rnum);
-	tidrecvc->tidflow_genseq.psn_seq = ((int)(rnum % INT_MAX)) & 0x3ff;
+	tidrecvc->tidflow_genseq.psn_seq = 0;	/* Always start sequence number at 0 (zero),
+	 	 	 	 	 	   in order to prevent wraparound sequence numbers */
 	hfi_tidflow_set_entry(tidrecvc->context->ctrl,
 			      tidrecvc->rdescid._desc_idx,
 			      tidrecvc->tidflow_genseq.psn_gen,
@@ -1650,6 +2289,58 @@ ips_tid_pendtids_timer_callback(struct psmi_timer *timer, uint64_t current)
 	int ret;
 
 	PSM2_LOG_MSG("entering");
+
+#ifdef PSM_CUDA
+	if (!(((struct ips_protoexp *)timer->context)->proto->flags
+		& IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV) ||
+		((((struct ips_protoexp *)timer->context)->proto->flags &
+		   IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV) &&
+		   gpudirect_recv_threshold)) {
+		/* Before processing pending TID requests, first try to free up
+		 * any CUDA host buffers that are now idle. */
+		struct ips_tid_get_cudapend *cphead =
+			&((struct ips_protoexp *)timer->context)->cudapend_getreqsq;
+		psm2_error_t err;
+
+		/* See if any CUDA memcpys are in progress. Grab the first getreq... */
+		while (!STAILQ_EMPTY(cphead)) {
+			getreq = STAILQ_FIRST(cphead);
+
+			err = psmi_cuda_reclaim_hostbufs(getreq);
+			if (err == PSM2_OK_NO_PROGRESS)
+				goto cudapend_exit;
+
+			/* This pending cuda getreq has no more CUDA ops queued up.
+			 * Either it's completely done, or the CUDA copies have caught
+			 * up with the TID data xfer, but the TID xfer itself is not
+			 * finished.
+			 */
+			if (getreq->tidgr_cuda_bytesdone == getreq->tidgr_length) {
+				/* TID xfer is done.
+				 * We should only get here if:
+				 * this was involved a cuda copy, and
+				 * the TIX xfer is done.
+				 */
+				psmi_assert(getreq->cuda_hostbuf_used);
+				psmi_assert(getreq->tidgr_length ==
+					    getreq->tidgr_offset);
+
+				/* Remove from the cudapend list, and reclaim */
+				getreq->tidgr_protoexp = NULL;
+				getreq->tidgr_epaddr = NULL;
+				STAILQ_REMOVE_HEAD(cphead, tidgr_next);
+
+				/* mark the req as done */
+				if (getreq->tidgr_callback)
+					getreq->tidgr_callback(getreq->tidgr_ucontext);
+				psmi_mpool_put(getreq);
+			} else
+				break; /* CUDA xfers in progress. Leave. */
+		}
+	}
+cudapend_exit:
+#endif
+
 	while (!STAILQ_EMPTY(phead)) {
 		getreq = STAILQ_FIRST(phead);
 		ipsaddr = (ips_epaddr_t *) (getreq->tidgr_epaddr);
@@ -1660,6 +2351,20 @@ ipsaddr_next:
 		ipsaddr->msgctl->ipsaddr_next = ipsaddr->next;
 		protoexp = ((psm2_epaddr_t) ipsaddr)->proto->protoexp;
 
+		if (protoexp->tid_flags & IPS_PROTOEXP_FLAG_CTS_SERIALIZED) {
+			struct ips_flow *flow = &ipsaddr->flows[protoexp->proto->msgflowid];
+			if (flow->flags & IPS_FLOW_FLAG_SKIP_CTS) {
+				break;                                    /* skip sending next CTS */
+			}
+		}
+
+#ifdef PSM_CUDA
+		if (getreq->cuda_hostbuf_used) {
+			/* If this is a large transfer, we may be able to
+			 * start reclaiming before all of the data is sent. */
+			psmi_cuda_reclaim_hostbufs(getreq);
+		}
+#endif
 		/*
 		 * Calculate the next window size, avoid the last
 		 * window too small.
@@ -1671,18 +2376,36 @@ ipsaddr_next:
 			nbytes_this /= 2;
 
 		/*
-		 * If there is a next window, make sure the window
+		 * If there is a next window and the next window
+		 * length is greater than PAGESIZE, make sure the window
 		 * starts on a page boundary.
 		 */
-		if ((getreq->tidgr_offset + nbytes_this) <
-					getreq->tidgr_length) {
-			uint32_t pageoff =
-				(((uintptr_t)getreq->tidgr_lbuf) &
-					(PSMI_PAGESIZE - 1)) +
-				getreq->tidgr_offset + nbytes_this;
-
-			nbytes_this -= pageoff & (PSMI_PAGESIZE - 1);
+#ifdef PSM_CUDA
+		psm2_mq_req_t req = (psm2_mq_req_t)getreq->tidgr_ucontext;
+		if (req->is_buf_gpu_mem){
+			if (((getreq->tidgr_offset + nbytes_this) <
+					getreq->tidgr_length) &&
+					nbytes_this > PSMI_GPU_PAGESIZE) {
+				uint32_t pageoff =
+					(((uintptr_t)getreq->tidgr_lbuf) &
+						(PSMI_GPU_PAGESIZE - 1)) +
+					getreq->tidgr_offset + nbytes_this;
+				nbytes_this -= pageoff & (PSMI_GPU_PAGESIZE - 1);
+			}
+		} else {
+#endif
+			if ((getreq->tidgr_offset + nbytes_this) <
+					getreq->tidgr_length &&
+					nbytes_this > PSMI_PAGESIZE) {
+				uint32_t pageoff =
+					(((uintptr_t)getreq->tidgr_lbuf) &
+						(PSMI_PAGESIZE - 1)) +
+					getreq->tidgr_offset + nbytes_this;
+				nbytes_this -= pageoff & (PSMI_PAGESIZE - 1);
+			}
+#ifdef PSM_CUDA
 		}
+#endif
 
 		psmi_assert(nbytes_this >= 4);
 		psmi_assert(nbytes_this <= PSM_TID_WINSIZE);
@@ -1711,6 +2434,16 @@ ipsaddr_next:
 			      getreq, nbytes_this, &tidrecvc) == PSM2_OK) {
 			ips_protoexp_send_tid_grant(tidrecvc);
 
+			if (protoexp->tid_flags & IPS_PROTOEXP_FLAG_CTS_SERIALIZED) {
+				/*
+				 * Once the CTS was sent, we mark it per 'flow' object
+				 * not to proceed with next CTSes until that one is done.
+				 */
+				struct ips_proto *proto = tidrecvc->protoexp->proto;
+				struct ips_flow *flow = &ipsaddr->flows[proto->msgflowid];
+				flow->flags |= IPS_FLOW_FLAG_SKIP_CTS;
+			}
+
 			/*
 			 * nbytes_this is the asked length for this session,
 			 * ips_tid_recv_alloc() might register less pages, the
@@ -1725,6 +2458,21 @@ ipsaddr_next:
 				  getreq->tidgr_length);
 
 			if (getreq->tidgr_offset == getreq->tidgr_length) {
+#ifdef PSM_CUDA
+				if (getreq->cuda_hostbuf_used) {
+					/* this completes the tid xfer setup.
+					   move to the pending cuda ops queue,
+					   set the timer to catch completion */
+					STAILQ_REMOVE_HEAD(phead, tidgr_next);
+					STAILQ_INSERT_TAIL(
+						&getreq->tidgr_protoexp->cudapend_getreqsq,
+						getreq, tidgr_next);
+					psmi_timer_request(getreq->tidgr_protoexp->timerq,
+							   &getreq->tidgr_protoexp->timer_getreqs,
+							   PSMI_TIMER_PRIO_1);
+					continue;
+				}
+#endif
 				getreq->tidgr_protoexp = NULL;
 				getreq->tidgr_epaddr = NULL;
 				STAILQ_REMOVE_HEAD(phead, tidgr_next);
@@ -1742,6 +2490,7 @@ ipsaddr_next:
 				STAILQ_INSERT_TAIL(phead, getreq ,tidgr_next);
 				continue;
 			}
+
 			/* created a tidrecvc, reset count */
 			count = ipsaddr->msgctl->ipsaddr_count;
 			goto ipsaddr_next;	/* try next fragment on next ipsaddr */
@@ -1762,6 +2511,32 @@ ipsaddr_next:
 	return PSM2_OK;		/* XXX err-broken */
 }
 
+#ifdef PSM_CUDA
+static
+void psmi_cudamemcpy_tid_to_device(struct ips_tid_recv_desc *tidrecvc)
+{
+	struct ips_protoexp *protoexp = tidrecvc->protoexp;
+	struct ips_cuda_hostbuf *chb;
+
+	chb = tidrecvc->cuda_hostbuf;
+	chb->size += tidrecvc->recv_tidbytes + tidrecvc->tid_list.tsess_unaligned_start +
+			tidrecvc->tid_list.tsess_unaligned_end;
+
+	PSMI_CUDA_CALL(cudaMemcpyAsync,
+		       chb->gpu_buf, chb->host_buf,
+		       tidrecvc->recv_tidbytes + tidrecvc->tid_list.tsess_unaligned_start +
+							tidrecvc->tid_list.tsess_unaligned_end,
+		       cudaMemcpyHostToDevice,
+		       protoexp->cudastream_recv);
+	PSMI_CUDA_CALL(cudaEventRecord, chb->copy_status,
+		       protoexp->cudastream_recv);
+
+	STAILQ_INSERT_TAIL(&tidrecvc->getreq->pend_cudabuf, chb, next);
+	tidrecvc->cuda_hostbuf = NULL;
+	ips_tid_pendtids_timer_callback(&tidrecvc->getreq->tidgr_protoexp->timer_getreqs,0);
+}
+#endif
+
 static
 psm2_error_t ips_tid_recv_free(struct ips_tid_recv_desc *tidrecvc)
 {
@@ -1773,6 +2548,11 @@ psm2_error_t ips_tid_recv_free(struct ips_tid_recv_desc *tidrecvc)
 	psmi_assert(getreq != NULL);
 	psmi_assert(tidcount > 0);
 	psmi_assert(tidrecvc->state == TIDRECVC_STATE_BUSY);
+
+#ifdef PSM_CUDA
+	if (tidrecvc->cuda_hostbuf)
+		psmi_cudamemcpy_tid_to_device(tidrecvc);
+#endif
 
 	if (protoexp->tid_flags & IPS_PROTOEXP_FLAG_TID_DEBUG) {
 		int tid, i;
@@ -1820,11 +2600,19 @@ psm2_error_t ips_tid_recv_free(struct ips_tid_recv_desc *tidrecvc)
 	ips_tf_deallocate(&protoexp->tfc, tidrecvc->rdescid._desc_idx);
 
 	if (getreq->tidgr_bytesdone == getreq->tidgr_length) {
+#ifdef PSM_CUDA
+		/* if cuda, we handle callbacks when the cuda xfer is done */
+		if (!getreq->cuda_hostbuf_used) {
+			if (getreq->tidgr_callback)
+				getreq->tidgr_callback(getreq->tidgr_ucontext);
+			psmi_mpool_put(getreq);
+		}
+#else
 		if (getreq->tidgr_callback)
 			getreq->tidgr_callback(getreq->tidgr_ucontext);
 		psmi_mpool_put(getreq);
+#endif
 	} else {
-
 		/* We just released some tids.
 		 * If requests are waiting on tids to be
 		 * freed, queue up the timer */

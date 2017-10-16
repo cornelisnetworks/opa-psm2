@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
 
@@ -99,6 +99,10 @@ struct mpool {
 	non_empty_callback_fn_t mp_non_empty_cb;
 	void *mp_non_empty_cb_context;
 
+#ifdef PSM_CUDA
+	alloc_dealloc_callback_fn_t mp_alloc_dealloc_cb;
+	void *mp_alloc_dealloc_cb_context;
+#endif
 };
 
 static int psmi_mpool_allocate_chunk(mpool_t);
@@ -128,10 +132,10 @@ static int psmi_mpool_allocate_chunk(mpool_t);
  * Return the mpool on success, NULL on failure.
  */
 mpool_t
-psmi_mpool_create(size_t obj_size, uint32_t num_obj_per_chunk,
-		  uint32_t num_obj_max_total, int flags,
-		  psmi_memtype_t statstype, non_empty_callback_fn_t cb,
-		  void *context)
+psmi_mpool_create_inner(size_t obj_size, uint32_t num_obj_per_chunk,
+			uint32_t num_obj_max_total, int flags,
+			psmi_memtype_t statstype,
+			non_empty_callback_fn_t cb, void *context)
 {
 	mpool_t mp;
 	int s;
@@ -199,6 +203,24 @@ psmi_mpool_create(size_t obj_size, uint32_t num_obj_per_chunk,
 		mp->mp_elm_offset = 0;
 	}
 
+	return mp;
+}
+
+mpool_t
+MOCKABLE(psmi_mpool_create)(size_t obj_size, uint32_t num_obj_per_chunk,
+		  uint32_t num_obj_max_total, int flags,
+		  psmi_memtype_t statstype, non_empty_callback_fn_t cb,
+		  void *context)
+{
+	mpool_t mp;
+
+	mp = psmi_mpool_create_inner(obj_size, num_obj_per_chunk,
+					num_obj_max_total, flags, statstype,
+					cb, context);
+
+	if (mp == NULL)
+		return NULL;
+
 	if (psmi_mpool_allocate_chunk(mp) != PSM2_OK) {
 		psmi_mpool_destroy(mp);
 		return NULL;
@@ -209,6 +231,39 @@ psmi_mpool_create(size_t obj_size, uint32_t num_obj_per_chunk,
 
 	return mp;
 }
+MOCK_DEF_EPILOGUE(psmi_mpool_create);
+
+#ifdef PSM_CUDA
+mpool_t
+psmi_mpool_create_for_cuda(size_t obj_size, uint32_t num_obj_per_chunk,
+			   uint32_t num_obj_max_total, int flags,
+			   psmi_memtype_t statstype,
+			   non_empty_callback_fn_t cb, void *context,
+			   alloc_dealloc_callback_fn_t ad_cb, void *ad_context)
+{
+	mpool_t mp;
+
+	mp = psmi_mpool_create_inner(obj_size, num_obj_per_chunk,
+					num_obj_max_total, flags, statstype,
+					cb, context);
+
+	if (mp == NULL)
+		return NULL;
+
+	mp->mp_alloc_dealloc_cb = ad_cb;
+	mp->mp_alloc_dealloc_cb_context = ad_context;
+
+	if (psmi_mpool_allocate_chunk(mp) != PSM2_OK) {
+		psmi_mpool_destroy(mp);
+		return NULL;
+	}
+
+	VALGRIND_CREATE_MEMPOOL(mp, 0 /* no redzone */ ,
+				PSM_VALGRIND_MEM_UNDEFINED);
+
+	return mp;
+}
+#endif
 
 /**
  * psmi_mpool_get()
@@ -365,6 +420,24 @@ void *psmi_mpool_find_obj_by_index(mpool_t mp, int index)
 	return (void *)((uintptr_t) me + sizeof(struct mpool_element));
 }
 
+#ifdef PSM_CUDA
+/**
+ * psmi_mpool_chunk_dealloc()
+ * <mp>	    memory pool
+ * <i>	    index
+ * Calls the dealloc function on each element in the chunk.
+ */
+void psmi_mpool_chunk_dealloc(mpool_t mp, int idx)
+{
+	int j;
+	for (j = 0; j < mp->mp_num_obj_per_chunk; j++)
+		mp->mp_alloc_dealloc_cb(0 /* is not alloc */,
+					mp->mp_alloc_dealloc_cb_context,
+					((void *) mp->mp_elm_vector[idx]) +
+					j * mp->mp_elm_size +
+					sizeof(struct mpool_element));
+}
+#endif
 /**
  * psmi_mpool_destroy()
  *
@@ -380,8 +453,13 @@ void psmi_mpool_destroy(mpool_t mp)
 	size_t nbytes = mp->mp_num_obj * mp->mp_elm_size;
 
 	for (i = 0; i < mp->mp_elm_vector_size; i++) {
-		if (mp->mp_elm_vector[i])
+		if (mp->mp_elm_vector[i]) {
+#ifdef PSM_CUDA
+			if (mp->mp_alloc_dealloc_cb)
+				psmi_mpool_chunk_dealloc(mp, i);
+#endif
 			psmi_free(mp->mp_elm_vector[i]);
+		}
 	}
 	psmi_free(mp->mp_elm_vector);
 	nbytes += mp->mp_elm_vector_size * sizeof(struct mpool_element *);
@@ -399,13 +477,14 @@ void psmi_mpool_destroy(mpool_t mp)
  * Returns the num-obj-max-total
  */
 void
-psmi_mpool_get_obj_info(mpool_t mp, uint32_t *num_obj_per_chunk,
+MOCKABLE(psmi_mpool_get_obj_info)(mpool_t mp, uint32_t *num_obj_per_chunk,
 			uint32_t *num_obj_max_total)
 {
 	*num_obj_per_chunk = mp->mp_num_obj_per_chunk;
 	*num_obj_max_total = mp->mp_num_obj_max_total;
 	return;
 }
+MOCK_DEF_EPILOGUE(psmi_mpool_get_obj_info);
 
 static int psmi_mpool_allocate_chunk(mpool_t mp)
 {
@@ -423,8 +502,17 @@ static int psmi_mpool_allocate_chunk(mpool_t mp)
 	if (num_to_allocate == 0)
 		return PSM2_NO_MEMORY;
 
+#ifdef PSM_CUDA
+	if (mp->mp_alloc_dealloc_cb)
+		chunk = psmi_calloc(PSMI_EP_NONE, mp->mp_memtype,
+				    num_to_allocate, mp->mp_elm_size);
+	else
+		chunk = psmi_malloc(PSMI_EP_NONE, mp->mp_memtype,
+				    num_to_allocate * mp->mp_elm_size);
+#else
 	chunk = psmi_malloc(PSMI_EP_NONE, mp->mp_memtype,
 			    num_to_allocate * mp->mp_elm_size);
+#endif
 	if (chunk == NULL) {
 		fprintf(stderr,
 			"Failed to allocate memory for memory pool chunk: %s\n",
@@ -433,6 +521,13 @@ static int psmi_mpool_allocate_chunk(mpool_t mp)
 	}
 
 	for (i = 0; i < num_to_allocate; i++) {
+#ifdef PSM_CUDA
+		if (mp->mp_alloc_dealloc_cb)
+			mp->mp_alloc_dealloc_cb(1 /* is alloc */,
+						mp->mp_alloc_dealloc_cb_context,
+						chunk + i * mp->mp_elm_size +
+						sizeof(struct mpool_element));
+#endif
 		elm = (struct mpool_element *)((uintptr_t) chunk +
 					       i * mp->mp_elm_size +
 					       mp->mp_elm_offset);

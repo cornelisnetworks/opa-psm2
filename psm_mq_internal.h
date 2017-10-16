@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@
 
 */
 
-/* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #ifndef MQ_INT_H
 #define MQ_INT_H
@@ -65,6 +65,7 @@
 #endif
 #include <smmintrin.h>
 #include "psm_user.h"
+#include "psm_sysbuf.h"
 
 #include "psm2_mock_testing.h"
 
@@ -96,6 +97,10 @@ struct psm2_mq {
 	struct mqq unexpected_htab[NUM_HASH_CONFIGS][NUM_HASH_BUCKETS];
 	struct mqq expected_htab[NUM_HASH_CONFIGS][NUM_HASH_BUCKETS];
 
+	/* in case the compiler can't figure out how to preserve the hashed values
+	between mq_req_match() and mq_add_to_unexpected_hashes() ... */
+	unsigned hashvals[NUM_HASH_CONFIGS];
+
 	/*psm_mq_unexpected_callback_fn_t unexpected_callback; */
 	struct mqq expected_q;		/**> Preposted (expected) queue */
 	struct mqq unexpected_q;	/**> Unexpected queue */
@@ -104,9 +109,12 @@ struct psm2_mq {
 	struct mqq outoforder_q;	/**> OutofOrder queue */
 	STAILQ_HEAD(, psm2_mq_req) eager_q; /**> eager request queue */
 
+	uint32_t hfi_thresh_tiny;
 	uint32_t hfi_thresh_rv;
 	uint32_t shm_thresh_rv;
-	uint32_t hfi_window_rv;
+	uint32_t hfi_base_window_rv;	/**> this is a base rndv window size,
+					     will be further trimmed down per-connection based
+					     on the peer's MTU */
 	int memmode;
 
 	uint64_t timestamp;
@@ -117,13 +125,31 @@ struct psm2_mq {
 	unsigned unexpected_list_len;
 	unsigned expected_hash_len;
 	unsigned expected_list_len;
+
+	psmi_mem_ctrl_t handler_index[MM_NUM_OF_POOLS];
+	int mem_ctrl_is_init;
+	uint64_t mem_ctrl_total_bytes;
+
+	psmi_lock_t progress_lock;
 };
 
 #define MQ_HFI_THRESH_TINY	8
-#define MQ_HFI_THRESH_EGR_SDMA_XEON 34000
-#define MQ_HFI_THRESH_EGR_SDMA_PHI2 200000
-#define MQ_HFI_THRESH_EGR_SDMA_SQ_XEON 16000
-#define MQ_HFI_THRESH_EGR_SDMA_SQ_PHI2 65536
+#define MQ_HFI_THRESH_EGR_SDMA_XEON 34000       /* Eager Xeon blocking */
+#define MQ_HFI_THRESH_EGR_SDMA_PHI2 200000      /* Eager Phi2 blocking */
+#define MQ_HFI_THRESH_EGR_SDMA_SQ_XEON 16000    /* Eager Xeon non-blocking */
+#define MQ_HFI_THRESH_EGR_SDMA_SQ_PHI2 65536    /* Eager Phi2 non-blocking */
+
+#define MQ_HFI_THRESH_RNDV_PHI2 200000
+#define MQ_HFI_THRESH_RNDV_XEON  64000
+
+#define MQ_HFI_WINDOW_RNDV_PHI2 4194304
+#define MQ_HFI_WINDOW_RNDV_XEON  131072
+
+#ifdef PSM_CUDA
+#define MQ_HFI_THRESH_RNDV_CUDA 2097152
+#endif
+
+#define MQ_SHM_THRESH_RNDV 16000
 
 #define MQE_TYPE_IS_SEND(type)	((type) & MQE_TYPE_SEND)
 #define MQE_TYPE_IS_RECV(type)	((type) & MQE_TYPE_RECV)
@@ -237,6 +263,22 @@ struct psm2_mq_req {
 	psm2_epaddr_t rts_peer;
 	uintptr_t rts_sbuf;
 
+#ifdef PSM_CUDA
+	/* is_buf_gpu_mem - used to indicate if the send or receive is issued
+	 * on a device/host buffer.
+	 * is_sendbuf_gpu_mem - Used to always select TID path on the receiver
+	 * when send is on a device buffer
+	 */
+	uint8_t is_buf_gpu_mem;
+	uint8_t is_sendbuf_gpu_mem;
+	STAILQ_HEAD(sendreq_spec_, ips_cuda_hostbuf) sendreq_prefetch;
+	uint32_t prefetch_send_msgoff;
+	int cuda_hostbuf_used;
+	cudaIpcMemHandle_t cuda_ipc_handle;
+	cudaEvent_t cuda_ipc_event;
+	uint8_t cuda_ipc_handle_attached;
+#endif
+
 	/* PTLs get to store their own per-request data.  MQ manages the allocation
 	 * by allocating psm2_mq_req so that ptl_req_data has enough space for all
 	 * possible PTLs.
@@ -262,6 +304,7 @@ hash_32(uint32_t a))
 
 void MOCKABLE(psmi_mq_mtucpy)(void *vdest, const void *vsrc, uint32_t nchars);
 MOCK_DCL_EPILOGUE(psmi_mq_mtucpy);
+void psmi_mq_mtucpy_host_mem(void *vdest, const void *vsrc, uint32_t nchars);
 
 #if defined(__x86_64__)
 void psmi_mq_mtucpy_safe(void *vdest, const void *vsrc, uint32_t nchars);
@@ -275,6 +318,56 @@ void psmi_mq_mtucpy_safe(void *vdest, const void *vsrc, uint32_t nchars);
 PSMI_ALWAYS_INLINE(
 void
 mq_copy_tiny(uint32_t *dest, uint32_t *src, uint8_t len))
+{
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED && (PSMI_IS_CUDA_MEM(dest) || PSMI_IS_CUDA_MEM(src))) {
+		if (!PSMI_IS_CUDA_ENABLED) {
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+				 "Please enable PSM CUDA support when using GPU buffer \n");
+			return;
+		}
+		PSMI_CUDA_CALL(cudaMemcpy, dest, src, len, cudaMemcpyDefault);
+		return;
+	}
+#endif
+	switch (len) {
+	case 8:
+		*dest++ = *src++;
+	case 4:
+		*dest++ = *src++;
+	case 0:
+		return;
+	case 7:
+	case 6:
+	case 5:
+		*dest++ = *src++;
+		len -= 4;
+	case 3:
+	case 2:
+	case 1:
+		break;
+	default:		/* greater than 8 */
+		psmi_mq_mtucpy(dest, src, len);
+		return;
+	}
+	uint8_t *dest1 = (uint8_t *) dest;
+	uint8_t *src1 = (uint8_t *) src;
+	switch (len) {
+	case 3:
+		*dest1++ = *src1++;
+	case 2:
+		*dest1++ = *src1++;
+	case 1:
+		*dest1++ = *src1++;
+	}
+}
+
+#ifdef PSM_CUDA
+typedef void (*psmi_mtucpy_fn_t)(void *dest, const void *src, uint32_t len);
+
+PSMI_ALWAYS_INLINE(
+void
+mq_copy_tiny_host_mem(uint32_t *dest, uint32_t *src, uint8_t len))
 {
 	switch (len) {
 	case 8:
@@ -307,6 +400,7 @@ mq_copy_tiny(uint32_t *dest, uint32_t *src, uint8_t len))
 		*dest1++ = *src1++;
 	}
 }
+#endif
 
 /* Typedef describing a function to populate a psm2_mq_status(2)_t given a
  * matched request.  The purpose of this typedef is to avoid duplicating
@@ -459,7 +553,9 @@ MOCK_DCL_EPILOGUE(psmi_mq_req_alloc);
  */
 psm2_error_t psmi_mq_malloc(psm2_mq_t *mqo);
 psm2_error_t psmi_mq_initialize_defaults(psm2_mq_t mq);
-psm2_error_t psmi_mq_free(psm2_mq_t mq);
+
+psm2_error_t MOCKABLE(psmi_mq_free)(psm2_mq_t mq);
+MOCK_DCL_EPILOGUE(psmi_mq_free);
 
 /* Three functions that handle all MQ stuff */
 #define MQ_RET_MATCH_OK	0

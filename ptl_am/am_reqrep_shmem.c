@@ -5,7 +5,7 @@
 
   GPL LICENSE SUMMARY
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of version 2 of the GNU General Public License as
@@ -21,7 +21,7 @@
 
   BSD LICENSE
 
-  Copyright(c) 2015 Intel Corporation.
+  Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -51,6 +51,8 @@
 
 */
 
+/* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
+
 #include <sys/types.h>		/* shm_open and signal handling */
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -62,6 +64,10 @@
 #include "psm_am_internal.h"
 #include "cmarw.h"
 #include "psmi_wrappers.h"
+
+#ifdef PSM_CUDA
+#include "am_cuda_memhandle_cache.h"
+#endif
 
 int psmi_shm_mq_rv_thresh = PSMI_MQ_RV_THRESH_NO_KASSIST;
 
@@ -98,7 +104,9 @@ static void amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg,
 			      void *buf, size_t len);
 
 /* Kassist helper functions */
+#if _HFI_DEBUGGING
 static const char *psmi_kassist_getmode(int mode);
+#endif
 static int psmi_get_kassist_mode();
 int psmi_epaddr_pid(psm2_epaddr_t epaddr);
 
@@ -150,7 +158,6 @@ void amsh_atexit()
 	static pthread_mutex_t mutex_once = PTHREAD_MUTEX_INITIALIZER;
 	static int atexit_once;
 	psm2_ep_t ep;
-	extern psm2_ep_t psmi_opened_endpoint;
 	ptl_t *ptl;
 
 	pthread_mutex_lock(&mutex_once);
@@ -233,7 +240,6 @@ void amsh_mmap_fault(int signo, siginfo_t *siginfo, void *context)
 psm2_error_t psmi_shm_create(ptl_t *ptl)
 {
 	psm2_ep_t ep = ptl->ep;
-	int use_kassist;
 	char shmbuf[256];
 	void *mapptr;
 	size_t segsz;
@@ -243,11 +249,14 @@ psm2_error_t psmi_shm_create(ptl_t *ptl)
 	int iterator;
 	/* Get which kassist mode to use. */
 	ptl->psmi_kassist_mode = psmi_get_kassist_mode();
-	use_kassist = (ptl->psmi_kassist_mode != PSMI_KASSIST_OFF);
 
-	_HFI_PRDBG("kassist_mode %d %s use_kassist %d\n",
-		   ptl->psmi_kassist_mode,
-		   psmi_kassist_getmode(ptl->psmi_kassist_mode), use_kassist);
+	if (_HFI_PRDBG_ON) {
+		_HFI_PRDBG_ALWAYS
+			("kassist_mode %d %s use_kassist %d\n",
+			ptl->psmi_kassist_mode,
+			psmi_kassist_getmode(ptl->psmi_kassist_mode),
+			(ptl->psmi_kassist_mode != PSMI_KASSIST_OFF));
+	}
 
 	segsz = am_ctl_sizeof_block();
 	for (iterator = 0; iterator <= INT_MAX; iterator++) {
@@ -1278,7 +1287,7 @@ amsh_ep_connreq_wrap(ptl_t *ptl, int op,
 			   ++num_polls_noprogress ==
 			   CONNREQ_ZERO_POLLS_BEFORE_YIELD) {
 			num_polls_noprogress = 0;
-			PSMI_PYIELD();
+			PSMI_YIELD(ptl->ep->mq->progress_lock);
 		}
 	}
 	while (psmi_cycles_left(t_start, timeout_ns));
@@ -1923,8 +1932,25 @@ amsh_mq_rndv(ptl_t *ptl, psm2_mq_t mq, psm2_mq_req_t req,
 	req->send_msglen = len;
 	req->send_msgoff = 0;
 
-	psmi_amsh_short_request(ptl, epaddr, mq_handler_hidx, args, 5, NULL, 0,
-				0);
+#ifdef PSM_CUDA
+		/* If the send buffer is on gpu, we create a cuda IPC
+		 * handle and send it as payload in the RTS
+		 */
+		if (req->is_buf_gpu_mem) {
+			PSMI_CUDA_CALL(cudaIpcGetMemHandle,
+				      (cudaIpcMemHandle_t *) &req->cuda_ipc_handle,
+				      (void*) buf);
+			psmi_amsh_short_request(ptl, epaddr, mq_handler_hidx,
+						args, 5, (void*)&req->cuda_ipc_handle,
+						sizeof(cudaIpcMemHandle_t), 0);
+			req->cuda_ipc_handle_attached = 1;
+		} else
+			psmi_amsh_short_request(ptl, epaddr, mq_handler_hidx,
+						args, 5, NULL, 0, 0);
+#else
+		psmi_amsh_short_request(ptl, epaddr, mq_handler_hidx,
+					args, 5, NULL, 0, 0);
+#endif
 
 	return err;
 }
@@ -1941,6 +1967,19 @@ amsh_mq_send_inner(psm2_mq_t mq, psm2_mq_req_t req, psm2_epaddr_t epaddr,
 	psm2_amarg_t args[3];
 	psm2_error_t err = PSM2_OK;
 	int is_blocking = (req == NULL);
+
+#ifdef PSM_CUDA
+	int gpu_mem;
+	/* All sends from  a gpu buffer use the rendezvous protocol */
+	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)ubuf)) {
+		if (!PSMI_IS_CUDA_ENABLED)
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+				 " Please enable PSM CUDA support when using GPU buffer \n");
+		gpu_mem = 1;
+		goto do_rendezvous;
+	} else
+		gpu_mem = 0;
+#endif
 
 	if (!flags && len <= AMLONG_MTU) {
 		if (len <= 32)
@@ -1989,7 +2028,30 @@ do_rendezvous:
 			    return PSM2_NO_MEMORY;
 			req->send_msglen = len;
 			req->tag = *tag;
+
+			/* Since SEND command is blocking, this request is
+			 * entirely internal and we will not be exposed to user.
+			 * Setting as internal so it will not be added to
+			 * mq->completed_q */
+			req->flags |= PSMI_REQ_FLAG_IS_INTERNAL;
 		}
+#ifdef PSM_CUDA
+		/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
+		 * when the buffer pointer received into PSM has been allocated
+		 * by the application. This guarantees the all memory operations
+		 * to this region of memory (used by multiple layers of the stack)
+		 * always synchronize
+		 */
+		if (gpu_mem) {
+			int trueflag = 1;
+			PSMI_CUDA_CALL(cuPointerSetAttribute, &trueflag,
+				       CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
+				      (CUdeviceptr)ubuf);
+			req->is_buf_gpu_mem = 1;
+		} else
+			req->is_buf_gpu_mem = 0;
+#endif
+
 		err =
 		    amsh_mq_rndv(epaddr->ptlctl->ptl, mq, req, epaddr, tag,
 				 ubuf, len);
@@ -2060,7 +2122,7 @@ int psmi_epaddr_pid(psm2_epaddr_t epaddr)
 	uint16_t shmidx = ((am_epaddr_t *) epaddr)->_shmidx;
 	return epaddr->ptlctl->ptl->am_ep[shmidx].pid;
 }
-
+#if _HFI_DEBUGGING
 static
 const char *psmi_kassist_getmode(int mode)
 {
@@ -2075,11 +2137,16 @@ const char *psmi_kassist_getmode(int mode)
 		return "unknown";
 	}
 }
+#endif
 
 static
 int psmi_get_kassist_mode()
 {
 	int mode = PSMI_KASSIST_MODE_DEFAULT;
+	/* Cuda PSM only supports KASSIST_CMA_GET */
+#ifdef PSM_CUDA
+	mode = PSMI_KASSIST_CMA_GET;
+#else
 	union psmi_envvar_val env_kassist;
 
 	if (!psmi_getenv("PSM2_KASSIST_MODE",
@@ -2101,7 +2168,7 @@ int psmi_get_kassist_mode()
 		   if CMA is not available it falls back to 'none' there. */
 		mode = PSMI_KASSIST_CMA_GET;
 	}
-
+#endif
 	return mode;
 }
 
@@ -2372,6 +2439,27 @@ amsh_init(psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 	ctl->epaddr_stats_num = NULL;
 	ctl->epaddr_stats_init = NULL;
 	ctl->epaddr_stats_get = NULL;
+#ifdef PSM_CUDA
+	union psmi_envvar_val env_memcache_enabled;
+	psmi_getenv("PSM2_CUDA_MEMCACHE_ENABLED",
+		    "PSM cuda ipc memhandle cache enabled (default is enabled)",
+		     PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
+		     (union psmi_envvar_val)
+		      1, &env_memcache_enabled);
+	if (PSMI_IS_CUDA_ENABLED && env_memcache_enabled.e_uint) {
+		union psmi_envvar_val env_memcache_size;
+		psmi_getenv("PSM2_CUDA_MEMCACHE_SIZE",
+			    "Size of the cuda ipc memhandle cache ",
+			    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
+			    (union psmi_envvar_val)
+			    CUDA_MEMHANDLE_CACHE_SIZE, &env_memcache_size);
+		if ((err = am_cuda_memhandle_mpool_init(env_memcache_size.e_uint)
+		     != PSM2_OK))
+			goto fail;
+		if ((err = am_cuda_memhandle_cache_map_init() != PSM2_OK))
+			goto fail;
+	}
+#endif
 fail:
 	return err;
 }
@@ -2465,7 +2553,10 @@ static psm2_error_t amsh_fini(ptl_t *ptl, int force, uint64_t timeout_ns)
 	 * deallocated to reference memory that disappeared */
 	ptl->repH.head = &ptl->amsh_empty_shortpkt;
 	ptl->reqH.head = &ptl->amsh_empty_shortpkt;
-
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED)
+		am_cuda_memhandle_cache_map_fini();
+#endif
 	return PSM2_OK;
 fail:
 	return err;
