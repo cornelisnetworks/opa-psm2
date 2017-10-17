@@ -20,9 +20,12 @@ libpsm2.so.2 libpsm2 #MINVER#
  psm2_am_register_handlers@PSM2_1.0 10.2
  psm2_am_reply_short@PSM2_1.0 10.2
  psm2_am_request_short@PSM2_1.0 10.2
+ psm2_capabilities_bitset@PSM2_1.0 10.3.10.4
  psm2_ep_close@PSM2_1.0 10.2
  psm2_ep_connect@PSM2_1.0 10.2
+ psm2_ep_disconnect2@PSM2_1.0 10.3.10.4
  psm2_ep_disconnect@PSM2_1.0 10.2
+ psm2_ep_epid_lookup2@PSM2_1.0 10.3.10.4
  psm2_ep_epid_lookup@PSM2_1.0 10.2
  psm2_ep_epid_share_memory@PSM2_1.0 10.2
  psm2_ep_num_devunits@PSM2_1.0 10.2
@@ -32,6 +35,7 @@ libpsm2.so.2 libpsm2 #MINVER#
  psm2_epaddr_getctxt@PSM2_1.0 10.2
  psm2_epaddr_setctxt@PSM2_1.0 10.2
  psm2_epaddr_setlabel@PSM2_1.0 10.2
+ psm2_epaddr_to_epid@PSM2_1.0 10.3.10.4
  psm2_epid_context@PSM2_1.0 10.2
  psm2_epid_nid@PSM2_1.0 10.2
  psm2_epid_port@PSM2_1.0 10.2
@@ -39,6 +43,7 @@ libpsm2.so.2 libpsm2 #MINVER#
  psm2_error_get_string@PSM2_1.0 10.2
  psm2_error_register_handler@PSM2_1.0 10.2
  psm2_finalize@PSM2_1.0 10.2
+ psm2_get_capability_mask@PSM2_1.0 10.3.10.4
  psm2_getopt@PSM2_1.0 10.2
  psm2_init@PSM2_1.0 10.2
  psm2_map_nid_hostname@PSM2_1.0 10.2
