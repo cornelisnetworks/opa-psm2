@@ -56,19 +56,19 @@
 
 /*
 
-  A note about PSM_LOG and PSM_LOG_FAST_IO:
+  A note about PSM2_LOG and PSM2_LOG_FAST_IO:
 
-  By default, the PSM_LOG facility is safe, slow, and is complete.  That is, if the
+  By default, the PSM2_LOG facility is safe, slow, and is complete.  That is, if the
   test case you are debugging has an abnormal termiation, no problem.  The logs are
   saved up to the point of the abnormal termination.  Abnormal termination can be
   a seg fault, the test case issues a fatal error, or exit()'s or abort()'s.
 
-  However, debugging timing sensitive problems, make the usual SLOW PSM_LOG
+  However, debugging timing sensitive problems, make the usual SLOW PSM2_LOG
   facility inadequate as the timing overhead that it introduces dominates, and the
   symptoms of your problem may change or go away.
 
-  For this case, you can use BOTH: PSM_LOG and PSM_LOG_FAST_IO.  To use
-  PSM_LOG_FAST_IO though, caution: for abnormal program termination, you will get
+  For this case, you can use BOTH: PSM2_LOG and PSM2_LOG_FAST_IO.  To use
+  PSM2_LOG_FAST_IO though, caution: for abnormal program termination, you will get
   no log file.
 
   To workaround this problem, and allow you to get a log file even after an abnormal
@@ -84,23 +84,23 @@
   By default, these macros are not defined when building psm.  When not defined, the
   macros become no-ops in the PSM code.
 
-  When enabled (by defining the PSM_LOG symbol), the macros present information to
+  When enabled (by defining the PSM2_LOG symbol), the macros present information to
   the psmi_log_message() facility for processing.  See below for more information on the
   psmi_log_message() facility.
 
-  To enable the macros, build PSM with the PSM_LOG environment variable exported, ala:
+  To enable the macros, build PSM with the PSM2_LOG environment variable exported, ala:
 
-  PSM_LOG=1 make ...
+  PSM2_LOG=1 make ...
 
   The macros are described in the following:
 
   PSM2_LOG_MSG(FORMAT,...)        Spills a printf-style message to the log.
-  PSM_LOG_DECLARE_BT_BUFFER()    Declares a local back trace buffer for use with the
-  				 PSM_LOG_BT() macro.
-  PSM_LOG_BT(NFRAMES,FORMAT,...) Spills the current backtrace, if it differs from the
+  PSM2_LOG_DECLARE_BT_BUFFER()    Declares a local back trace buffer for use with the
+  				 PSM2_LOG_BT() macro.
+  PSM2_LOG_BT(NFRAMES,FORMAT,...) Spills the current backtrace, if it differs from the
                                  previous backtrace spilled to the log.
 
-  The psmi_log_message() facility is the backend for these messages when PSM_LOG is enabled.
+  The psmi_log_message() facility is the backend for these messages when PSM2_LOG is enabled.
   The psmi_log_message() facility spills messages to unique log files based on the process id
   and the thread id.  So every unique process id, and thread id will spill to unique log files.
   The psmi_log_message prefixes each message in the log files with a high resolution timer
@@ -108,15 +108,15 @@
   It is left as an exercise to the reader to reconcile log messages from different hosts to one
   timeline.
 
-  The backtrace capability in the PSM_LOG functionality needs some explanation: often a bug
-  happens only when the code is tickled from a specific call-chain.  The PSM_LOG_BT() macro
+  The backtrace capability in the PSM2_LOG functionality needs some explanation: often a bug
+  happens only when the code is tickled from a specific call-chain.  The PSM2_LOG_BT() macro
   supports identifying the unique call-chain when a problem occurs.  The model is as follows:
 
   A unique declaration is made for a backtrace to spill the backtrace information to.  This
-  declaration should be made in the same basic block as the use of the PSM_LOG_BT() macro.
-  To make the declaration, use PSM_LOG_DECLARE_BT_BUFFER().
+  declaration should be made in the same basic block as the use of the PSM2_LOG_BT() macro.
+  To make the declaration, use PSM2_LOG_DECLARE_BT_BUFFER().
 
-  When the PSM_LOG is enabled, at the statement for the macro: PSM_LOG_BT(NFRAMES,FORMAT,...),
+  When the PSM2_LOG is enabled, at the statement for the macro: PSM2_LOG_BT(NFRAMES,FORMAT,...),
   the psmi_log_message() facility generates the current backtrace, and compares the first
   NFRAMES of the current backtrace against the previous backtrace stored in the backtrace
   buffer declared with the declaration.  If the two backtraces differ, the psmi_log_message()
@@ -160,11 +160,11 @@
 
  */
 
-#define PSM_LOG_EPM_TX ((int)1)
-#define PSM_LOG_EPM_RX ((int)0)
+#define PSM2_LOG_EPM_TX ((int)1)
+#define PSM2_LOG_EPM_RX ((int)0)
 
 
-#ifdef PSM_LOG
+#ifdef PSM2_LOG
 
 extern void psmi_log_initialize(void);
 
@@ -174,7 +174,7 @@ extern void psmi_log_message(const char *fileName,
 			     int lineNumber,
 			     const char *format, ...);
 
-#ifdef PSM_LOG_FAST_IO
+#ifdef PSM2_LOG_FAST_IO
 extern void psmi_log_fini(void);
 #else
 #define psmi_log_fini() /* nothing */
@@ -182,26 +182,30 @@ extern void psmi_log_fini(void);
 
 #define PSM2_LOG_MSG(FORMAT , ...) psmi_log_message(__FILE__,__FUNCTION__,__LINE__,FORMAT, ## __VA_ARGS__)
 
-#define PSM_LOG_BT_BUFFER_SIZE 100
+#define PSM2_LOG_BT_BUFFER_SIZE 100
 
-#define PSM_LOG_DECLARE_BT_BUFFER() static void * psm_log_bt_buffer[PSM_LOG_BT_BUFFER_SIZE]
+#define PSM2_LOG_DECLARE_BT_BUFFER() static void * psm_log_bt_buffer[PSM2_LOG_BT_BUFFER_SIZE]
 
-#define PSM_LOG_BT_MAGIC ((const char *)-1)
+#define PSM2_LOG_BT_MAGIC ((const char *)-1)
 
-#define PSM_LOG_BT(NFRAMES,FORMAT , ...) psmi_log_message(__FILE__,__FUNCTION__,__LINE__,PSM_LOG_BT_MAGIC,psm_log_bt_buffer,NFRAMES,FORMAT, ## __VA_ARGS__)
+#define PSM2_LOG_BT(NFRAMES,FORMAT , ...) psmi_log_message(__FILE__,__FUNCTION__,__LINE__,PSM2_LOG_BT_MAGIC,psm_log_bt_buffer,NFRAMES,FORMAT, ## __VA_ARGS__)
 
-#define PSM_LOG_EPM_MAGIC ((const char *)-2)
+#define PSM2_LOG_EPM_MAGIC ((const char *)-2)
 
 /* EPM is short for Emit Protocol Message to the log file.
 OPCODE is an int, and corresponds to one of the OPCODES declared in ptl_ips/ips_proto_header.h
-TXRX is an int, and should be one of the above two consts (PSM_LOG_EPM_TX, or PSM_LOG_EPM_RX).
+TXRX is an int, and should be one of the above two consts (PSM2_LOG_EPM_TX, or PSM2_LOG_EPM_RX).
 FROMEPID and TOEPID are uint64_t's and the fromepid should be the epid (end point id) of the sender   of the message
                                    and the toepid   should be the epid (end point id) of the receiver of the message
     */
-#define PSM_LOG_EPM(OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,...) psmi_log_message(__FILE__,__FUNCTION__,__LINE__,PSM_LOG_EPM_MAGIC,OPCODE,TXRX,FROMEPID,TOEPID,FORMAT, ## __VA_ARGS__)
+#define PSM2_LOG_EPM(OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,...) psmi_log_message(__FILE__,__FUNCTION__,__LINE__,PSM2_LOG_EPM_MAGIC,OPCODE,TXRX,FROMEPID,TOEPID,FORMAT, ## __VA_ARGS__)
 
-/* Just adds a condition to the PSM_LOG_EPM() macro. */
-#define PSM_LOG_EPM_COND(COND,OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,...) if (COND) PSM_LOG_EPM(OPCODE,TXRX,FROMEPID,TOEPID,FORMAT, ## __VA_ARGS__)
+/* Just adds a condition to the PSM2_LOG_EPM() macro. */
+#define PSM2_LOG_EPM_COND(COND,OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,...) if (COND) PSM2_LOG_EPM(OPCODE,TXRX,FROMEPID,TOEPID,FORMAT, ## __VA_ARGS__)
+
+#define PSM2_LOG_DUMP_MAGIC ((const char *)-3)
+
+#define PSM2_LOG_MSG_DUMP(ADDR,SIZE,FORMAT , ...) psmi_log_message(__FILE__,__FUNCTION__,__LINE__,PSM2_LOG_DUMP_MAGIC,ADDR,SIZE,FORMAT, ## __VA_ARGS__)
 
 #else
 
@@ -211,14 +215,16 @@ FROMEPID and TOEPID are uint64_t's and the fromepid should be the epid (end poin
 
 #define psmi_log_fini()                                     /* nothing */
 
-#define PSM_LOG_DECLARE_BT_BUFFER()                         /* nothing */
+#define PSM2_LOG_DECLARE_BT_BUFFER()                         /* nothing */
 
-#define PSM_LOG_BT(NFRAMES,FORMAT , ...)                    /* nothing */
+#define PSM2_LOG_BT(NFRAMES,FORMAT , ...)                    /* nothing */
 
-#define PSM_LOG_EPM(OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,...) /* nothing */
+#define PSM2_LOG_EPM(OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,...) /* nothing */
 
-#define PSM_LOG_EPM_COND(COND,OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,...) /* nothing */
+#define PSM2_LOG_EPM_COND(COND,OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,...) /* nothing */
 
-#endif /* #ifdef PSM_LOG */
+#define PSM2_LOG_MSG_DUMP(ADDR,SIZE,FORMAT , ...)                      /* nothing */
+
+#endif /* #ifdef PSM2_LOG */
 
 #endif /* #ifndef _PSMI_LOG_H */

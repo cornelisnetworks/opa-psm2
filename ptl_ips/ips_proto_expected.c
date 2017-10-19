@@ -706,7 +706,7 @@ ips_protoexp_send_tid_grant(struct ips_tid_recv_desc *tidrecvc)
 	ips_scb_buffer(scb) = (void *)&tidrecvc->tid_list;
 	ips_scb_length(scb) = tidrecvc->tsess_tidlist_length;
 
-	PSM_LOG_EPM(OPCODE_LONG_CTS,PSM_LOG_EPM_TX, proto->ep->epid,
+	PSM2_LOG_EPM(OPCODE_LONG_CTS,PSM2_LOG_EPM_TX, proto->ep->epid,
 		    flow->ipsaddr->epaddr.epid ,"tidrecvc->getreq->tidgr_sendtoken; %d",
 		    tidrecvc->getreq->tidgr_sendtoken);
 
@@ -723,7 +723,7 @@ ips_protoexp_send_tid_completion(struct ips_tid_recv_desc *tidrecvc,
 	struct ips_flow *flow = &ipsaddr->flows[proto->msgflowid];
 	ips_scb_t *scb;
 
-	PSM_LOG_EPM(OPCODE_EXPTID_COMPLETION,PSM_LOG_EPM_TX, proto->ep->epid,
+	PSM2_LOG_EPM(OPCODE_EXPTID_COMPLETION,PSM2_LOG_EPM_TX, proto->ep->epid,
 		    flow->ipsaddr->epaddr.epid ,"sdescid._desc_idx: %d",
 		    sdescid._desc_idx);
 	scb = tidrecvc->completescb;
@@ -765,7 +765,7 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 	struct ips_tid_send_desc *tidsendc;
 
 	PSM2_LOG_MSG("entering");
-	PSM_LOG_EPM(OPCODE_EXPTID_COMPLETION,PSM_LOG_EPM_RX,rcv_ev->ipsaddr->epaddr.epid,
+	PSM2_LOG_EPM(OPCODE_EXPTID_COMPLETION,PSM2_LOG_EPM_RX,rcv_ev->ipsaddr->epaddr.epid,
 		    rcv_ev->proto->ep->mq->ep->epid,"desc_id._desc_idx: %d",desc_id._desc_idx);
 
 	if (!ips_proto_is_expected_or_nak(rcv_ev))
@@ -885,7 +885,7 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 	PSM2_LOG_MSG("entering");
 
 	desc_id._desc_idx = ips_proto_flowid(p_hdr);
-	PSM_LOG_EPM(OPCODE_EXPTID,PSM_LOG_EPM_RX,rcv_ev->ipsaddr->epaddr.epid,
+	PSM2_LOG_EPM(OPCODE_EXPTID,PSM2_LOG_EPM_RX,rcv_ev->ipsaddr->epaddr.epid,
 		    proto->ep->mq->ep->epid,"desc_id._desc_idx: %d", desc_id._desc_idx);
 
 	desc_id._desc_genc = p_hdr->exp_rdescid_genc;
@@ -1644,7 +1644,7 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 	/*
 	 * Other packet fields.
 	 */
-	PSM_LOG_EPM(OPCODE_EXPTID,PSM_LOG_EPM_TX, protoexp->proto->ep->epid,
+	PSM2_LOG_EPM(OPCODE_EXPTID,PSM2_LOG_EPM_TX, protoexp->proto->ep->epid,
 		    flow->ipsaddr->epaddr.epid,
 		    "psmi_mpool_get_obj_index(tidsendc->mqreq): %d, tidsendc->rdescid._desc_idx: %d, tidsendc->sdescid._desc_idx: %d",
 		    psmi_mpool_get_obj_index(tidsendc->mqreq),tidsendc->rdescid._desc_idx,tidsendc->sdescid._desc_idx);

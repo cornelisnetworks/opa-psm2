@@ -80,7 +80,7 @@ else
 	anerr := $(error Unknown Fortran compiler arch: ${FCARCH})
 endif # gfortran
 
-BASECFLAGS += $(BASE_FLAGS)
+BASECFLAGS += $(BASE_FLAGS) -pthread
 LDFLAGS += $(BASE_FLAGS)
 ASFLAGS += $(BASE_FLAGS)
 
@@ -155,9 +155,9 @@ ifneq (,${PSM_COVERAGE}) # This check must come after PSM_DEBUG to override opti
   LDFLAGS += -fprofile-arcs
 endif
 ifneq (,${PSM_LOG})
-   BASECFLAGS += -DPSM_LOG
+   BASECFLAGS += -DPSM2_LOG
 ifneq (,${PSM_LOG_FAST_IO})
-   BASECFLAGS += -DPSM_LOG_FAST_IO
+   BASECFLAGS += -DPSM2_LOG_FAST_IO
    PSM2_ADDITIONAL_GLOBALS += psmi_log_fini;psmi_log_message;
 endif
 endif

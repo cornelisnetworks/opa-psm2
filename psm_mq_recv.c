@@ -275,7 +275,7 @@ psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		}
 		req->recv_msgoff = req->send_msgoff = paylen;
 		*req_o = req;	/* yes match */
-		PSM_LOG_EPM(OPCODE_LONG_RTS,PSM_LOG_EPM_RX,src->epid,mq->ep->epid,
+		PSM2_LOG_EPM(OPCODE_LONG_RTS,PSM2_LOG_EPM_RX,src->epid,mq->ep->epid,
 			    "req->rts_reqidx_peer: %d",req->rts_reqidx_peer);
 		rc = MQ_RET_MATCH_OK;
 	} else if (msgorder > 1) {
@@ -292,8 +292,8 @@ psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		/* We don't know recv_msglen yet but we set it here for
 		 * mq_iprobe */
 		req->send_msglen = req->recv_msglen = send_msglen;
-		PSM_LOG_EPM_COND(req->send_msglen > mq->hfi_thresh_rv,
-				 OPCODE_LONG_RTS,PSM_LOG_EPM_RX,src->epid,mq->ep->epid,
+		PSM2_LOG_EPM_COND(req->send_msglen > mq->hfi_thresh_rv,
+				 OPCODE_LONG_RTS,PSM2_LOG_EPM_RX,src->epid,mq->ep->epid,
 				    "req->rts_reqidx_peer: %d",req->rts_reqidx_peer);
 		req->state = MQ_STATE_UNEXP_RV;
 		req->peer = src;

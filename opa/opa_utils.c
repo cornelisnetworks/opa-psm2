@@ -191,10 +191,14 @@ int hfi_set_pkey(struct _hfi_ctrl *ctrl, uint16_t pkey)
 	cmd.len = 0;
 	cmd.addr = (uint64_t) pkey;
 
+	_HFI_VDBG("Setting context pkey to %x.\n", (unsigned int) pkey);
 	if (hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd)) == -1) {
-		if (errno != EINVAL)
-			_HFI_INFO("set pkey failed: %s\n", strerror(errno));
+		_HFI_INFO("Setting context pkey to %x failed: %s\n",
+			  (unsigned int) pkey, strerror(errno));
 		return -1;
+	} else {
+		_HFI_VDBG("Successfully set context pkey to %x.\n",
+			(unsigned int) pkey);
 	}
 	return 0;
 }
