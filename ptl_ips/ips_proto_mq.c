@@ -508,7 +508,7 @@ ips_ptl_mq_rndv(struct ips_proto *proto, psm2_mq_req_t req,
 	}
 #endif
 
-	PSM_LOG_EPM_COND(len > proto->mq->hfi_thresh_rv && proto->protoexp,OPCODE_LONG_RTS,PSM_LOG_EPM_TX,proto->ep->epid, req->rts_peer->epid,
+	PSM2_LOG_EPM_COND(len > proto->mq->hfi_thresh_rv && proto->protoexp,OPCODE_LONG_RTS,PSM2_LOG_EPM_TX,proto->ep->epid, req->rts_peer->epid,
 			    "ips_scb_hdrdata(scb).u32w0: %d",ips_scb_hdrdata(scb).u32w0);
 
 	if ((err = ips_mq_send_envelope(proto, flow, scb, PSMI_TRUE)))
@@ -993,7 +993,7 @@ ips_proto_mq_push_cts_req(struct ips_proto *proto, psm2_mq_req_t req)
 	args[1].u32w1 = req->recv_msglen;
 	args[1].u32w0 = req->rts_reqidx_peer;
 
-	PSM_LOG_EPM(OPCODE_LONG_CTS,PSM_LOG_EPM_TX, proto->ep->epid,
+	PSM2_LOG_EPM(OPCODE_LONG_CTS,PSM2_LOG_EPM_TX, proto->ep->epid,
 		    flow->ipsaddr->epaddr.epid ,"req->rts_reqidx_peer: %d",
 		    req->rts_reqidx_peer);
 
@@ -1176,7 +1176,7 @@ ips_proto_mq_handle_cts(struct ips_recvhdrq_event *rcv_ev)
 		ips_tid_session_list *payload =
 			ips_recvhdrq_event_payload(rcv_ev);
 		psmi_assert(paylen == 0 || payload);
-		PSM_LOG_EPM(OPCODE_LONG_CTS,PSM_LOG_EPM_RX,rcv_ev->ipsaddr->epaddr.epid,
+		PSM2_LOG_EPM(OPCODE_LONG_CTS,PSM2_LOG_EPM_RX,rcv_ev->ipsaddr->epaddr.epid,
 			    mq->ep->epid,"p_hdr->data[1].u32w0 %d",
 			    p_hdr->data[1].u32w0);
 		proto->epaddr_stats.tids_grant_recv++;
@@ -1310,7 +1310,7 @@ ips_proto_mq_handle_rts(struct ips_recvhdrq_event *rcv_ev)
 	req->rts_reqidx_peer = p_hdr->data[1].u32w0;
 	if (req->send_msglen > mq->hfi_thresh_rv)
 	{
-		PSM_LOG_EPM(OPCODE_LONG_RTS,PSM_LOG_EPM_RX,req->rts_peer->epid,mq->ep->epid,
+		PSM2_LOG_EPM(OPCODE_LONG_RTS,PSM2_LOG_EPM_RX,req->rts_peer->epid,mq->ep->epid,
 			    "req->rts_reqidx_peer: %d",req->rts_reqidx_peer);
 	}
 	if (p_hdr->flags & IPS_SEND_FLAG_BLOCKING)

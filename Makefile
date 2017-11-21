@@ -177,29 +177,34 @@ endif
 export 	LIBPSM2_COMPAT_CONF_DIR
 
 # The desired version number comes from the most recent tag starting with "v"
-ifeq (true, $(shell git rev-parse --is-inside-work-tree))
+ifeq (true, $(shell git rev-parse --is-inside-work-tree 2>/dev/null))
 ISGIT := 1 # Cache the result for later
 # Note, we don't define ISGIT if we are not in a git folder
 VERSION := $(shell git describe --tags --abbrev=0 --match='psm-v*' | sed -e 's/^psm-v//' -e 's/-/_/')
 else
+ISGIT := 0
 VERSION := version
 endif
 
 # If we have a file called 'rpm_release_extension' (as on github),
 # we take the release extension number from this file
-RELEASE_EXT := $(shell if [ -e rpm_release_extension ] ; then cat rpm_release_extension; fi)
-CURRENTSHA := $(shell if [ $(ISGIT) -a -f rpm_release_extension ] ; then git log --pretty=format:'%h' -n 1; fi)
-RPMEXTHASH := $(shell if [ $(ISGIT) -a -f rpm_release_extension ] ; then git log --pretty=format:'%h' -n 1 rpm_release_extension; fi)
-
-# On github, the last commit for each release should be the one to bump up
-# the release extension number in 'rpm_release_extension'. Further commits
-# are counted here and appended to the final rpm name to distinguish commits
-# present only on github
-NCOMMITS := $(shell if [ $(ISGIT) -a -f rpm_release_extension ] ; then git log --children $(RPMEXTHASH)..$(CURRENTSHA) . --pretty=oneline | wc -l; fi)
+RELEASE_EXT := $(shell if [ -e rpm_release_extension ] ;\
+                       then cat rpm_release_extension; fi)
+CURRENTSHA := $(shell if [ $(ISGIT) = 1 -a -f rpm_release_extension ] ;\
+                      then git log --pretty=format:'%h' -n 1; fi)
+RPMEXTHASH := $(shell if [ $(ISGIT) = 1 -a -f rpm_release_extension ] ;\
+                      then git log --pretty=format:'%h' -n 1 rpm_release_extension; fi)
 
 # This logic should kick-in only on github
 ifdef RELEASE_EXT
 ifneq ($(CURRENTSHA), $(RPMEXTHASH))
+# On github, the last commit for each release should be the one to bump up
+# the release extension number in 'rpm_release_extension'. Further commits
+# are counted here and appended to the final rpm name to distinguish commits
+# present only on github
+NCOMMITS := $(shell if [ $(ISGIT) = 1 -a -f rpm_release_extension ] ;\
+                    then git log --children $(RPMEXTHASH)..$(CURRENTSHA) \
+                    --pretty=oneline . | wc -l; fi)
 RELEASE := $(RELEASE_EXT)_$(NCOMMITS)
 endif
 endif
@@ -209,11 +214,11 @@ endif
 ifndef RELEASE
 RELTAG := "psm-v$(VERSION)"
 RELEASE := $(shell if [ -f rpm_release_extension ]; then cat rpm_release_extension;\
-		   elif [ $ISGIT ] ; then git rev-list $(RELTAG)..HEAD -- . | wc -l; \
+		   elif [ $(ISGIT) = 1 ] ; then git rev-list $(RELTAG)..HEAD -- . | wc -l; \
 		   else echo "release" ; fi)
 endif
 
-DIST_SHA := ${shell if [ $(ISGIT) ] ; then git log -n1 --pretty=format:%H .; \
+DIST_SHA := ${shell if [ $(ISGIT) = 1 ] ; then git log -n1 --pretty=format:%H .; \
 		else echo DIST_SHA ; fi}
 
 # Concatenated version and release
@@ -223,7 +228,7 @@ else
 VERSION_RELEASE := ${VERSION_RELEASE_OVERRIDE}
 endif
 
-LDLIBS := -lrt -lpthread -ldl -lnuma ${EXTRA_LIBS}
+LDLIBS := -lrt -ldl -lnuma ${EXTRA_LIBS} -pthread
 
 PKG_CONFIG ?= pkg-config
 
@@ -404,7 +409,7 @@ dist: distclean
 		mkdir -p ${OUTDIR}/${DIST}/$$dir; \
 		[ ! -d $$x ] && cp $$x ${OUTDIR}/${DIST}/$$dir; \
 	done
-	if [ $(ISGIT) ] ; then git log -n1 --pretty=format:%H . > ${OUTDIR}/${DIST}/COMMIT ; fi
+	if [ $(ISGIT) = 1 ] ; then git log -n1 --pretty=format:%H . > ${OUTDIR}/${DIST}/COMMIT ; fi
 	echo ${RELEASE} > ${OUTDIR}/${DIST}/rpm_release_extension
 	cd ${OUTDIR}; tar czvf ${DIST}.tar.gz ${DIST}
 	@echo "${DIST}.tar.gz is located in ${OUTDIR}/${DIST}.tar.gz"
