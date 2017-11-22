@@ -132,7 +132,7 @@ __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epi
 			if (psmi_epid_version(array_of_epid[j]) >
 						 PSMI_EPID_VERSION) {
 					psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
-					  " Unkown version of EPID - %"PRIu64" \n"
+					  " Unknown version of EPID - %"PRIu64" \n"
 					  "Please upgrade PSM2 or set PSM2_ADDR_FMT=1 in the environment to force EPID version 1 \n",
 					  psmi_epid_version(array_of_epid[j]));
 			}
