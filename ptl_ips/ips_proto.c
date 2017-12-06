@@ -1097,6 +1097,10 @@ ips_proto_timer_ctrlq_callback(struct psmi_timer *timer, uint64_t t_cyc_expire)
 	while (ctrlq->ctrlq_cqe[ctrlq->ctrlq_tail].msg_queue_mask) {
 		cqe = &ctrlq->ctrlq_cqe[ctrlq->ctrlq_tail];
 
+		/* When PSM_PERF is enabled, the following line causes the
+		   PMU to start a stop watch to measure instruction cycles of the
+		   TX speedpath of PSM.  The stop watch is stopped below. */
+		GENERIC_PERF_BEGIN(PSM_TX_SPEEDPATH_CTR);
 		if (cqe->msg_scb.flow->transfer == PSM_TRANSFER_PIO) {
 			err = ips_spio_transfer_frame(proto,
 				cqe->msg_scb.flow, &cqe->msg_scb.pbc,
@@ -1112,6 +1116,10 @@ ips_proto_timer_ctrlq_callback(struct psmi_timer *timer, uint64_t t_cyc_expire)
 				cqe->msg_scb.cksum, 0,
 				have_cksum, cqe->msg_scb.cksum[0]);
 		}
+		/* When PSM_PERF is enabled, the following line causes the
+		   PMU to stop a stop watch to measure instruction cycles of the
+		   TX speedpath of PSM.  The stop watch was started above. */
+		GENERIC_PERF_END(PSM_TX_SPEEDPATH_CTR);
 
 		if (err == PSM2_OK) {
 			ips_proto_epaddr_stats_set(proto, cqe->message_type);
@@ -1197,6 +1205,10 @@ ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 
 	switch (flow->transfer) {
 	case PSM_TRANSFER_PIO:
+		/* When PSM_PERF is enabled, the following line causes the
+		   PMU to start a stop watch to measure instruction cycles of the
+		   TX speedpath of PSM.  The stop watch is stopped below. */
+		GENERIC_PERF_BEGIN(PSM_TX_SPEEDPATH_CTR);
 		err = ips_spio_transfer_frame(proto, flow,
 			     &ctrlscb->pbc, payload, paylen,
 			     PSMI_TRUE, have_cksum, ctrlscb->cksum[0]
@@ -1204,11 +1216,23 @@ ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 			     , 0
 #endif
 			     );
+		/* When PSM_PERF is enabled, the following line causes the
+		   PMU to stop a stop watch to measure instruction cycles of the
+		   TX speedpath of PSM.  The stop watch was started above. */
+		GENERIC_PERF_END(PSM_TX_SPEEDPATH_CTR);
 		break;
 	case PSM_TRANSFER_DMA:
+		/* When PSM_PERF is enabled, the following line causes the
+		   PMU to start a stop watch to measure instruction cycles of the
+		   TX speedpath of PSM.  The stop watch is stopped below. */
+		GENERIC_PERF_BEGIN(PSM_TX_SPEEDPATH_CTR);
 		err = ips_dma_transfer_frame(proto, flow,
 			     ctrlscb, payload, paylen,
 			     have_cksum, ctrlscb->cksum[0]);
+		/* When PSM_PERF is enabled, the following line causes the
+		   PMU to stop a stop watch to measure instruction cycles of the
+		   TX speedpath of PSM.  The stop watch was started above. */
+		GENERIC_PERF_END(PSM_TX_SPEEDPATH_CTR);
 		break;
 	default:
 		err = PSM2_INTERNAL_ERR;
@@ -1347,6 +1371,10 @@ ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed)
 		scb = SLIST_FIRST(scb_pend);
 		psmi_assert(scb->nfrag == 1);
 
+		/* When PSM_PERF is enabled, the following line causes the
+		   PMU to start a stop watch to measure instruction cycles of the
+		   TX speedpath of PSM.  The stop watch is stopped below. */
+		GENERIC_PERF_BEGIN(PSM_TX_SPEEDPATH_CTR);
 		if ((err = ips_spio_transfer_frame(proto, flow, &scb->pbc,
 						   ips_scb_buffer(scb),
 						   scb->payload_size,
@@ -1359,6 +1387,10 @@ ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed)
 						   , IS_TRANSFER_BUF_GPU_MEM(scb)
 #endif
 						)) == PSM2_OK) {
+			/* When PSM_PERF is enabled, the following line causes the
+			   PMU to stop a stop watch to measure instruction cycles of the
+			   TX speedpath of PSM.  The stop watch was started above. */
+			GENERIC_PERF_END(PSM_TX_SPEEDPATH_CTR);
 			t_cyc = get_cycles();
 			scb->flags &= ~IPS_SEND_FLAG_PENDING;
 			scb->ack_timeout = proto->epinfo.ep_timeout_ack;
@@ -1373,7 +1405,13 @@ ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed)
 #endif
 
 		} else
+		{
+			/* When PSM_PERF is enabled, the following line causes the
+			   PMU to stop a stop watch to measure instruction cycles of the
+			   TX speedpath of PSM.  The stop watch was started above. */
+			GENERIC_PERF_END(PSM_TX_SPEEDPATH_CTR);
 			break;
+		}
 	}
 
 	/* If out of flow credits re-schedule send timer */

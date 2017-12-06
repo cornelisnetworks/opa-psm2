@@ -73,7 +73,8 @@ Obsoletes: hfi1-psm < 1.0.0
 %package -n @RPM_NAME@@RPM_NAME_BASEEXT@
 %endif
 Summary: Intel PSM2 Libraries
-Provides: @RPM_NAME@
+Provides: @RPM_NAME@ = %{version}-%{release}
+Provides: @RPM_NAME@%{_isa} = %{version}-%{release}
 %if 0%{?suse_version}
 BuildRequires: libnuma-devel
 Requires: libnuma1
@@ -155,6 +156,7 @@ make %{?_smp_mflags}
 
 %files -n @RPM_NAME@-devel
 %{_libdir}/@TARGLIB@.so
+%{_libdir}/@TARGLIB@.a
 %{_includedir}/psm2.h
 %{_includedir}/psm2_mq.h
 %{_includedir}/psm2_am.h

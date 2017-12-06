@@ -410,7 +410,8 @@ ips_am_run_handler(const struct ips_message_header *p_hdr,
 {
 	struct ips_am_token token;
 	int nargs = p_hdr->amhdr_nargs;
-	psm2_am_handler_fn_t hfn;
+	int ret;
+	struct psm2_ep_am_handle_entry *hentry;
 	psm2_amarg_t *args = (psm2_amarg_t *)p_hdr->data;
 
 	token.tok.flags = p_hdr->flags;
@@ -449,10 +450,23 @@ ips_am_run_handler(const struct ips_message_header *p_hdr,
 		paylen -= p_hdr->amhdr_len;
 	}
 
-	hfn = psm_am_get_handler_function(proto_am->proto->ep,
+	hentry = psm_am_get_handler_function(proto_am->proto->ep,
 			p_hdr->amhdr_hidx);
 
-	int ret = hfn(&token, args, nargs, payload, paylen);
+	/* Note a guard here for hentry != NULL is not needed because at
+	 * initialization, a psmi_assert_always() assure the entry will be
+	 * non-NULL. */
+
+	if (likely(hentry->version == PSM2_AM_HANDLER_V2)) {
+		psm2_am_handler_2_fn_t hfn2 =
+				(psm2_am_handler_2_fn_t)hentry->hfn;
+		ret = hfn2(&token, args, nargs, payload, paylen, hentry->hctx);
+	} else {
+		psm2_am_handler_fn_t hfn1 =
+				(psm2_am_handler_fn_t)hentry->hfn;
+		ret = hfn1(&token, args, nargs, payload, paylen);
+	}
+
 	return ret;
 }
 

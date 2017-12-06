@@ -334,9 +334,10 @@ psm2_mq_init(psm2_ep_t ep, uint64_t tag_order_mask,
 psm2_error_t
 psm2_mq_finalize(psm2_mq_t mq);
 
-#define PSM2_MQ_TAG_ELEMENTS 3
+#define PSM2_MQ_TAG_ELEMENTS 4
 	/**< Represents the number of 32-bit tag elements in the psm2_mq_tag_t
-	 *   type. */
+	 *   type plus one extra element to keep alignment and padding
+	 *   as 16 bytes.  */
 
 /** @struct psm2_mq_tag
  ** @brief MQ Message tag
@@ -356,7 +357,11 @@ typedef
 //struct psm2_mq_tag {
 union psm2_mq_tag {
 //    union {
-		uint32_t tag[PSM2_MQ_TAG_ELEMENTS] __attribute__ ((aligned(16)));
+		uint32_t tag[PSM2_MQ_TAG_ELEMENTS]; /* No longer specifying
+						     * alignment as it makes
+						     * code break with newer
+						     * compilers. */
+
             /**< 3 x 32bit array representation of @ref psm2_mq_tag */
 		struct {
 			uint32_t tag0; /**< 1 of 3 uint32_t tag values */
@@ -403,7 +408,11 @@ struct psm2_mq_status2 {
 	/** Remote peer's epaddr */
 	psm2_epaddr_t msg_peer;
 	/** Sender's original message tag */
-	psm2_mq_tag_t msg_tag;
+	psm2_mq_tag_t msg_tag __attribute__ ((aligned(16)));/* Alignment added
+							     * to preserve the
+							     * layout as is
+							     * expected by
+							     * existent code */
 	/** Sender's original message length */
 	uint32_t msg_length;
 	/** Actual number of bytes transfered (receiver only) */
@@ -1080,6 +1089,45 @@ psm2_mq_ipeek(psm2_mq_t mq, psm2_mq_req_t *req, psm2_mq_status_t *status);
  */
 psm2_error_t
 psm2_mq_ipeek2(psm2_mq_t mq, psm2_mq_req_t *req, psm2_mq_status2_t *status);
+
+/** @brief Check and dequeue the first request entry from the completed queue.
+ *
+ * Function to atomically check and dequeue the first entry from the completed
+ * queue. It must be paired with function psm2_mq_req_free, which returns the
+ * request to PSM2 library.
+ *
+ * @param[in] mq Matched Queue Handle
+ * @param[out] req PSM MQ Request handle, to be used for receiving the matched
+ *                  message.
+ *
+ * The following error codes are returned.
+ *
+ * @retval PSM2_OK The dequeue operation was successful and @c req is updated
+ *                 with a request ready for completion.
+ *
+ * @retval PSM2_MQ_NO_COMPLETIONS The dequeue operation was not successful,
+ *                            meaning that there are no further requests ready
+ *                            for completion. The contents of @c req remain
+ *                            unchanged.
+ */
+psm2_error_t
+psm2_mq_ipeek_dequeue(psm2_mq_t mq, psm2_mq_req_t *req);
+
+/** @brief Return the request to PSM2 library.
+ *
+ * Function returns the request previously obtained via psm2_mq_ipeek_dequeue
+ * to the PSM2 library.
+ *
+ * @param[in] mq Matched Queue Handle
+ * @param[in] req PSM MQ Request handle to be returned to PSM2 library.
+              If @p req is NULL, no operation is performed.
+ *
+ * The following error codes are returned.
+ *
+ * @retval PSM2_OK Return of an object to PSM2 library pool was successful.
+ */
+psm2_error_t
+psm2_mq_req_free(psm2_mq_t mq, psm2_mq_req_t req);
 
 /** @brief Wait until a non-blocking request completes
  *

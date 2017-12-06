@@ -223,14 +223,27 @@ self_am_short_request(psm2_epaddr_t epaddr,
 		      psm2_am_completion_fn_t completion_fn,
 		      void *completion_ctxt)
 {
-	psm2_am_handler_fn_t hfn;
+	struct psm2_ep_am_handle_entry *hentry;
 	psm2_ep_t ep = epaddr->ptlctl->ptl->ep;
 	struct psmi_am_token tok;
 
 	tok.epaddr_incoming = epaddr;
 
-	hfn = psm_am_get_handler_function(ep, handler);
-	hfn(&tok, args, nargs, src, len);
+	hentry = psm_am_get_handler_function(ep, handler);
+
+	/* Note a guard here for hentry != NULL is not needed because at
+	 * initialization, a psmi_assert_always() assure the entry will be
+	 * non-NULL. */
+
+	if (likely(hentry->version == PSM2_AM_HANDLER_V2)) {
+		psm2_am_handler_2_fn_t hfn2 =
+				(psm2_am_handler_2_fn_t)hentry->hfn;
+		hfn2(&tok, args, nargs, src, len, hentry->hctx);
+	} else {
+		psm2_am_handler_fn_t hfn1 =
+				(psm2_am_handler_fn_t)hentry->hfn;
+		hfn1(&tok, args, nargs, src, len);
+	}
 
 	if (completion_fn) {
 		completion_fn(completion_ctxt);
@@ -246,12 +259,25 @@ self_am_short_reply(psm2_am_token_t token,
 		    void *src, size_t len, int flags,
 		    psm2_am_completion_fn_t completion_fn, void *completion_ctxt)
 {
-	psm2_am_handler_fn_t hfn;
+	struct psm2_ep_am_handle_entry *hentry;
 	struct psmi_am_token *tok = token;
 	psm2_ep_t ep = tok->epaddr_incoming->ptlctl->ptl->ep;
 
-	hfn = psm_am_get_handler_function(ep, handler);
-	hfn(token, args, nargs, src, len);
+	hentry = psm_am_get_handler_function(ep, handler);
+
+	/* Note a guard here for hentry != NULL is not needed because at
+	 * initialization, a psmi_assert_always() assure the entry will be
+	 * non-NULL. */
+
+	if (likely(hentry->version == PSM2_AM_HANDLER_V2)) {
+		psm2_am_handler_2_fn_t hfn2 =
+				(psm2_am_handler_2_fn_t)hentry->hfn;
+		hfn2(token, args, nargs, src, len, hentry->hctx);
+	} else {
+		psm2_am_handler_fn_t hfn1 =
+				(psm2_am_handler_fn_t)hentry->hfn;
+		hfn1(token, args, nargs, src, len);
+	}
 
 	if (completion_fn) {
 		completion_fn(completion_ctxt);

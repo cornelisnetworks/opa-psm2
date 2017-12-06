@@ -154,60 +154,34 @@ int psmi_cuda_initialize()
 		goto fail;
 	}
 
+	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuCtxGetCurrent);
+	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuCtxSetCurrent);
+	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuPointerGetAttribute);
+	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuPointerSetAttribute);
 
-	psmi_cuCtxGetCurrent = dlsym(psmi_cuda_lib, "cuCtxGetCurrent");
-	psmi_cuCtxSetCurrent = dlsym(psmi_cuda_lib, "cuCtxSetCurrent");
-	psmi_cuPointerGetAttribute = dlsym(psmi_cuda_lib, "cuPointerGetAttribute");
-	psmi_cuPointerSetAttribute = dlsym(psmi_cuda_lib, "cuPointerSetAttribute");
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaGetDeviceCount);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaGetDeviceProperties);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaGetDevice);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaSetDevice);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaStreamCreate);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaDeviceSynchronize);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaStreamSynchronize);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaEventCreate);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaEventDestroy);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaEventQuery);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaEventRecord);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaEventSynchronize);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaMalloc);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaHostAlloc);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaFreeHost);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaMemcpy);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaMemcpyAsync);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaIpcGetMemHandle);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaIpcOpenMemHandle);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaIpcCloseMemHandle);
 
-	psmi_cudaGetDeviceCount = dlsym(psmi_cudart_lib, "cudaGetDeviceCount");
-	psmi_cudaGetDeviceProperties = dlsym(psmi_cudart_lib, "cudaGetDeviceProperties");
-	psmi_cudaGetDevice = dlsym(psmi_cudart_lib, "cudaGetDevice");
-	psmi_cudaSetDevice = dlsym(psmi_cudart_lib, "cudaSetDevice");
-	psmi_cudaStreamCreate = dlsym(psmi_cudart_lib, "cudaStreamCreate");
-	psmi_cudaDeviceSynchronize = dlsym(psmi_cudart_lib, "cudaDeviceSynchronize");
-	psmi_cudaStreamSynchronize = dlsym(psmi_cudart_lib, "cudaStreamSynchronize");
-	psmi_cudaEventCreate = dlsym(psmi_cudart_lib, "cudaEventCreate");
-	psmi_cudaEventDestroy = dlsym(psmi_cudart_lib, "cudaEventDestroy");
-	psmi_cudaEventQuery = dlsym(psmi_cudart_lib, "cudaEventQuery");
-	psmi_cudaEventRecord = dlsym(psmi_cudart_lib, "cudaEventRecord");
-	psmi_cudaEventSynchronize = dlsym(psmi_cudart_lib, "cudaEventSynchronize");
-	psmi_cudaMalloc = dlsym(psmi_cudart_lib, "cudaMalloc");
-	psmi_cudaHostAlloc = dlsym(psmi_cudart_lib, "cudaHostAlloc");
-	psmi_cudaFreeHost = dlsym(psmi_cudart_lib, "cudaFreeHost");
-	psmi_cudaMemcpy = dlsym(psmi_cudart_lib, "cudaMemcpy");
-	psmi_cudaMemcpyAsync = dlsym(psmi_cudart_lib, "cudaMemcpyAsync");
-
-	psmi_cudaIpcGetMemHandle = dlsym(psmi_cudart_lib, "cudaIpcGetMemHandle");
-	psmi_cudaIpcOpenMemHandle = dlsym(psmi_cudart_lib, "cudaIpcOpenMemHandle");
-	psmi_cudaIpcCloseMemHandle = dlsym(psmi_cudart_lib, "cudaIpcCloseMemHandle");
-
-	if (!psmi_cuCtxGetCurrent || !psmi_cuCtxSetCurrent ||
-	    !psmi_cuPointerGetAttribute || !psmi_cuPointerSetAttribute ||
-	    !psmi_cudaGetDeviceCount || !psmi_cudaGetDeviceProperties ||
-	    !psmi_cudaGetDevice || !psmi_cudaSetDevice ||
-	    !psmi_cudaStreamCreate ||
-	    !psmi_cudaDeviceSynchronize || !psmi_cudaStreamSynchronize ||
-	    !psmi_cudaEventCreate || !psmi_cudaEventDestroy ||
-	    !psmi_cudaEventQuery || !psmi_cudaEventRecord ||
-	    !psmi_cudaEventSynchronize ||
-	    !psmi_cudaMalloc || !psmi_cudaHostAlloc || !psmi_cudaFreeHost ||
-	    !psmi_cudaMemcpy || !psmi_cudaMemcpyAsync || !psmi_cudaIpcGetMemHandle ||
-	    !psmi_cudaIpcOpenMemHandle || !psmi_cudaIpcCloseMemHandle) {
-		_HFI_ERROR
-			("Unable to resolve symbols in CUDA libraries.\n");
-		goto fail;
-	}
-
-	if (cuda_runtime_version > 7000) {
-		psmi_cudaStreamCreateWithFlags = dlsym(psmi_cudart_lib,
-						       "cudaStreamCreateWithFlags");
-		if (!psmi_cudaStreamCreateWithFlags) {
-			_HFI_ERROR
-				("Unable to resolve symbols in CUDA libraries.\n");
-			goto fail;
-		}
-	}
+	if (cuda_runtime_version > 7000)
+		PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaStreamCreateWithFlags);
 
 	/* Check if all devices support Unified Virtual Addressing. */
 	PSMI_CUDA_CALL(cudaGetDeviceCount, &num_devices);
@@ -243,11 +217,13 @@ psm2_error_t __psm2_init(int *major, int *minor)
 	psmi_log_initialize();
 
 	PSM2_LOG_MSG("entering");
-#ifdef RDPMC_PERF_FRAMEWORK
-	psmi_rdpmc_perf_framework_init();
-#endif /* RDPMC_PERF_FRAMEWORK */
 
+	/* When PSM_PERF is enabled, the following code causes the
+	   PMU to be programmed to measure instruction cycles of the
+	   TX/RX speedpaths of PSM. */
 	GENERIC_PERF_INIT();
+	GENERIC_PERF_SET_SLOT_NAME(PSM_TX_SPEEDPATH_CTR, "TX");
+	GENERIC_PERF_SET_SLOT_NAME(PSM_RX_SPEEDPATH_CTR, "RX");
 
 	if (psmi_isinit == PSMI_INITIALIZED)
 		goto update;
@@ -457,6 +433,9 @@ psm2_error_t __psm2_finalize(void)
 
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
 
+	/* When PSM_PERF is enabled, the following line causes the
+	   instruction cycles gathered in the current run to be dumped
+	   to stderr. */
 	GENERIC_PERF_DUMP(stderr);
 	ep = psmi_opened_endpoint;
 	while (ep != NULL) {

@@ -161,7 +161,7 @@ struct psm2_amarg {
 
 /** @brief The AM handler function type
  *
- * psm2_am_handler_fm_t is the datatype for an AM handler. PSM2 AM will call-back
+ * psm2_am_handler_fn_t is the datatype for an AM handler. PSM2 AM will call-back
  * into an AM handler using this function prototype. The parameters and result
  * of these handler functions are described here.
  *
@@ -182,6 +182,32 @@ typedef
 int (*psm2_am_handler_fn_t) (psm2_am_token_t token,
 			    psm2_amarg_t *args, int nargs,
 			    void *src, uint32_t len);
+
+/** @brief The AM handler function type with caller context
+ *
+ * psm2_am_handler_2_fn_t is the datatype for an AM handler that
+ * includes a user context. PSM2 AM will call-back into an AM handler using
+ * this function prototype. The parameters and result
+ * of these handler functions are described here.
+ *
+ * @param[in] token This is an opaque token value passed into a handler.
+ *                  A request handler may send at most one reply back to the
+ *                  original requestor, and must pass this value as the token
+ *                  parameter to the psm2_am_reply_short() function. A reply
+ *                  handler is also passed a token value, but must not attempt
+ *                  to reply.
+ * @param[in] args A pointer to the arguments provided to this handler.
+ * @param[in] nargs The number of arguments.
+ * @param[in] src A pointer to the data payload provided to this handler.
+ * @param[in] len The length of the data payload in bytes.
+ * @param[in] hctx The user context pointer provided at handler registration.
+ *
+ * @returns 0 The handler should always return a result of 0.
+ */
+typedef
+int (*psm2_am_handler_2_fn_t) (psm2_am_token_t token,
+			    psm2_amarg_t *args, int nargs,
+			    void *src, uint32_t len, void *hctx);
 
 /** @brief Type for a completion call-back handler.
  *
@@ -224,6 +250,35 @@ void (*psm2_am_completion_fn_t) (void *context);
 psm2_error_t psm2_am_register_handlers(psm2_ep_t ep,
 				     const psm2_am_handler_fn_t *
 				     handlers, int num_handlers,
+				     int *handlers_idx);
+
+/** @brief Register AM call-back handlers at the specified end-point.
+ *
+ * This function is used to register an array of handlers, and may be called
+ * multiple times to register additonal handlers. The maximum number of
+ * handlers that can be registered is limited to the max_handlers value
+ * returned by psm2_am_get_parameters(). Handlers are associated with a PSM
+ * end-point. The handlers are allocated index numbers in the the handler table
+ * for that end-point.  The allocated index for the handler function in
+ * handlers[i] is returned in handlers_idx[i] for i in (0, num_handlers]. These
+ * handler index values are used in the psm2_am_request_short() and
+ * psm2_am_reply_short() functions.
+ *
+ * @param[in] ep End-point value
+ * @param[in] handlers Array of handler functions
+ * @param[in] num_handlers Number of handlers (sizes the handlers and
+ *                         handlers_idx arrays)
+ * @param[in] hctx Array of void* pointers to a user contexts for identifying the
+ *                         target ep that registered these handlers.
+ * @param[out] handlers_idx Used to return handler index mapping table
+ *
+ * @returns PSM2_OK Indicates success
+ * @returns PSM2_EP_NO_RESOURCES Insufficient slots in the AM handler table
+ */
+psm2_error_t psm2_am_register_handlers_2(psm2_ep_t ep,
+				     const psm2_am_handler_2_fn_t *
+				     handlers, int num_handlers,
+				     void **hctx,
 				     int *handlers_idx);
 
 /** @brief Generate an AM request.

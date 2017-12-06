@@ -259,8 +259,9 @@ union psmi_envvar_val {
 	unsigned long long e_ulonglong;
 };
 
-#define PSMI_ENVVAR_LEVEL_USER	    1
-#define PSMI_ENVVAR_LEVEL_HIDDEN    2
+#define PSMI_ENVVAR_LEVEL_USER	         1
+#define PSMI_ENVVAR_LEVEL_HIDDEN         2
+#define PSMI_ENVVAR_LEVEL_NEVER_PRINT    4
 
 #define PSMI_ENVVAR_TYPE_YESNO		0
 #define PSMI_ENVVAR_TYPE_STR		1

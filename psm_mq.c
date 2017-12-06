@@ -1166,6 +1166,38 @@ __psm2_mq_ipeek(psm2_mq_t mq, psm2_mq_req_t *oreq, psm2_mq_status_t *status)
 }
 PSMI_API_DECL(psm2_mq_ipeek)
 
+psm2_error_t __psm2_mq_ipeek_dequeue(psm2_mq_t mq, psm2_mq_req_t *oreq)
+{
+	psm2_mq_req_t req;
+
+	PSMI_ASSERT_INITIALIZED();
+	PSMI_LOCK(mq->progress_lock);
+	if (mq->completed_q.first == NULL)
+		psmi_poll_internal(mq->ep, 1);
+	if ((req = mq->completed_q.first) == NULL) {
+		PSMI_UNLOCK(mq->progress_lock);
+		return PSM2_MQ_NO_COMPLETIONS;
+	}
+	mq_qq_remove(&mq->completed_q, req);
+	PSMI_UNLOCK(mq->progress_lock);
+	*oreq = req;
+	return PSM2_OK;
+}
+PSMI_API_DECL(psm2_mq_ipeek_dequeue)
+
+psm2_error_t __psm2_mq_req_free(psm2_mq_t mq, psm2_mq_req_t req)
+{
+	PSMI_ASSERT_INITIALIZED();
+	if (req == NULL)
+		return PSM2_OK;
+	PSMI_LOCK(mq->progress_lock);
+	psmi_mq_req_free(req);
+	PSMI_UNLOCK(mq->progress_lock);
+
+	return PSM2_OK;
+}
+PSMI_API_DECL(psm2_mq_req_free)
+
 static
 psm2_error_t psmi_mqopt_ctl(psm2_mq_t mq, uint32_t key, void *value, int get)
 {

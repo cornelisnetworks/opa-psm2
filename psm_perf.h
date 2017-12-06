@@ -51,21 +51,19 @@
 
 */
 
+#define PSM_TX_SPEEDPATH_CTR 0
+#define PSM_RX_SPEEDPATH_CTR 1
+
 #ifdef RDPMC_PERF_FRAMEWORK
 
-#include <linux/perf_event.h>
-
 /* Configuration */
-
-#define RDPMC_PERF_DEFAULT_TYPE   (PERF_TYPE_HARDWARE)
-#define RDPMC_PERF_DEFAULT_CONFIG (PERF_COUNT_HW_CPU_CYCLES)
 
 #define RDPMC_PERF_MAX_SLOT_NUMBER (8)
 #define RDPMC_PERF_MAX_SLOT_NAME   (256)
 
 /* RDPMC infrastructure */
 
-extern struct rdpmc_ctx global_rdpmc_ctx;
+extern __thread struct rdpmc_ctx global_rdpmc_ctx;
 
 typedef unsigned long long u64;
 
@@ -75,10 +73,8 @@ extern u64 global_rdpmc_number[RDPMC_PERF_MAX_SLOT_NUMBER];
 
 extern char global_rdpmc_slot_name[RDPMC_PERF_MAX_SLOT_NUMBER][RDPMC_PERF_MAX_SLOT_NAME];
 
-extern unsigned int global_rdpmc_type;
-extern unsigned int global_rdpmc_config;
-
-extern void psmi_rdpmc_perf_framework_init();
+extern __thread unsigned int global_rdpmc_type;
+extern __thread unsigned int global_rdpmc_config;
 
 extern unsigned long long rdpmc_read(struct rdpmc_ctx *ctx);
 

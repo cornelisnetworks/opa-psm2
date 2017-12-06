@@ -61,7 +61,21 @@
 
 #define PSMI_AM_ARGS_DEFAULT psm2_am_token_t token,			\
 			     psm2_amarg_t *args, int nargs,		\
-			     void *src, uint32_t len
+			     void *src, uint32_t len,			\
+			     void *hctx
+
+enum psm2_am_handler_version
+{
+	PSM2_AM_HANDLER_V1 = 0,
+	PSM2_AM_HANDLER_V2,
+};
+
+struct psm2_ep_am_handle_entry
+{
+	void *hfn;
+	void *hctx;
+	enum psm2_am_handler_version version;
+};
 
 struct psmi_am_token {
 	psm2_epaddr_t epaddr_incoming;
@@ -77,14 +91,14 @@ struct psmi_am_token {
    various assertions reference these parameters for sanity checking. */
 extern struct psm2_am_parameters psmi_am_parameters;
 
-PSMI_ALWAYS_INLINE(psm2_am_handler_fn_t
+PSMI_ALWAYS_INLINE(struct psm2_ep_am_handle_entry *
 		   psm_am_get_handler_function(psm2_ep_t ep,
 					       psm2_handler_t handler_idx))
 {
 	int hidx = handler_idx & (PSMI_AM_NUM_HANDLERS - 1);
-	psm2_am_handler_fn_t fn = (psm2_am_handler_fn_t) ep->am_htable[hidx];
-	psmi_assert_always(fn != NULL);
-	return fn;
+	struct psm2_ep_am_handle_entry *hentry = &ep->am_htable[hidx];
+	psmi_assert_always(hentry != NULL);
+	return hentry;
 }
 
 /* PSM internal initialization */

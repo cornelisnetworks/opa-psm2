@@ -86,8 +86,9 @@ ASFLAGS += $(BASE_FLAGS)
 
 ifeq ($(PSM2_MOCK_TESTING),1)
 BASECFLAGS += -DPSM2_MOCK_TESTING=1
-# we skip the linker script for testing version, we want all symbols to be
-# reachable from outside the library
+unexport LINKER_SCRIPT
+# We skip the linker script for mock testing version, we want all symbols
+# to be reachable from outside the library
 else
 LINKER_SCRIPT := -Wl,--version-script $(LINKER_SCRIPT_FILE)
 endif
@@ -178,14 +179,10 @@ endif
 
 BASECFLAGS += -fpic -fPIC -D_GNU_SOURCE
 
-ifeq (${CCARCH},gcc)
-  BASECFLAGS += -funwind-tables
-endif
-
 ifneq (,${PSM_VALGRIND})
-  CFLAGS += -DPSM_VALGRIND
+  BASECFLAGS += -DPSM_VALGRIND
 else
-  CFLAGS += -DNVALGRIND
+  BASECFLAGS += -DNVALGRIND
 endif
 
 ASFLAGS += -g3 -fpic
@@ -193,18 +190,25 @@ ASFLAGS += -g3 -fpic
 BASECFLAGS += ${OPA_CFLAGS}
 
 ifeq (${CCARCH},icc)
-    BASECFLAGS += -O3 -g3 -fpic -fPIC -D_GNU_SOURCE -DPACK_STRUCT_STL=packed,
-    CFLAGS += $(BASECFLAGS)
+    BASECFLAGS += -fpic -fPIC -D_GNU_SOURCE -DPACK_STRUCT_STL=packed,
     LDFLAGS += -static-intel
 else
 	ifeq (${CCARCH},gcc)
-	    CFLAGS += $(BASECFLAGS) -Wno-strict-aliasing -Wformat-security
+	    BASECFLAGS += -funwind-tables -Wno-strict-aliasing -Wformat-security
 	else
-	    ifeq (${CCARCH},gcc4)
-		CFLAGS += $(BASECFLAGS)
-	    else
+	    ifneq (${CCARCH},gcc4)
 		$(error Unknown compiler arch "${CCARCH}")
 	    endif # gcc4
 	endif # gcc
 endif # icc
+
+# We run export here to ensure all the above setup is in the environment
+# for sub makes. However, we exclude this during clean and distclean
+# to avoid resolution of some variables that don't need to be resolved
+# and avoid unnecessary missing file warnings during cleanup.
+ifneq ($(MAKECMDGOALS), clean)
+ifneq ($(MAKECMDGOALS), distclean)
+export
+endif
+endif
 

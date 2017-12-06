@@ -401,12 +401,15 @@ static int psmi_getenv_is_verblevel(int printlevel)
 	return (printlevel <= psmi_getenv_verblevel);
 }
 
-#define GETENV_PRINTF(_level, _fmt, ...)			\
-	do {							\
-		int nlevel = _level;				\
-		if (psmi_getenv_is_verblevel(nlevel))		\
-		nlevel = 0;					\
-		_HFI_ENVDBG(nlevel, _fmt, ##__VA_ARGS__);	\
+#define GETENV_PRINTF(_level, _fmt, ...)				\
+	do {								\
+		if ((_level & PSMI_ENVVAR_LEVEL_NEVER_PRINT) == 0)	\
+		{							\
+			int nlevel = _level;				\
+			if (psmi_getenv_is_verblevel(nlevel))		\
+				nlevel = 0;				\
+			_HFI_ENVDBG(nlevel, _fmt, ##__VA_ARGS__);	\
+		}							\
 	} while (0)
 
 int
@@ -476,10 +479,14 @@ MOCKABLE(psmi_getenv)(const char *name, const char *descr, int level,
 			used_default = 1;
 		} else {
 			char *ep;
-			tval.e_int = (int)strtol(env, &ep, 0);
+			/* Avoid base 8 (octal) on purpose, so don't pass in 0 for radix */
+			tval.e_int = (int)strtol(env, &ep, 10);
 			if (ep == env) {
-				used_default = 1;
-				tval = defval;
+				tval.e_int = (int)strtol(env, &ep, 16);
+				if (ep == env) {
+					used_default = 1;
+					tval = defval;
+				}
 			}
 		}
 		_GETENV_PRINT(used_default, "%d", tval.e_int, defval.e_int);
@@ -492,10 +499,14 @@ MOCKABLE(psmi_getenv)(const char *name, const char *descr, int level,
 			used_default = 1;
 		} else {
 			char *ep;
-			tval.e_int = (unsigned int)strtoul(env, &ep, 0);
+			/* Avoid base 8 (octal) on purpose, so don't pass in 0 for radix */
+			tval.e_int = (unsigned int)strtoul(env, &ep, 10);
 			if (ep == env) {
-				used_default = 1;
-				tval = defval;
+				tval.e_int = (unsigned int)strtoul(env, &ep, 16);
+				if (ep == env) {
+					used_default = 1;
+					tval = defval;
+				}
 			}
 		}
 		if (type == PSMI_ENVVAR_TYPE_UINT_FLAGS)
@@ -512,10 +523,14 @@ MOCKABLE(psmi_getenv)(const char *name, const char *descr, int level,
 			used_default = 1;
 		} else {
 			char *ep;
-			tval.e_long = strtol(env, &ep, 0);
+			/* Avoid base 8 (octal) on purpose, so don't pass in 0 for radix */
+			tval.e_long = strtol(env, &ep, 10);
 			if (ep == env) {
-				used_default = 1;
-				tval = defval;
+				tval.e_long = strtol(env, &ep, 16);
+				if (ep == env) {
+					used_default = 1;
+					tval = defval;
+				}
 			}
 		}
 		_GETENV_PRINT(used_default, "%ld", tval.e_long, defval.e_long);
@@ -526,11 +541,16 @@ MOCKABLE(psmi_getenv)(const char *name, const char *descr, int level,
 			used_default = 1;
 		} else {
 			char *ep;
+		 	/* Avoid base 8 (octal) on purpose, so don't pass in 0 for radix */
 			tval.e_ulonglong =
-			    (unsigned long long)strtoull(env, &ep, 0);
+			    (unsigned long long)strtoull(env, &ep, 10);
 			if (ep == env) {
-				used_default = 1;
-				tval = defval;
+				tval.e_ulonglong =
+				    (unsigned long long)strtoull(env, &ep, 16);
+				if (ep == env) {
+					used_default = 1;
+					tval = defval;
+				}
 			}
 		}
 		_GETENV_PRINT(used_default, "%llu",
@@ -544,10 +564,14 @@ MOCKABLE(psmi_getenv)(const char *name, const char *descr, int level,
 			used_default = 1;
 		} else {
 			char *ep;
-			tval.e_ulong = (unsigned long)strtoul(env, &ep, 0);
+			/* Avoid base 8 (octal) on purpose, so don't pass in 0 for radix */
+			tval.e_ulong = (unsigned long)strtoul(env, &ep, 10);
 			if (ep == env) {
-				used_default = 1;
-				tval = defval;
+				tval.e_ulong = (unsigned long)strtoul(env, &ep, 16);
+				if (ep == env) {
+					used_default = 1;
+					tval = defval;
+				}
 			}
 		}
 		if (type == PSMI_ENVVAR_TYPE_ULONG_FLAGS)

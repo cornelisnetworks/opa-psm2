@@ -173,7 +173,7 @@ struct psm2_ep {
 	struct psm2_ep *mctxt_master;
 
 	/* Active Message handler table */
-	void **am_htable;
+	struct psm2_ep_am_handle_entry *am_htable;
 
 	uint64_t gid_hi;
 	uint64_t gid_lo;

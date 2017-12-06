@@ -515,8 +515,10 @@ psm2_error_t psmi_context_close(psmi_context_t *context)
 		/* only unmap the RTAIL if it was enabled in the first place */
 		if (cinfo->runtime_flags & HFI1_CAP_DMA_RTAIL) {
 			munmap((void*)PSMI_ALIGNDOWN(binfo->rcvhdrtail_base, __hfi_pg_sz),
-			       __hfi_pg_sz);
+				__hfi_pg_sz);
 		}
+		munmap((void*)PSMI_ALIGNDOWN(binfo->user_regbase, __hfi_pg_sz),
+			__hfi_pg_sz);
 		munmap((void*)PSMI_ALIGNDOWN(binfo->events_bufbase, __hfi_pg_sz),
 		       __hfi_pg_sz);
 		munmap((void*)PSMI_ALIGNDOWN(binfo->status_bufbase, __hfi_pg_sz),
@@ -669,12 +671,13 @@ psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
 		max_contexts = max(env_maxctxt.e_int, 1);		/* needs to be non-negative */
 		ask_contexts = min(max_contexts, avail_contexts);	/* needs to be available */
 	} else if (!psmi_getenv("PSM2_SHAREDCONTEXTS_MAX",
-			 "Maximum number of contexts for this PSM2 job",
-			 PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
-			 (union psmi_envvar_val)avail_contexts, &env_maxctxt)) {
+				"",  /* deprecated */
+				PSMI_ENVVAR_LEVEL_HIDDEN | PSMI_ENVVAR_LEVEL_NEVER_PRINT,
+				PSMI_ENVVAR_TYPE_INT,
+				(union psmi_envvar_val)avail_contexts, &env_maxctxt)) {
 
 		_HFI_INFO
-		    ("This env variable is deprecated. Please use PSM2_MAX_CONTEXTS_PER_JOB in future.\n");
+		    ("The PSM2_SHAREDCONTEXTS_MAX env variable is deprecated. Please use PSM2_MAX_CONTEXTS_PER_JOB in future.\n");
 
 		max_contexts = max(env_maxctxt.e_int, 1);		/* needs to be non-negative */
 		ask_contexts = min(max_contexts, avail_contexts);	/* needs to be available */
@@ -717,7 +720,7 @@ psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
 		if (contexts > ask_contexts) {
 			err = psmi_handle_error(NULL, PSM2_EP_NO_DEVICE,
 						"Incompatible settings for "
-						"(PSM2_SHAREDCONTEXTS_MAX / PSM2_MAX_CONTEXTS_PER_JOB) and PSM2_RANKS_PER_CONTEXT");
+						"PSM2_MAX_CONTEXTS_PER_JOB and PSM2_RANKS_PER_CONTEXT");
 			goto fail;
 		}
 		ask_contexts = contexts;

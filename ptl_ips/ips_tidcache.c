@@ -203,14 +203,21 @@ retry:
 			 * PSM frees tidcache enteries when the driver sends
 			 * EINVAL there by unpinning pages and freeing some
 			 * BAR1 space.*/
-		     || (PSMI_IS_CUDA_ENABLED && errno == EINVAL)
+		     || (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)start) && errno == EINVAL)
 #endif
 			) && NIDLE) {
 			uint64_t lengthEvicted = ips_tidcache_evict(tidc,length);
 
 			if (lengthEvicted >= length)
 				goto retry;
-		}
+		} else if (errno == EFAULT)
+                       psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+                                " Unhandled error in TID Update: %s\n", strerror(errno));
+#ifdef PSM_CUDA
+		else if (PSMI_IS_CUDA_ENABLED && errno == ENOTSUP)
+		       psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+                                " Nvidia driver apis mismatch: %s\n", strerror(errno));
+#endif
 
 		/* Unable to pin pages? retry later */
 		return PSM2_EP_DEVICE_FAILURE;

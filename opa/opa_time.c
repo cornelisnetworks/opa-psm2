@@ -272,6 +272,7 @@ static uint32_t hfi_timebase_from_cpuinfo(uint32_t old_pico_per_cycle)
 			goto fail;
 	}
 #endif
+
 	max_bet_new_old_pico = max(new_pico_per_cycle, old_pico_per_cycle);
 	min_bet_new_old_pico = min(new_pico_per_cycle, old_pico_per_cycle);
 	/* If there's no change (within a small range), just return the old one */

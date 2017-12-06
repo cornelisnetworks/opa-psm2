@@ -266,6 +266,7 @@ static int hfi_sysfs_unit_open_for_node(uint32_t unit, int flags)
 
 	snprintf(buf, sizeof(buf), "%s/hfi1_%u/device/numa_node",
 		 dirname(path_copy), unit);
+	free(path_copy);
 	fd = open(buf, flags);
 	saved_errno = errno;
 

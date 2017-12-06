@@ -231,7 +231,11 @@ struct psm2_mq_req {
 
 	/* Tag matching vars */
 	psm2_epaddr_t peer;
-	psm2_mq_tag_t tag;
+	psm2_mq_tag_t tag __attribute__ ((aligned(16)));/* Alignment added
+							 * to preserve the
+							 * layout as is
+							 * expected by
+							 * existent code */
 	psm2_mq_tag_t tagsel;	/* used for receives */
 
 	/* Some PTLs want to get notified when there's a test/wait event */
@@ -278,6 +282,8 @@ struct psm2_mq_req {
 	cudaEvent_t cuda_ipc_event;
 	uint8_t cuda_ipc_handle_attached;
 #endif
+
+	uint64_t user_reserved[4];
 
 	/* PTLs get to store their own per-request data.  MQ manages the allocation
 	 * by allocating psm2_mq_req so that ptl_req_data has enough space for all

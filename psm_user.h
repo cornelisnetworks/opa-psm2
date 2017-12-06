@@ -154,13 +154,13 @@ _psmi_get_epid_version()) {
 	return psmi_epid_ver;
 }
 
-#define PSMI_EPID_VERSION_SHM 			0
+#define PSMI_EPID_VERSION_SHM 				0
 #define PSMI_EPID_SHM_ONLY				1
 #define PSMI_EPID_IPS_SHM				0
 #define PSMI_EPID_VERSION 				_psmi_get_epid_version()
-#define PSMI_MAX_EPID_VERNO_SUPPORTED	2
-#define PSMI_MIN_EPID_VERNO_SUPPORTED	1
-#define PSMI_EPID_VERNO_DEFAULT			2
+#define PSMI_MAX_EPID_VERNO_SUPPORTED			2
+#define PSMI_MIN_EPID_VERNO_SUPPORTED			1
+#define PSMI_EPID_VERNO_DEFAULT				2
 #define PSMI_EPID_V1					1
 #define PSMI_EPID_V2					2
 
@@ -240,18 +240,18 @@ _psmi_mutex_unlock_inner(pthread_mutex_t *mutex,
 
 #define _PSMI_LOCK_INIT(pl)	/* static initialization */
 #define _PSMI_LOCK_TRY(pl)							\
-	    _psmi_mutex_trylock_inner(&((pl).lock), PSMI_CURLOC,	\
+	    _psmi_mutex_trylock_inner(&((pl).lock), PSMI_CURLOC,		\
 					&((pl).lock_owner))
 #define _PSMI_LOCK(pl)								\
-	    _psmi_mutex_lock_inner(&((pl).lock), PSMI_CURLOC,	\
+	    _psmi_mutex_lock_inner(&((pl).lock), PSMI_CURLOC,			\
                                         &((pl).lock_owner))
 #define _PSMI_UNLOCK(pl)							\
-	    _psmi_mutex_unlock_inner(&((pl).lock), PSMI_CURLOC,	\
+	    _psmi_mutex_unlock_inner(&((pl).lock), PSMI_CURLOC,			\
                                         &((pl).lock_owner))
 #define _PSMI_LOCK_ASSERT(pl)							\
-	    psmi_assert_always(pl.lock_owner == pthread_self());
-#define _PSMI_UNLOCK_ASSERT(pl)						\
-	    psmi_assert_always(pl.lock_owner != pthread_self());
+	psmi_assert_always((pl).lock_owner == pthread_self());
+#define _PSMI_UNLOCK_ASSERT(pl)							\
+	psmi_assert_always((pl).lock_owner != pthread_self());
 #define PSMI_LOCK_DISABLED	0
 
 #elif defined(PSMI_LOCK_IS_MUTEXLOCK)
@@ -409,7 +409,7 @@ cudaError_t (*psmi_cudaIpcCloseMemHandle)(void* devPtr);
 
 #define PSMI_CUDA_CHECK_EVENT(event, cudaerr) do {			\
 		cudaerr = psmi_cudaEventQuery(event);			\
-		if ((cudaerr != cudaSuccess) &&			\
+		if ((cudaerr != cudaSuccess) &&			        \
 		    (cudaerr != cudaErrorNotReady)) {			\
 			_HFI_ERROR(					\
 				"CUDA failure: %s() returned %d\n",	\
@@ -420,7 +420,15 @@ cudaError_t (*psmi_cudaIpcCloseMemHandle)(void* devPtr);
 		}							\
 	} while (0)
 
-
+#define PSMI_CUDA_DLSYM(psmi_cuda_lib,func) do {                        \
+	psmi_##func = dlsym(psmi_cuda_lib, STRINGIFY(func));            \
+	if (!psmi_##func) {               				\
+		psmi_handle_error(PSMI_EP_NORETURN,                     \
+			       PSM2_INTERNAL_ERR,                       \
+			       " Unable to resolve %s symbol"		\
+			       " in CUDA libraries.\n",STRINGIFY(func));\
+	}                                                               \
+} while (0)
 
 PSMI_ALWAYS_INLINE(
 int

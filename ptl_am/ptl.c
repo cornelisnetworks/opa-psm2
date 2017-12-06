@@ -350,15 +350,27 @@ void
 psmi_am_handler(void *toki, psm2_amarg_t *args, int narg, void *buf, size_t len)
 {
 	amsh_am_token_t *tok = (amsh_am_token_t *) toki;
-	psm2_am_handler_fn_t hfn;
+	struct psm2_ep_am_handle_entry *hentry;
 
 	psmi_assert(toki != NULL);
 
-	hfn = psm_am_get_handler_function(tok->mq->ep,
+	hentry = psm_am_get_handler_function(tok->mq->ep,
 					  (psm2_handler_t) args[0].u32w0);
 
+	/* Note a guard here for hentry != NULL is not needed because at
+	 * initialization, a psmi_assert_always() assure the entry will be
+	 * non-NULL. */
+
 	/* Invoke handler function. For AM we do not support break functionality */
-	hfn(toki, args + 1, narg - 1, buf, len);
+	if (likely(hentry->version == PSM2_AM_HANDLER_V2)) {
+		psm2_am_handler_2_fn_t hfn2 =
+				(psm2_am_handler_2_fn_t)hentry->hfn;
+		hfn2(toki, args + 1, narg - 1, buf, len, hentry->hctx);
+	} else {
+		psm2_am_handler_fn_t hfn1 =
+				(psm2_am_handler_fn_t)hentry->hfn;
+		hfn1(toki, args + 1, narg - 1, buf, len);
+	}
 
 	return;
 }
