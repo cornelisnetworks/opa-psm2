@@ -456,6 +456,12 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	if ((err = ips_proto_recv_init(proto)))
 		goto fail;
 
+	/* If progress thread is enabled, set the proto flag */
+	{
+		if(context->runtime_flags & PSMI_RUNTIME_RCVTHREAD)
+			proto->flags |= IPS_PROTO_FLAG_RCVTHREAD;
+	}
+
 	/*
 	 * Eager buffers.  We don't care to receive a callback when eager buffers
 	 * are newly released since we actively poll for new bufs.
@@ -618,16 +624,16 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	/* Default Send threshold for Gpu-direct set to 30000 */
 	union psmi_envvar_val env_gpudirect_send_thresh;
 	psmi_getenv("PSM2_GPUDIRECT_SEND_THRESH",
-		    "Threshold to switch off Gpu-Direct feature on send side",
+		    "GPUDirect feature on send side will be switched off if threshold value is exceeded.",
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
 		    (union psmi_envvar_val)30000, &env_gpudirect_send_thresh);
 	gpudirect_send_threshold = env_gpudirect_send_thresh.e_uint;
 
 	union psmi_envvar_val env_gpudirect_recv_thresh;
 	psmi_getenv("PSM2_GPUDIRECT_RECV_THRESH",
-		    "Threshold to switch off Gpu-Direct feature on receive side",
+		    "GPUDirect feature on receive side will be switched off if threshold value is exceeded.",
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
-		    (union psmi_envvar_val)0, &env_gpudirect_recv_thresh);
+		    (union psmi_envvar_val)UINT_MAX, &env_gpudirect_recv_thresh);
 	gpudirect_recv_threshold = env_gpudirect_recv_thresh.e_uint;
 
 	if (env_gpudirect_rdma.e_uint && device_support_gpudirect) {

@@ -692,7 +692,7 @@ MOCKABLE(ips_ibta_init)(struct ips_proto *proto)
  */
 		i = hfi_get_cc_settings_bin(proto->ep->context.ctrl->__hfi_unit,
 					    proto->ep->context.ctrl->__hfi_port,
-					    ccabuf);
+					    ccabuf, sizeof(ccabuf));
 		if (i <= 0) {
 			goto disablecca;
 		}

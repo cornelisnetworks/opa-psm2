@@ -809,26 +809,32 @@ int hfi_get_ctrs_port(int unitno, int port, uint64_t *c, int nelem)
 		return i / sizeof(*c);
 }
 
-int hfi_get_cc_settings_bin(int unit, int port, char *ccabuf)
+int hfi_get_cc_settings_bin(int unit, int port, char *ccabuf, size_t len_ccabuf)
 {
 	int fd;
-	size_t count;
-/*
- * Check qib driver CCA setting, and try to use it if available.
- * Fall to self CCA setting if errors.
- */
-	sprintf(ccabuf, HFI_CLASS_PATH "_%d/ports/%d/CCMgtA/cc_settings_bin",
-		unit, port);
-	fd = open(ccabuf, O_RDONLY);
-	if (fd < 0) {
-		return 0;
-	}
+
 	/*
 	 * 4 bytes for 'control map'
 	 * 2 bytes 'port control'
 	 * 32 (#SLs) * 6 bytes 'congestion setting' (per-SL)
 	 */
-	count = 4 + 2 + (32 * 6);
+	const size_t count = 4 + 2 + (32 * 6);
+
+	if (count > len_ccabuf)
+		return -2;
+/*
+ * Check qib driver CCA setting, and try to use it if available.
+ * Fall to self CCA setting if errors.
+ */
+	if (snprintf(ccabuf, len_ccabuf, "%s%d/ports/%d/CCMgtA/cc_settings_bin",
+		     hfi_sysfs_path(), unit, port) >= (len_ccabuf-1))
+		return -1;
+
+	fd = open(ccabuf, O_RDONLY);
+	if (fd < 0) {
+		return 0;
+	}
+
 	if (read(fd, ccabuf, count) != count) {
 		_HFI_CCADBG("Read cc_settings_bin failed. using static CCA\n");
 		close(fd);
@@ -847,10 +853,11 @@ int hfi_get_cc_table_bin(int unit, int port, uint16_t **cctp)
 	uint16_t *cct;
 	int fd;
 	char pathname[256];
-
 	*cctp = NULL;
-	sprintf(pathname, HFI_CLASS_PATH "_%d/ports/%d/CCMgtA/cc_table_bin",
-		unit, port);
+
+	if (snprintf(pathname,sizeof(pathname), "%s%d/ports/%d/CCMgtA/cc_table_bin",
+		     hfi_sysfs_path(), unit, port) >= (sizeof(pathname)-1))
+		return -1;
 	fd = open(pathname, O_RDONLY);
 	if (fd < 0) {
 		_HFI_CCADBG("Open cc_table_bin failed. using static CCA\n");

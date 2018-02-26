@@ -78,18 +78,52 @@ static long sysfs_page_size;
 
 static void __attribute__ ((constructor)) sysfs_init(void)
 {
-	struct stat s;
 	if (sysfs_path == NULL)
-		sysfs_path = getenv("HFI_SYSFS_PATH");
-	if (sysfs_path == NULL) {
-		static char syspath[64];
-		snprintf(syspath, sizeof(syspath), "%s_%d", HFI_CLASS_PATH, 0);
-		sysfs_path = syspath;
+	{
+		if (NULL != (sysfs_path = getenv("HFI_SYSFS_PATH")))
+		{
+			char *syspath = strdup(sysfs_path);
+
+			if (!syspath)
+				_HFI_DBG("Failed to strdup(\"%s\") for syspath.\n",
+					 sysfs_path);
+			else
+				sysfs_path = syspath;
+		}
+		if (sysfs_path == NULL) {
+			unsigned len = sizeof(HFI_CLASS_PATH) + 4;
+			char *syspath = malloc(len);
+
+			if (!syspath)
+				_HFI_DBG("Failed to alloc %u bytes for syspath.\n",len);
+			else
+			{
+				snprintf(syspath, len, "%s_0", HFI_CLASS_PATH);
+				sysfs_path = syspath;
+			}
+		}
+
+		if (sysfs_path != NULL) {
+			struct stat s;
+
+			if (stat(sysfs_path, &s) || !S_ISDIR(s.st_mode))
+			{
+				_HFI_DBG("Did not find sysfs directory %s, using anyway\n",
+					 sysfs_path);
+			}
+			else
+			{
+				/* Remove the unit number from the sysfs path: */
+				char *lastUS = strrchr(sysfs_path, '_');
+
+				if ((NULL != lastUS) && (isdigit(lastUS[1])))
+					lastUS[1] = 0;
+			}
+		}
 	}
-	if (stat(sysfs_path, &s) || !S_ISDIR(s.st_mode))
-		_HFI_DBG("Did not find sysfs directory %s, using anyway\n",
-			 sysfs_path);
-	sysfs_path_len = strlen(sysfs_path);
+
+	if (sysfs_path != NULL)
+		sysfs_path_len = strlen(sysfs_path);
 
 	if (hfifs_path == NULL)
 		hfifs_path = getenv("HFI_HFIFS_PATH");
@@ -113,36 +147,6 @@ size_t hfi_sysfs_path_len(void)
 const char *hfi_hfifs_path(void)
 {
 	return hfifs_path;
-}
-
-/* Calls stat() for the given attribute, return value is unchanged
-   from stat() sbuf is populated from stat() too. */
-int hfi_sysfs_stat(const char *attr,struct stat *sbuf)
-{
-	char buf[1024];
-
-	snprintf(buf, sizeof(buf), "%s/%s", hfi_sysfs_path(), attr);
-	return stat(buf,sbuf);
-}
-
-int hfi_sysfs_open(const char *attr, int flags)
-{
-	char buf[1024];
-	int saved_errno;
-	int fd;
-
-	snprintf(buf, sizeof(buf), "%s/%s", hfi_sysfs_path(), attr);
-	fd = open(buf, flags);
-	saved_errno = errno;
-
-	if (fd == -1) {
-		_HFI_DBG("Failed to open driver attribute '%s': %s\n", attr,
-			 strerror(errno));
-		_HFI_DBG("Offending file name: %s\n", buf);
-	}
-
-	errno = saved_errno;
-	return fd;
 }
 
 int hfi_hfifs_open(const char *attr, int flags)
@@ -196,54 +200,13 @@ bail:
 	return ret;
 }
 
-int hfi_sysfs_printf(const char *attr, const char *fmt, ...)
-{
-	int fd = -1;
-	va_list ap;
-	int ret = -1;
-	int saved_errno;
-
-	fd = hfi_sysfs_open(attr, O_WRONLY);
-	saved_errno = errno;
-
-	if (fd == -1) {
-		goto bail;
-	}
-
-	va_start(ap, fmt);
-	ret = sysfs_vprintf(fd, fmt, ap);
-	saved_errno = errno;
-	va_end(ap);
-
-	if (ret == -1) {
-		_HFI_DBG("Failed to write to driver attribute '%s': %s\n", attr,
-			 strerror(errno));
-	}
-
-bail:
-	if (fd != -1)
-		close(fd);
-
-	errno = saved_errno;
-	return ret;
-}
-
 int hfi_sysfs_unit_open(uint32_t unit, const char *attr, int flags)
 {
 	int saved_errno;
 	char buf[1024];
 	int fd;
-	int len, l;
 
-	snprintf(buf, sizeof(buf), "%s", hfi_sysfs_path());
-	len = l = strlen(buf) - 1;
-	while (l > 0 && isdigit(buf[l]))
-		l--;
-	if (l)
-		buf[++l] = 0;
-	else
-		l = len;	/* assume they know what they are doing */
-	snprintf(buf + l, sizeof(buf) - l, "%u/%s", unit, attr);
+	snprintf(buf, sizeof(buf), "%s%u/%s", hfi_sysfs_path(), unit, attr);
 	fd = open(buf, flags);
 	saved_errno = errno;
 
@@ -262,11 +225,9 @@ static int hfi_sysfs_unit_open_for_node(uint32_t unit, int flags)
 	int saved_errno;
 	char buf[1024];
 	int fd;
-	char *path_copy = strdup(hfi_sysfs_path());
 
-	snprintf(buf, sizeof(buf), "%s/hfi1_%u/device/numa_node",
-		 dirname(path_copy), unit);
-	free(path_copy);
+	snprintf(buf, sizeof(buf), "%s%u/device/numa_node",
+		 hfi_sysfs_path(), unit);
 	fd = open(buf, flags);
 	saved_errno = errno;
 
@@ -286,17 +247,9 @@ int hfi_sysfs_port_open(uint32_t unit, uint32_t port, const char *attr,
 	int saved_errno;
 	char buf[1024];
 	int fd;
-	int len, l;
 
-	snprintf(buf, sizeof(buf), "%s", hfi_sysfs_path());
-	len = l = strlen(buf) - 1;
-	while (l > 0 && isdigit(buf[l]))
-		l--;
-	if (l)
-		buf[++l] = 0;
-	else
-		l = len;	/* assume they know what they are doing */
-	snprintf(buf + l, sizeof(buf) - l, "%u/ports/%u/%s", unit, port, attr);
+	snprintf(buf, sizeof(buf), "%s%u/ports/%u/%s", hfi_sysfs_path(),
+		 unit, port, attr);
 	fd = open(buf, flags);
 	saved_errno = errno;
 
@@ -422,35 +375,6 @@ bail:
 		free(data);
 	} else {
 		*datap = data;
-	}
-
-	errno = saved_errno;
-	return ret;
-}
-
-/*
- * On return, caller must free *datap.
- */
-int hfi_sysfs_read(const char *attr, char **datap)
-{
-	int fd = -1, ret = -1;
-	int saved_errno;
-
-	fd = hfi_sysfs_open(attr, O_RDONLY);
-	saved_errno = errno;
-
-	if (fd == -1)
-		goto bail;
-
-	ret = read_page(fd, datap);
-	saved_errno = errno;
-
-bail:
-	if (ret == -1)
-		*datap = NULL;
-
-	if (fd != -1) {
-		close(fd);
 	}
 
 	errno = saved_errno;
@@ -705,37 +629,6 @@ bail:
 		close(fd);
 	}
 
-	errno = saved_errno;
-	return ret;
-}
-
-int hfi_sysfs_read_s64(const char *attr, int64_t *valp, int base)
-{
-	char *data, *end;
-	int ret;
-	int saved_errno;
-	long long val;
-
-	ret = hfi_sysfs_read(attr, &data);
-	saved_errno = errno;
-
-	if (ret == -1) {
-		goto bail;
-	}
-
-	val = strtoll(data, &end, base);
-	saved_errno = errno;
-
-	if (!*data || !(*end == '\0' || isspace(*end))) {
-		ret = -1;
-		goto bail;
-	}
-
-	*valp = val;
-	ret = 0;
-
-bail:
-	free(data);
 	errno = saved_errno;
 	return ret;
 }

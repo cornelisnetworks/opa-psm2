@@ -125,7 +125,6 @@ int psmi_cuda_initialize()
 {
 	psm2_error_t err = PSM2_OK;
 	int num_devices, dev;
-	struct cudaDeviceProp dev_prop;
 	char *dlerr;
 
 	PSM2_LOG_MSG("entering");
@@ -158,9 +157,10 @@ int psmi_cuda_initialize()
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuCtxSetCurrent);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuPointerGetAttribute);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuPointerSetAttribute);
+	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDeviceGetAttribute);
+  	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDeviceGet);
 
 	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaGetDeviceCount);
-	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaGetDeviceProperties);
 	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaGetDevice);
 	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaSetDevice);
 	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaStreamCreate);
@@ -186,20 +186,31 @@ int psmi_cuda_initialize()
 	/* Check if all devices support Unified Virtual Addressing. */
 	PSMI_CUDA_CALL(cudaGetDeviceCount, &num_devices);
 	for (dev = 0; dev < num_devices; dev++) {
-		PSMI_CUDA_CALL(cudaGetDeviceProperties, &dev_prop, dev);
-		if (dev_prop.unifiedAddressing != 1) {
-			_HFI_ERROR("CUDA device %d does not support Unified Virtual Addressing.\n", dev);
-			goto fail;
-		}
-		/* Only devices based on Kepler and
-		 * above can support GPU Direct.
-		 */
-		if (dev_prop.major >= 3 && cuda_runtime_version >= 5000)
-			device_support_gpudirect = 1;
-		else {
-			device_support_gpudirect = 0;
-			_HFI_INFO("Device %d does not GPUDirect RDMA (Non-fatal error) \n", dev);
-		}
+    		CUdevice device;
+    		PSMI_CUDA_DRIVER_API_CALL(cuDeviceGet, &device, dev);
+    		int unifiedAddressing;
+    		PSMI_CUDA_DRIVER_API_CALL(cuDeviceGetAttribute,
+                              		&unifiedAddressing,
+                              		CU_DEVICE_ATTRIBUTE_UNIFIED_ADDRESSING,
+                             		device);
+
+    		if (unifiedAddressing !=1){
+      			_HFI_ERROR("CUDA device %d does not support Unified Virtual Addressing.\n", dev);
+      			goto fail;
+   		}
+
+    		int major;
+	    	PSMI_CUDA_DRIVER_API_CALL(cuDeviceGetAttribute,
+                              		&major,
+                              		CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
+                              		device);
+    		if (major >= 3 && cuda_runtime_version >= 5000)
+      			device_support_gpudirect = 1;
+    		else {
+		      	device_support_gpudirect = 0;
+      			_HFI_INFO("Device %d does not support GPUDirect RDMA (Non-fatal error) \n", dev);
+    		}
+
 	}
 	PSM2_LOG_MSG("leaving");
 	return err;
@@ -362,7 +373,7 @@ psm2_error_t __psm2_init(int *major, int *minor)
 	if (getenv("PSM2_IDENTIFY")) {
                 Dl_info info_psm;
 		char ofed_delta[100] = "";
-		strcat(strcat(ofed_delta," built for OFED DELTA "),psmi_hfi_IFS_version);
+		strcat(strcat(ofed_delta," built for OFA DELTA "),psmi_hfi_IFS_version);
                 printf("%s %s PSM2 v%d.%d%s\n"
 		       "%s %s location %s\n"
 		       "%s %s build date %s\n"

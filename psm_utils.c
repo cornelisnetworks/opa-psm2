@@ -442,6 +442,23 @@ MOCKABLE(psmi_getenv)(const char *name, const char *descr, int level,
 				ishex ? " 0x" : " ", defval);		\
 	} while (0)
 
+/* _CONSUMED_ALL() is a macro which indicates if strtol() consumed all
+   of the input passed to it. */
+#define _CONSUMED_ALL(CHAR_PTR) (((CHAR_PTR) != NULL) && (*(CHAR_PTR) == 0))
+#define _CONVERT_TO_NUM(DEST,TYPE,STRTOL)						\
+	do {										\
+		char *ep;								\
+		/* Avoid base 8 (octal) on purpose, so don't pass in 0 for radix */	\
+		DEST = (TYPE)STRTOL(env, &ep, 10);					\
+		if (! _CONSUMED_ALL(ep)) {						\
+			DEST = (TYPE)STRTOL(env, &ep, 16);				\
+			if (! _CONSUMED_ALL(ep)) {					\
+				used_default = 1;					\
+				tval = defval;						\
+			}								\
+		}									\
+	} while (0)
+
 	switch (type) {
 	case PSMI_ENVVAR_TYPE_YESNO:
 		if (!env || *env == '\0') {
@@ -478,16 +495,7 @@ MOCKABLE(psmi_getenv)(const char *name, const char *descr, int level,
 			tval = defval;
 			used_default = 1;
 		} else {
-			char *ep;
-			/* Avoid base 8 (octal) on purpose, so don't pass in 0 for radix */
-			tval.e_int = (int)strtol(env, &ep, 10);
-			if (ep == env) {
-				tval.e_int = (int)strtol(env, &ep, 16);
-				if (ep == env) {
-					used_default = 1;
-					tval = defval;
-				}
-			}
+			_CONVERT_TO_NUM(tval.e_int,int,strtol);
 		}
 		_GETENV_PRINT(used_default, "%d", tval.e_int, defval.e_int);
 		break;
@@ -498,16 +506,7 @@ MOCKABLE(psmi_getenv)(const char *name, const char *descr, int level,
 			tval = defval;
 			used_default = 1;
 		} else {
-			char *ep;
-			/* Avoid base 8 (octal) on purpose, so don't pass in 0 for radix */
-			tval.e_int = (unsigned int)strtoul(env, &ep, 10);
-			if (ep == env) {
-				tval.e_int = (unsigned int)strtoul(env, &ep, 16);
-				if (ep == env) {
-					used_default = 1;
-					tval = defval;
-				}
-			}
+			_CONVERT_TO_NUM(tval.e_int,unsigned int,strtoul);
 		}
 		if (type == PSMI_ENVVAR_TYPE_UINT_FLAGS)
 			_GETENV_PRINT(used_default, "%x", tval.e_uint,
@@ -522,16 +521,7 @@ MOCKABLE(psmi_getenv)(const char *name, const char *descr, int level,
 			tval = defval;
 			used_default = 1;
 		} else {
-			char *ep;
-			/* Avoid base 8 (octal) on purpose, so don't pass in 0 for radix */
-			tval.e_long = strtol(env, &ep, 10);
-			if (ep == env) {
-				tval.e_long = strtol(env, &ep, 16);
-				if (ep == env) {
-					used_default = 1;
-					tval = defval;
-				}
-			}
+			_CONVERT_TO_NUM(tval.e_long,long,strtol);
 		}
 		_GETENV_PRINT(used_default, "%ld", tval.e_long, defval.e_long);
 		break;
@@ -540,18 +530,7 @@ MOCKABLE(psmi_getenv)(const char *name, const char *descr, int level,
 			tval = defval;
 			used_default = 1;
 		} else {
-			char *ep;
-		 	/* Avoid base 8 (octal) on purpose, so don't pass in 0 for radix */
-			tval.e_ulonglong =
-			    (unsigned long long)strtoull(env, &ep, 10);
-			if (ep == env) {
-				tval.e_ulonglong =
-				    (unsigned long long)strtoull(env, &ep, 16);
-				if (ep == env) {
-					used_default = 1;
-					tval = defval;
-				}
-			}
+			_CONVERT_TO_NUM(tval.e_ulonglong,unsigned long long,strtoull);
 		}
 		_GETENV_PRINT(used_default, "%llu",
 			      tval.e_ulonglong, defval.e_ulonglong);
@@ -563,16 +542,7 @@ MOCKABLE(psmi_getenv)(const char *name, const char *descr, int level,
 			tval = defval;
 			used_default = 1;
 		} else {
-			char *ep;
-			/* Avoid base 8 (octal) on purpose, so don't pass in 0 for radix */
-			tval.e_ulong = (unsigned long)strtoul(env, &ep, 10);
-			if (ep == env) {
-				tval.e_ulong = (unsigned long)strtoul(env, &ep, 16);
-				if (ep == env) {
-					used_default = 1;
-					tval = defval;
-				}
-			}
+			_CONVERT_TO_NUM(tval.e_ulong,unsigned long,strtoul);
 		}
 		if (type == PSMI_ENVVAR_TYPE_ULONG_FLAGS)
 			_GETENV_PRINT(used_default, "%lx", tval.e_ulong,

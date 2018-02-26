@@ -194,7 +194,9 @@ void hfi_set_user_major_version(uint16_t major_version);
 int hfi_cmd_write(int fd, struct hfi1_cmd *, size_t count);
 int hfi_cmd_writev(int fd, const struct iovec *iov, int iovcnt);
 
-int hfi_get_cc_settings_bin(int unit, int port, char *ccabuf);
+/* hfi_get_cc_settings_bin() returns less than or equal to 0 on failure,
+   returns greater than 0 on success. */
+ int hfi_get_cc_settings_bin(int unit, int port, char *ccabuf, size_t len_ccabuf);
 int hfi_get_cc_table_bin(int unit, int port, uint16_t **cctp);
 
 /* We use mmap64() because we compile in both 32 and 64 bit mode,
@@ -221,12 +223,7 @@ int hfi_get_ctrs_port_names(int unitno, char **namep);
 /* sysfs helper routines (only those currently used are exported;
  * try to avoid using others) */
 
-/* Calls stat() for the given attribute, return value is unchanged
-   from stat() sbuf is populated from stat() too. */
-int hfi_sysfs_stat(const char *attr,struct stat *sbuf);
-
-/* read a signed 64-bit quantity, in some arbitrary base */
-int hfi_sysfs_read_s64(const char *attr, int64_t *valp, int base);
+const char *hfi_sysfs_path(void);
 
 /* read a string value */
 int hfi_sysfs_port_read(uint32_t unit, uint32_t port, const char *attr,
