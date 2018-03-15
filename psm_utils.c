@@ -945,7 +945,7 @@ struct psmi_faultinj_spec *psmi_faultinj_getspec(char *spec_name, int num,
 		union psmi_envvar_val env_fi;
 		char fvals_str[128];
 		char fname[128];
-		char fdesc[256];
+		char fdesc[280];
 
 		snprintf(fvals_str, sizeof(fvals_str) - 1, "%d:%d:1", num,
 			 denom);
