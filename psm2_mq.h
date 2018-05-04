@@ -334,9 +334,10 @@ psm2_mq_init(psm2_ep_t ep, uint64_t tag_order_mask,
 psm2_error_t
 psm2_mq_finalize(psm2_mq_t mq);
 
-#define PSM2_MQ_TAG_ELEMENTS 3
+#define PSM2_MQ_TAG_ELEMENTS 4
 	/**< Represents the number of 32-bit tag elements in the psm2_mq_tag_t
-	 *   type. */
+	 *   type plus one extra element to keep alignment and padding
+	 *   as 16 bytes.  */
 
 /** @struct psm2_mq_tag
  ** @brief MQ Message tag
@@ -356,7 +357,11 @@ typedef
 //struct psm2_mq_tag {
 union psm2_mq_tag {
 //    union {
-		uint32_t tag[PSM2_MQ_TAG_ELEMENTS] __attribute__ ((aligned(16)));
+		uint32_t tag[PSM2_MQ_TAG_ELEMENTS]; /* No longer specifying
+						     * alignment as it makes
+						     * code break with newer
+						     * compilers. */
+
             /**< 3 x 32bit array representation of @ref psm2_mq_tag */
 		struct {
 			uint32_t tag0; /**< 1 of 3 uint32_t tag values */
@@ -403,7 +408,11 @@ struct psm2_mq_status2 {
 	/** Remote peer's epaddr */
 	psm2_epaddr_t msg_peer;
 	/** Sender's original message tag */
-	psm2_mq_tag_t msg_tag;
+	psm2_mq_tag_t msg_tag __attribute__ ((aligned(16)));/* Alignment added
+							     * to preserve the
+							     * layout as is
+							     * expected by
+							     * existent code */
 	/** Sender's original message length */
 	uint32_t msg_length;
 	/** Actual number of bytes transfered (receiver only) */

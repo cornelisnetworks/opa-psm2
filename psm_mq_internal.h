@@ -146,7 +146,7 @@ struct psm2_mq {
 #define MQ_HFI_WINDOW_RNDV_XEON  131072
 
 #ifdef PSM_CUDA
-#define MQ_HFI_THRESH_RNDV_CUDA 2097152
+#define MQ_HFI_WINDOW_RNDV_CUDA 2097152
 #endif
 
 #define MQ_SHM_THRESH_RNDV 16000
@@ -231,7 +231,11 @@ struct psm2_mq_req {
 
 	/* Tag matching vars */
 	psm2_epaddr_t peer;
-	psm2_mq_tag_t tag;
+	psm2_mq_tag_t tag __attribute__ ((aligned(16)));/* Alignment added
+							 * to preserve the
+							 * layout as is
+							 * expected by
+							 * existent code */
 	psm2_mq_tag_t tagsel;	/* used for receives */
 
 	/* Some PTLs want to get notified when there's a test/wait event */
@@ -264,6 +268,13 @@ struct psm2_mq_req {
 	uintptr_t rts_sbuf;
 
 #ifdef PSM_CUDA
+	uint8_t* user_gpu_buffer;
+	STAILQ_HEAD(sendreq_spec_, ips_cuda_hostbuf) sendreq_prefetch;
+	uint32_t prefetch_send_msgoff;
+	int cuda_hostbuf_used;
+	cudaIpcMemHandle_t cuda_ipc_handle;
+	cudaEvent_t cuda_ipc_event;
+	uint8_t cuda_ipc_handle_attached;
 	/* is_buf_gpu_mem - used to indicate if the send or receive is issued
 	 * on a device/host buffer.
 	 * is_sendbuf_gpu_mem - Used to always select TID path on the receiver
@@ -271,12 +282,6 @@ struct psm2_mq_req {
 	 */
 	uint8_t is_buf_gpu_mem;
 	uint8_t is_sendbuf_gpu_mem;
-	STAILQ_HEAD(sendreq_spec_, ips_cuda_hostbuf) sendreq_prefetch;
-	uint32_t prefetch_send_msgoff;
-	int cuda_hostbuf_used;
-	cudaIpcMemHandle_t cuda_ipc_handle;
-	cudaEvent_t cuda_ipc_event;
-	uint8_t cuda_ipc_handle_attached;
 #endif
 
 	/* PTLs get to store their own per-request data.  MQ manages the allocation

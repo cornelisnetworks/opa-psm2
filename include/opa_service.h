@@ -75,6 +75,11 @@
 
 /* base name of path (without unit #) for qib driver */
 #define HFI_DEVICE_PATH "/dev/hfi1"
+
+#ifdef PSM_CUDA
+#define GDR_DEVICE_PATH "/dev/hfi1_gdr"
+#endif
+
 #define HFI_CLASS_PATH "/sys/class/infiniband/hfi1"
 
 /* Commands used to communicate with driver. */

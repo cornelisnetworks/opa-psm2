@@ -66,6 +66,10 @@
 #include "ips_proto_help.h"
 #include "psmi_wrappers.h"
 
+#ifdef PSM_CUDA
+#include "psm_gdrcpy.h"
+#endif
+
 /*
  * Control message types have their own flag to determine whether a message of
  * that type is queued or not.  These flags are kept in a state bitfield.
@@ -614,20 +618,28 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 				PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
 				(union psmi_envvar_val)0, /* Disabled by default */
 				&env_gpudirect_rdma);
+	/* The following cases need to be handled:
+	 * 1) GPU DIRECT is turned off but GDR COPY is turned on by the user or
+	 *    by default - Turn off GDR COPY
+	 * 2) GPU DIRECT is on but GDR COPY is turned off by the user - Leave
+	 *.   this config as it is.
+	 */
+	if (!env_gpudirect_rdma.e_uint)
+		is_gdr_copy_enabled = 0;
 
 	/* Default Send threshold for Gpu-direct set to 30000 */
 	union psmi_envvar_val env_gpudirect_send_thresh;
 	psmi_getenv("PSM2_GPUDIRECT_SEND_THRESH",
-		    "Threshold to switch off Gpu-Direct feature on send side",
+		    "GPUDirect feature on send side will be switched off if threshold value is exceeded.",
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
 		    (union psmi_envvar_val)30000, &env_gpudirect_send_thresh);
 	gpudirect_send_threshold = env_gpudirect_send_thresh.e_uint;
 
 	union psmi_envvar_val env_gpudirect_recv_thresh;
 	psmi_getenv("PSM2_GPUDIRECT_RECV_THRESH",
-		    "Threshold to switch off Gpu-Direct feature on receive side",
+		    "GPUDirect feature on receive side will be switched off if threshold value is exceeded.",
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
-		    (union psmi_envvar_val)0, &env_gpudirect_recv_thresh);
+		    (union psmi_envvar_val)UINT_MAX, &env_gpudirect_recv_thresh);
 	gpudirect_recv_threshold = env_gpudirect_recv_thresh.e_uint;
 
 	if (env_gpudirect_rdma.e_uint && device_support_gpudirect) {
@@ -1097,6 +1109,10 @@ ips_proto_timer_ctrlq_callback(struct psmi_timer *timer, uint64_t t_cyc_expire)
 	while (ctrlq->ctrlq_cqe[ctrlq->ctrlq_tail].msg_queue_mask) {
 		cqe = &ctrlq->ctrlq_cqe[ctrlq->ctrlq_tail];
 
+		/* When PSM_PERF is enabled, the following line causes the
+		   PMU to start a stop watch to measure instruction cycles of the
+		   TX speedpath of PSM.  The stop watch is stopped below. */
+		GENERIC_PERF_BEGIN(PSM_TX_SPEEDPATH_CTR);
 		if (cqe->msg_scb.flow->transfer == PSM_TRANSFER_PIO) {
 			err = ips_spio_transfer_frame(proto,
 				cqe->msg_scb.flow, &cqe->msg_scb.pbc,
@@ -1112,6 +1128,10 @@ ips_proto_timer_ctrlq_callback(struct psmi_timer *timer, uint64_t t_cyc_expire)
 				cqe->msg_scb.cksum, 0,
 				have_cksum, cqe->msg_scb.cksum[0]);
 		}
+		/* When PSM_PERF is enabled, the following line causes the
+		   PMU to stop a stop watch to measure instruction cycles of the
+		   TX speedpath of PSM.  The stop watch was started above. */
+		GENERIC_PERF_END(PSM_TX_SPEEDPATH_CTR);
 
 		if (err == PSM2_OK) {
 			ips_proto_epaddr_stats_set(proto, cqe->message_type);
@@ -1197,6 +1217,10 @@ ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 
 	switch (flow->transfer) {
 	case PSM_TRANSFER_PIO:
+		/* When PSM_PERF is enabled, the following line causes the
+		   PMU to start a stop watch to measure instruction cycles of the
+		   TX speedpath of PSM.  The stop watch is stopped below. */
+		GENERIC_PERF_BEGIN(PSM_TX_SPEEDPATH_CTR);
 		err = ips_spio_transfer_frame(proto, flow,
 			     &ctrlscb->pbc, payload, paylen,
 			     PSMI_TRUE, have_cksum, ctrlscb->cksum[0]
@@ -1204,11 +1228,23 @@ ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 			     , 0
 #endif
 			     );
+		/* When PSM_PERF is enabled, the following line causes the
+		   PMU to stop a stop watch to measure instruction cycles of the
+		   TX speedpath of PSM.  The stop watch was started above. */
+		GENERIC_PERF_END(PSM_TX_SPEEDPATH_CTR);
 		break;
 	case PSM_TRANSFER_DMA:
+		/* When PSM_PERF is enabled, the following line causes the
+		   PMU to start a stop watch to measure instruction cycles of the
+		   TX speedpath of PSM.  The stop watch is stopped below. */
+		GENERIC_PERF_BEGIN(PSM_TX_SPEEDPATH_CTR);
 		err = ips_dma_transfer_frame(proto, flow,
 			     ctrlscb, payload, paylen,
 			     have_cksum, ctrlscb->cksum[0]);
+		/* When PSM_PERF is enabled, the following line causes the
+		   PMU to stop a stop watch to measure instruction cycles of the
+		   TX speedpath of PSM.  The stop watch was started above. */
+		GENERIC_PERF_END(PSM_TX_SPEEDPATH_CTR);
 		break;
 	default:
 		err = PSM2_INTERNAL_ERR;
@@ -1347,6 +1383,10 @@ ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed)
 		scb = SLIST_FIRST(scb_pend);
 		psmi_assert(scb->nfrag == 1);
 
+		/* When PSM_PERF is enabled, the following line causes the
+		   PMU to start a stop watch to measure instruction cycles of the
+		   TX speedpath of PSM.  The stop watch is stopped below. */
+		GENERIC_PERF_BEGIN(PSM_TX_SPEEDPATH_CTR);
 		if ((err = ips_spio_transfer_frame(proto, flow, &scb->pbc,
 						   ips_scb_buffer(scb),
 						   scb->payload_size,
@@ -1359,6 +1399,10 @@ ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed)
 						   , IS_TRANSFER_BUF_GPU_MEM(scb)
 #endif
 						)) == PSM2_OK) {
+			/* When PSM_PERF is enabled, the following line causes the
+			   PMU to stop a stop watch to measure instruction cycles of the
+			   TX speedpath of PSM.  The stop watch was started above. */
+			GENERIC_PERF_END(PSM_TX_SPEEDPATH_CTR);
 			t_cyc = get_cycles();
 			scb->flags &= ~IPS_SEND_FLAG_PENDING;
 			scb->ack_timeout = proto->epinfo.ep_timeout_ack;
@@ -1373,7 +1417,13 @@ ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed)
 #endif
 
 		} else
+		{
+			/* When PSM_PERF is enabled, the following line causes the
+			   PMU to stop a stop watch to measure instruction cycles of the
+			   TX speedpath of PSM.  The stop watch was started above. */
+			GENERIC_PERF_END(PSM_TX_SPEEDPATH_CTR);
 			break;
+		}
 	}
 
 	/* If out of flow credits re-schedule send timer */
@@ -1644,10 +1694,28 @@ handle_ENOMEM_on_DMA_completion(struct ips_proto *proto)
 
 		if (lengthEvicted)
 			return PSM2_OK; /* signals a retry of the writev command. */
-		else
-			return PSM2_EP_NO_RESOURCES;  /* should signal a return of
+		else {
+#ifdef PSM_CUDA
+			if (PSMI_IS_GDR_COPY_ENABLED && gdr_cache_evict()) {
+				return PSM2_OK;
+			} else
+#endif
+				return PSM2_EP_NO_RESOURCES;  /* should signal a return of
 							no progress, and retry later */
+		}
 	}
+#ifdef PSM_CUDA
+	else if (PSMI_IS_GDR_COPY_ENABLED) {
+		uint64_t lengthEvicted = gdr_cache_evict();
+		if (!proto->writevFailTime)
+			proto->writevFailTime = now;
+
+		if (lengthEvicted)
+			return PSM2_OK;
+		else
+			return PSM2_EP_NO_RESOURCES;
+	}
+#endif
 	else if (!proto->writevFailTime)
 	{
 		proto->writevFailTime = now;

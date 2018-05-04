@@ -113,7 +113,7 @@ while [ "$1" != "" ]; do
                         if [ -z "$1" ]; then
                             usage
                         fi
-                        $RPM_NAME_BASEEXT="$1"
+                        RPM_NAME_BASEEXT="$1"
                         export RPM_NAME_BASEEXT="$1"
                         ;;
         -r | -rpmname)  shift

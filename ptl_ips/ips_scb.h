@@ -196,13 +196,7 @@ struct ips_scb {
 };
 
 #ifdef PSM_CUDA
-#define IS_TRANSFER_BUF_GPU_MEM(scb) (scb->mq_req != NULL)
-/* In case we need to be more precise about scb's locality
- * we can expand the macro in place, e.g.
- * #define IS_TRANSFER_BUF_GPU_MEM(scb) (scb->mq_req != NULL && \
- * 					 scb->mq_req->is_buf_gpu_mem && \
- * 					!scb->mq_req->cuda_hostbuf_used)
- */
+#define IS_TRANSFER_BUF_GPU_MEM(scb) (ips_scb_flags(scb) & IPS_SEND_FLAG_PAYLOAD_BUF_GPU)
 #endif
 
 void ips_scbctrl_free(ips_scb_t *scb);

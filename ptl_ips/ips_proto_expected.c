@@ -1785,6 +1785,7 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 	if (tidsendc->mqreq->is_buf_gpu_mem &&		/* request's buffer comes from GPU realm */
 	   !tidsendc->mqreq->cuda_hostbuf_used) {	/* and it was NOT moved to HOST memory */
 		scb->mq_req = tidsendc->mqreq;		/* so let's mark it per scb, not to check its locality again */
+		ips_scb_flags(scb) |= IPS_SEND_FLAG_PAYLOAD_BUF_GPU;
 	}
 #endif
 

@@ -84,16 +84,15 @@ override OUTDIR := $(shell readlink -m $(OUTDIR))
 endif
 endif
 
-LINKER_SCRIPT_FILE := ${OUTDIR}/psm2_linker_script.map
 
 PSM2_VERNO_MAJOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_MAJOR.*0x0\?\([1-9a-f]\?[0-9a-f]\+\).*/\1/p' $(top_srcdir)/psm2.h)
 PSM2_VERNO_MINOR := $(shell sed -n 's/^\#define.*PSM2_VERNO_MINOR.*0x\([0-9]\?[0-9a-f]\+\).*/\1/p' $(top_srcdir)/psm2.h)
 PSM2_LIB_MAJOR   := $(shell printf "%d" ${PSM2_VERNO_MAJOR})
 PSM2_LIB_MINOR   := $(shell printf "%d" `sed -n 's/^\#define.*PSM2_VERNO_MINOR.*\(0x[0-9a-f]\+\).*/\1/p' $(top_srcdir)/psm2.h`)
+LINKER_SCRIPT_FILE = ${OUTDIR}/psm2_linker_script.map
 SOURCES_CHKSUM_FILES = Makefile buildflags.mak $(LINKER_SCRIPT_FILE) \
 		`find . -regex '\(.*\.h\|.*\.c\)' -not -path "./test/*" -not -path "./tools/*" -not -path "_revision.c" | sort`
 SOURCES_CHKSUM_VALUE = $(shell cat ${SOURCES_CHKSUM_FILES} | sha1sum | cut -d' ' -f 1)
-
 OPA_LIB_MAJOR := 4
 OPA_LIB_MINOR := 0
 
@@ -105,8 +104,16 @@ export OPA_LIB_MAJOR
 export OPA_LIB_MINOR
 export CCARCH ?= gcc
 export FCARCH ?= gfortran
+export AR ?= ar
 
 include $(top_srcdir)/buildflags.mak
+# We need to unexport these environs as during mock testing and normal calls,
+# if they are exported then during each submake they will be evaulated again.
+# This is costly and the LINKER_SCRIPT_FILE doesn't exist until after its
+# target rule runs.
+unexport SOURCES_CHKSUM_FILES
+unexport SOURCES_CHKSUM_VALUE
+unexport LINKER_SCRIPT_FILE
 INCLUDES += -I$(top_srcdir)
 
 ifneq (x86_64,$(arch))
@@ -272,18 +279,20 @@ all: outdir symlinks
 	@if [ ! -e $(HISTORY) ] || [ -z "`grep -E '^$(OUTDIR)$$' $(HISTORY)`" ]; then \
 		echo $(OUTDIR) >> $(HISTORY); \
 	fi
+	# Our buildflags.mak exports all variables, all are propogated to submakes.
 	@for subdir in $(SUBDIRS); do \
 		mkdir -p $(OUTDIR)/$$subdir; \
-		$(MAKE) -j $(nthreads) -C $$subdir OUTDIR=$(OUTDIR)/$$subdir $(OPTIONS); \
+		$(MAKE) -j $(nthreads) -C $$subdir OUTDIR=$(OUTDIR)/$$subdir; \
 	done
-	$(MAKE) -j $(nthreads) OUTDIR=$(OUTDIR) $(OPTIONS) $(OUTDIR)/${TARGLIB}.so
+	$(MAKE) -j $(nthreads) $(OUTDIR)/${TARGLIB}.so
+	$(MAKE) -j $(nthreads) $(OUTDIR)/${TARGLIB}.a
 	@mkdir -p $(OUTDIR)/compat
-	$(MAKE) -j $(nthreads) -C compat OUTDIR=$(OUTDIR)/compat $(OPTIONS)
+	$(MAKE) -j $(nthreads) -C compat OUTDIR=$(OUTDIR)/compat
 
 %_clean:
 	make OUTDIR=$* clean
 
-clean: linker_script_file_clean cleanlinks
+clean: cleanlinks
 	rm -rf ${OUTDIR}
 	@if [ -e $(HISTORY) ]; then \
 		grep -v -E "^$(OUTDIR)$$" $(HISTORY) > $(HISTORY)_tmp; \
@@ -294,12 +303,11 @@ clean: linker_script_file_clean cleanlinks
 	fi
 
 mock: OUTDIR := $(MOCK_OUTDIR)
-mock: OPTIONS = PSM2_MOCK_TESTING=1
 mock:
-	$(MAKE) OUTDIR=$(OUTDIR) OPTIONS=$(OPTIONS)
+	$(MAKE) OUTDIR=$(OUTDIR) PSM2_MOCK_TESTING=1
 
 debug: OUTDIR := $(DEBUG_OUTDIR)
-debug: OPTIONS = PSM_DEBUG=1
+debug: OPTIONS := PSM_DEBUG=1
 debug:
 	$(MAKE) OUTDIR=$(OUTDIR) OPTIONS=$(OPTIONS)
 
@@ -338,6 +346,8 @@ install: all
 	(cd ${DESTDIR}${INSTALL_LIB_TARG} ; \
 		ln -sf ${TARGLIB}.so.${MAJOR}.${MINOR} ${TARGLIB}.so.${MAJOR} ; \
 		ln -sf ${TARGLIB}.so.${MAJOR} ${TARGLIB}.so)
+	install -D $(OUTDIR)/${TARGLIB}.a \
+		${DESTDIR}${INSTALL_LIB_TARG}/${TARGLIB}.a
 	install -m 0644 -D psm2.h ${DESTDIR}/usr/include/psm2.h
 	install -m 0644 -D psm2_mq.h ${DESTDIR}/usr/include/psm2_mq.h
 	install -m 0644 -D psm2_am.h ${DESTDIR}/usr/include/psm2_am.h
@@ -479,7 +489,8 @@ ${TARGLIB}-objs := ptl_am/am_reqrep_shmem.o	\
 		   ptl_self/ptl.o		\
 		   opa/*.o			\
 		   psm_diags.o 			\
-		   psmi_wrappers.o
+		   psmi_wrappers.o              \
+		   psm_gdrcpy.o
 
 ${TARGLIB}-objs := $(patsubst %.o, ${OUTDIR}/%.o, ${${TARGLIB}-objs})
 
@@ -501,16 +512,16 @@ $(OUTDIR)/${TARGLIB}.so.${MAJOR}.${MINOR}: ${${TARGLIB}-objs} $(LINKER_SCRIPT_FI
 	date -u -d@$${SOURCE_DATE_EPOCH:-$$(date +%s)} +'char psmi_hfi_build_timestamp[] ="%F %T%:z";' >> ${OUTDIR}/_revision.c
 	echo "char psmi_hfi_sources_checksum[] =\"${SOURCES_CHKSUM_VALUE}\";" >> ${OUTDIR}/_revision.c
 	echo "char psmi_hfi_git_checksum[] =\"`git rev-parse HEAD`\";" >> ${OUTDIR}/_revision.c
-	$(CC) -c $(BASECFLAGS) $(INCLUDES) ${OUTDIR}/_revision.c -o $(OUTDIR)/_revision.o
+	$(CC) -c $(CFLAGS) $(BASECFLAGS) $(INCLUDES) ${OUTDIR}/_revision.c -o $(OUTDIR)/_revision.o
 	$(CC) $(LINKER_SCRIPT) $(LDFLAGS) -o $@ -Wl,-soname=${TARGLIB}.so.${MAJOR} -shared \
 		${${TARGLIB}-objs} $(OUTDIR)/_revision.o -Lopa $(LDLIBS)
 
+$(OUTDIR)/${TARGLIB}.a: $(OUTDIR)/${TARGLIB}.so.${MAJOR}.${MINOR}
+	$(AR) rcs $(OUTDIR)/${TARGLIB}.a ${${TARGLIB}-objs} $(OUTDIR)/_revision.o
+
 ${OUTDIR}/%.o: ${top_srcdir}/%.c
-	$(CC) $(CFLAGS) $(INCLUDES) -MMD -c $< -o $@
+	$(CC) $(CFLAGS) $(BASECFLAGS) $(INCLUDES) -MMD -c $< -o $@
 
 $(LINKER_SCRIPT_FILE): psm2_linker_script_map.in
 	sed "s/_psm2_additional_globals_;/$(PSM2_ADDITIONAL_GLOBALS)/" \
 	     psm2_linker_script_map.in > ${OUTDIR}/psm2_linker_script.map
-
-linker_script_file_clean:
-	rm -f $(LINKER_SCRIPT_FILE)

@@ -61,6 +61,8 @@
 
 #include <sched.h>
 #include <numa.h>
+#include <semaphore.h>
+#include <fcntl.h>
 
 #include "psm2.h"
 #include "psm2_mq.h"
@@ -145,8 +147,21 @@ int psmi_get_current_proc_location();
 extern int psmi_epid_ver;
 extern uint32_t non_dw_mul_sdma;
 extern psmi_lock_t psmi_creation_lock;
-
 extern psm2_ep_t psmi_opened_endpoint;
+
+extern int psmi_affinity_shared_file_opened;
+extern uint64_t *shared_affinity_ptr;
+extern char *affinity_shm_name;
+
+extern sem_t *sem_affinity_shm_rw;
+extern int psmi_affinity_semaphore_open;
+extern char *sem_affinity_shm_rw_name;
+
+#define AFFINITY_SHM_BASENAME			"/psm2_hfi_affinity_shm"
+#define AFFINITY_SHMEMSIZE			sysconf(_SC_PAGE_SIZE)
+#define AFFINITY_SHM_REF_COUNT_LOCATION		0
+#define AFFINITY_SHM_HFI_INDEX_LOCATION		1
+#define SEM_AFFINITY_SHM_RW_BASENAME		"/psm2_hfi_affinity_shm_rw_mutex"
 
 PSMI_ALWAYS_INLINE(
 int
@@ -154,13 +169,13 @@ _psmi_get_epid_version()) {
 	return psmi_epid_ver;
 }
 
-#define PSMI_EPID_VERSION_SHM 			0
+#define PSMI_EPID_VERSION_SHM 				0
 #define PSMI_EPID_SHM_ONLY				1
 #define PSMI_EPID_IPS_SHM				0
 #define PSMI_EPID_VERSION 				_psmi_get_epid_version()
-#define PSMI_MAX_EPID_VERNO_SUPPORTED	2
-#define PSMI_MIN_EPID_VERNO_SUPPORTED	1
-#define PSMI_EPID_VERNO_DEFAULT			2
+#define PSMI_MAX_EPID_VERNO_SUPPORTED			2
+#define PSMI_MIN_EPID_VERNO_SUPPORTED			1
+#define PSMI_EPID_VERNO_DEFAULT				2
 #define PSMI_EPID_V1					1
 #define PSMI_EPID_V2					2
 
@@ -240,18 +255,18 @@ _psmi_mutex_unlock_inner(pthread_mutex_t *mutex,
 
 #define _PSMI_LOCK_INIT(pl)	/* static initialization */
 #define _PSMI_LOCK_TRY(pl)							\
-	    _psmi_mutex_trylock_inner(&((pl).lock), PSMI_CURLOC,	\
+	    _psmi_mutex_trylock_inner(&((pl).lock), PSMI_CURLOC,		\
 					&((pl).lock_owner))
 #define _PSMI_LOCK(pl)								\
-	    _psmi_mutex_lock_inner(&((pl).lock), PSMI_CURLOC,	\
+	    _psmi_mutex_lock_inner(&((pl).lock), PSMI_CURLOC,			\
                                         &((pl).lock_owner))
 #define _PSMI_UNLOCK(pl)							\
-	    _psmi_mutex_unlock_inner(&((pl).lock), PSMI_CURLOC,	\
+	    _psmi_mutex_unlock_inner(&((pl).lock), PSMI_CURLOC,			\
                                         &((pl).lock_owner))
 #define _PSMI_LOCK_ASSERT(pl)							\
-	    psmi_assert_always(pl.lock_owner == pthread_self());
-#define _PSMI_UNLOCK_ASSERT(pl)						\
-	    psmi_assert_always(pl.lock_owner != pthread_self());
+	psmi_assert_always((pl).lock_owner == pthread_self());
+#define _PSMI_UNLOCK_ASSERT(pl)							\
+	psmi_assert_always((pl).lock_owner != pthread_self());
 #define PSMI_LOCK_DISABLED	0
 
 #elif defined(PSMI_LOCK_IS_MUTEXLOCK)
@@ -337,6 +352,7 @@ void psmi_profile_reblock(int did_no_progress) __attribute__ ((weak));
 #endif
 
 extern int is_cuda_enabled;
+extern int is_gdr_copy_enabled;
 extern int device_support_gpudirect;
 extern int cuda_runtime_version;
 
@@ -347,9 +363,10 @@ CUresult (*psmi_cuCtxGetCurrent)(CUcontext *c);
 CUresult (*psmi_cuCtxSetCurrent)(CUcontext c);
 CUresult (*psmi_cuPointerGetAttribute)(void *data, CUpointer_attribute pa, CUdeviceptr p);
 CUresult (*psmi_cuPointerSetAttribute)(void *data, CUpointer_attribute pa, CUdeviceptr p);
+CUresult (*psmi_cuDeviceGet)(CUdevice* device, int  ordinal);
+CUresult (*psmi_cuDeviceGetAttribute)(int* pi, CUdevice_attribute attrib, CUdevice dev);
 cudaError_t (*psmi_cudaRuntimeGetVersion)(int *runtime_version);
 cudaError_t (*psmi_cudaGetDeviceCount)(int *n);
-cudaError_t (*psmi_cudaGetDeviceProperties)(struct cudaDeviceProp *p, int d);
 cudaError_t (*psmi_cudaGetDevice)(int *n);
 cudaError_t (*psmi_cudaSetDevice)(int n);
 cudaError_t (*psmi_cudaStreamCreate)(cudaStream_t *s);
@@ -409,7 +426,7 @@ cudaError_t (*psmi_cudaIpcCloseMemHandle)(void* devPtr);
 
 #define PSMI_CUDA_CHECK_EVENT(event, cudaerr) do {			\
 		cudaerr = psmi_cudaEventQuery(event);			\
-		if ((cudaerr != cudaSuccess) &&			\
+		if ((cudaerr != cudaSuccess) &&			        \
 		    (cudaerr != cudaErrorNotReady)) {			\
 			_HFI_ERROR(					\
 				"CUDA failure: %s() returned %d\n",	\
@@ -420,7 +437,15 @@ cudaError_t (*psmi_cudaIpcCloseMemHandle)(void* devPtr);
 		}							\
 	} while (0)
 
-
+#define PSMI_CUDA_DLSYM(psmi_cuda_lib,func) do {                        \
+	psmi_##func = dlsym(psmi_cuda_lib, STRINGIFY(func));            \
+	if (!psmi_##func) {               				\
+		psmi_handle_error(PSMI_EP_NORETURN,                     \
+			       PSM2_INTERNAL_ERR,                       \
+			       " Unable to resolve %s symbol"		\
+			       " in CUDA libraries.\n",STRINGIFY(func));\
+	}                                                               \
+} while (0)
 
 PSMI_ALWAYS_INLINE(
 int
@@ -444,6 +469,15 @@ _psmi_is_cuda_enabled())
 }
 
 #define PSMI_IS_CUDA_ENABLED _psmi_is_cuda_enabled()
+
+PSMI_ALWAYS_INLINE(
+int
+_psmi_is_gdr_copy_enabled())
+{
+        return is_gdr_copy_enabled;
+}
+
+#define PSMI_IS_GDR_COPY_ENABLED _psmi_is_gdr_copy_enabled()
 
 #define PSMI_IS_CUDA_MEM(p) _psmi_is_cuda_mem(p)
 /* XXX TODO: Getting the gpu page size from driver at init time */
@@ -484,6 +518,29 @@ void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *context, void *obj);
 
 extern uint32_t gpudirect_send_threshold;
 extern uint32_t gpudirect_recv_threshold;
+extern uint32_t cuda_thresh_rndv;
+/* This threshold dictates when the sender turns off
+ * GDR Copy. The threshold needs to be less than
+ * CUDA RNDV threshold.
+ */
+extern uint32_t gdr_copy_threshold_send;
+/* This threshold dictates when the reciever turns off
+ * GDR Copy. The threshold needs to be less than
+ * CUDA RNDV threshold.
+ */
+extern uint32_t gdr_copy_threshold_recv;
+
+#define GDR_COPY_THRESH_SEND 32
+#define GDR_COPY_THRESH_RECV 64000
+
+#define PSMI_USE_GDR_COPY(req, len) req->is_buf_gpu_mem &&       \
+				    PSMI_IS_GDR_COPY_ENABLED  && \
+				    len >=1 && len <= gdr_copy_threshold_recv
+
+/* All GPU transfers beyond this threshold use
+ * RNDV protocol. It is mostly a send side knob.
+ */
+#define CUDA_THRESH_RNDV 32768
 
 enum psm2_chb_match_type {
 	/* Complete data found in a single chb */

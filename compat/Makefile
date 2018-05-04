@@ -76,7 +76,7 @@ install: all
 	install -D $(OUTDIR)/${COMPATLIB}.so.${MAJOR} ${DESTDIR}${COMPAT_LIB_TARG}/${COMPATLIB}.so.${MAJOR}
 
 $(OUTDIR)/%.o: $(compat_build_dir)/%.c
-	$(CC) $(CFLAGS) $(INCLUDES) -MMD -c $< -o $@
+	$(CC) $(CFLAGS) $(BASECFLAGS) $(INCLUDES) -MMD -c $< -o $@
 
 $(OUTDIR)/${COMPATLIB}.so.${MAJOR}: ${${COMPATLIB}-objs}
 	$(CC) $(BASECFLAGS) $(LINKER_SCRIPT) $(LDFLAGS) -Wl,-soname=${COMPATLIB}.so.${MAJOR} -shared \

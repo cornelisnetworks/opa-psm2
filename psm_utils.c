@@ -401,12 +401,15 @@ static int psmi_getenv_is_verblevel(int printlevel)
 	return (printlevel <= psmi_getenv_verblevel);
 }
 
-#define GETENV_PRINTF(_level, _fmt, ...)			\
-	do {							\
-		int nlevel = _level;				\
-		if (psmi_getenv_is_verblevel(nlevel))		\
-		nlevel = 0;					\
-		_HFI_ENVDBG(nlevel, _fmt, ##__VA_ARGS__);	\
+#define GETENV_PRINTF(_level, _fmt, ...)				\
+	do {								\
+		if ((_level & PSMI_ENVVAR_LEVEL_NEVER_PRINT) == 0)	\
+		{							\
+			int nlevel = _level;				\
+			if (psmi_getenv_is_verblevel(nlevel))		\
+				nlevel = 0;				\
+			_HFI_ENVDBG(nlevel, _fmt, ##__VA_ARGS__);	\
+		}							\
 	} while (0)
 
 int

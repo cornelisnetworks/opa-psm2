@@ -55,7 +55,6 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <fcntl.h>
 
 #include "psm_user.h"
 
@@ -204,6 +203,169 @@ psmi_spread_hfi_selection(psm2_uuid_t const job_key, long *unit_start,
 	}
 }
 
+static int
+psmi_create_and_open_affinity_shm(psm2_uuid_t const job_key)
+{
+	int shm_fd, ret;
+	int first_to_create = 0;
+	size_t shm_name_len = 256;
+	shared_affinity_ptr = NULL;
+	affinity_shm_name = NULL;
+	affinity_shm_name = (char *) psmi_malloc(PSMI_EP_NONE, UNDEFINED, shm_name_len);
+
+	snprintf(affinity_shm_name, shm_name_len,
+		 AFFINITY_SHM_BASENAME".%d",
+		 psmi_get_uuid_hash(job_key));
+	shm_fd = shm_open(affinity_shm_name, O_RDWR | O_CREAT | O_EXCL,
+			  S_IRUSR | S_IWUSR);
+	if ((shm_fd < 0) && (errno == EEXIST)) {
+		shm_fd = shm_open(affinity_shm_name, O_RDWR, S_IRUSR | S_IWUSR);
+		if (shm_fd < 0) {
+			_HFI_VDBG("Cannot open affinity shared mem fd:%s, errno=%d\n",
+				  affinity_shm_name, errno);
+			return shm_fd;
+		}
+	} else if (shm_fd > 0) {
+		first_to_create = 1;
+	} else {
+		_HFI_VDBG("Cannot create affinity shared mem fd:%s, errno=%d\n",
+			  affinity_shm_name, errno);
+	}
+
+	ret = ftruncate(shm_fd, AFFINITY_SHMEMSIZE);
+	if ( ret < 0 )
+		return ret;
+
+	shared_affinity_ptr = (uint64_t *) mmap(NULL, AFFINITY_SHMEMSIZE, PROT_READ | PROT_WRITE,
+					MAP_SHARED, shm_fd, 0);
+	if (shared_affinity_ptr == MAP_FAILED) {
+		_HFI_VDBG("Cannot mmap affinity shared memory. errno=%d\n",
+			  errno);
+		close(shm_fd);
+		return -1;
+	}
+	close(shm_fd);
+
+	psmi_affinity_shared_file_opened = 1;
+
+	if (first_to_create) {
+		_HFI_VDBG("Creating shm to store HFI affinity per socket\n");
+
+		memset(shared_affinity_ptr, 0, AFFINITY_SHMEMSIZE);
+
+		/*
+		 * Once shm object is initialized, unlock others to be able to
+		 * use it.
+		 */
+		psmi_sem_post(sem_affinity_shm_rw, sem_affinity_shm_rw_name);
+	} else {
+		_HFI_VDBG("Opening shm object to read/write HFI affinity per socket\n");
+	}
+
+	/*
+	 * Start critical section to increment reference count when creating
+	 * or opening shm object. Decrement of ref count will be done before
+	 * closing the shm.
+	 */
+	if (psmi_sem_timedwait(sem_affinity_shm_rw, sem_affinity_shm_rw_name)) {
+		_HFI_VDBG("Could not enter critical section to update shm refcount\n");
+		return -1;
+	}
+
+	shared_affinity_ptr[AFFINITY_SHM_REF_COUNT_LOCATION] += 1;
+
+	/* End critical section */
+	psmi_sem_post(sem_affinity_shm_rw, sem_affinity_shm_rw_name);
+
+	return 0;
+}
+
+/*
+ * Spread HFI selection between units if we find more than one within a socket.
+ */
+static void
+psmi_spread_hfi_within_socket(long *unit_start, long *unit_end, int node_id,
+			      int *saved_hfis, int found, psm2_uuid_t const job_key)
+{
+	int ret, shm_location;
+
+	/*
+	 * Take affinity lock and open shared memory region to be able to
+	 * accurately determine which HFI to pick for this process. If any
+	 * issues, bail by picking first known HFI.
+	 */
+	if (!psmi_affinity_semaphore_open)
+		goto spread_hfi_fallback;
+
+	ret = psmi_create_and_open_affinity_shm(job_key);
+	if (ret < 0)
+		goto spread_hfi_fallback;
+
+	shm_location = AFFINITY_SHM_HFI_INDEX_LOCATION + node_id;
+	if (shm_location > AFFINITY_SHMEMSIZE)
+		goto spread_hfi_fallback;
+
+	/* Start critical section to read/write shm object */
+	if (psmi_sem_timedwait(sem_affinity_shm_rw, sem_affinity_shm_rw_name)) {
+		_HFI_VDBG("Could not enter critical section to update HFI index\n");
+		goto spread_hfi_fallback;
+	}
+
+	*unit_start = *unit_end = shared_affinity_ptr[shm_location];
+	shared_affinity_ptr[shm_location] =
+		(shared_affinity_ptr[shm_location] + 1) % found;
+	_HFI_VDBG("Selected HFI index= %ld, Next HFI=%ld, node = %d, local rank=%d, found=%d.\n",
+		  *unit_start, shared_affinity_ptr[shm_location], node_id,
+		  psmi_get_envvar("MPI_LOCALRANKID"), found);
+
+	/* End Critical Section */
+	psmi_sem_post(sem_affinity_shm_rw, sem_affinity_shm_rw_name);
+
+spread_hfi_fallback:
+	*unit_start = *unit_end = saved_hfis[0];
+}
+
+static void
+psmi_create_affinity_semaphores(psm2_uuid_t const job_key)
+{
+	int ret;
+	sem_affinity_shm_rw_name = NULL;
+	size_t sem_len = 256;
+
+	/*
+	 * If already opened, no need to do anything else.
+	 * This could be true for Multi-EP cases where a different thread has
+	 * already created the semaphores. We don't need separate locks here as
+	 * we are protected by the overall "psmi_creation_lock" which each
+	 * thread will take in psm2_ep_open()
+	 */
+	if (psmi_affinity_semaphore_open)
+		return;
+
+	sem_affinity_shm_rw_name = (char *) psmi_malloc(PSMI_EP_NONE, UNDEFINED, sem_len);
+	snprintf(sem_affinity_shm_rw_name, sem_len,
+		 SEM_AFFINITY_SHM_RW_BASENAME".%d",
+		 psmi_get_uuid_hash(job_key));
+
+	ret = psmi_init_semaphore(&sem_affinity_shm_rw, sem_affinity_shm_rw_name,
+				  S_IRUSR | S_IWUSR, 0);
+	if (ret) {
+		_HFI_VDBG("Cannot initialize semaphore: %s for read-write access to shm object.\n",
+			  sem_affinity_shm_rw_name);
+		sem_close(sem_affinity_shm_rw);
+		psmi_free(sem_affinity_shm_rw_name);
+		sem_affinity_shm_rw_name = NULL;
+		return;
+	}
+
+	_HFI_VDBG("Semaphore: %s created for read-write access to shm object.\n",
+		  sem_affinity_shm_rw_name);
+
+	psmi_affinity_semaphore_open = 1;
+
+	return;
+}
+
 static
 psm2_error_t
 psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
@@ -212,6 +374,7 @@ psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
 {
 	int node_id, unit_id, found = 0;
 	int saved_hfis[nunits];
+
 	context->user_info.hfi1_alg = HFI1_ALG_ACROSS;
 	/* if the user did not set HFI_UNIT then ... */
 	if (unit_param == HFI_UNIT_ID_ANY)
@@ -237,20 +400,14 @@ psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
 					if (hfi_sysfs_unit_read_node_s64(unit_id) == node_id) {
 						saved_hfis[found] = unit_id;
 						found++;
-						_HFI_VDBG("Picking unit: %d for current task"
-							  " which is on node:%d\n", unit_id, node_id);
 					}
 				}
 
-				/*
-				 * Spread HFI selection between units if
-				 * we find more than one within a socket.
-				 */
 				if (found > 1) {
-					*unit_start = (psmi_get_envvar("MPI_LOCALRANKID") +
-						psmi_get_uuid_hash(job_key)) % found;
-
-					*unit_start = *unit_end = saved_hfis[*unit_start];
+					psmi_create_affinity_semaphores(job_key);
+					psmi_spread_hfi_within_socket(unit_start, unit_end,
+								      node_id, saved_hfis,
+								      found, job_key);
 				} else if (found == 1) {
 					*unit_start = *unit_end = saved_hfis[0];
 				}
@@ -270,12 +427,12 @@ psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
 			*unit_end = nunits - 1;
 		}
 	} else if (unit_param >= 0) {
-	/* the user specified HFI_UNIT, we use it. */
+		/* the user specified HFI_UNIT, we use it. */
 		*unit_start = *unit_end = unit_param;
 	} else {
 		psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
-					"PSM2 can't open unit: %ld for reading and writing",
-					unit_param);
+				 "PSM2 can't open unit: %ld for reading and writing",
+				 unit_param);
 		return PSM2_EP_DEVICE_FAILURE;
 	}
 
@@ -515,8 +672,10 @@ psm2_error_t psmi_context_close(psmi_context_t *context)
 		/* only unmap the RTAIL if it was enabled in the first place */
 		if (cinfo->runtime_flags & HFI1_CAP_DMA_RTAIL) {
 			munmap((void*)PSMI_ALIGNDOWN(binfo->rcvhdrtail_base, __hfi_pg_sz),
-			       __hfi_pg_sz);
+				__hfi_pg_sz);
 		}
+		munmap((void*)PSMI_ALIGNDOWN(binfo->user_regbase, __hfi_pg_sz),
+			__hfi_pg_sz);
 		munmap((void*)PSMI_ALIGNDOWN(binfo->events_bufbase, __hfi_pg_sz),
 		       __hfi_pg_sz);
 		munmap((void*)PSMI_ALIGNDOWN(binfo->status_bufbase, __hfi_pg_sz),
@@ -669,12 +828,13 @@ psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
 		max_contexts = max(env_maxctxt.e_int, 1);		/* needs to be non-negative */
 		ask_contexts = min(max_contexts, avail_contexts);	/* needs to be available */
 	} else if (!psmi_getenv("PSM2_SHAREDCONTEXTS_MAX",
-			 "Maximum number of contexts for this PSM2 job",
-			 PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
-			 (union psmi_envvar_val)avail_contexts, &env_maxctxt)) {
+				"",  /* deprecated */
+				PSMI_ENVVAR_LEVEL_HIDDEN | PSMI_ENVVAR_LEVEL_NEVER_PRINT,
+				PSMI_ENVVAR_TYPE_INT,
+				(union psmi_envvar_val)avail_contexts, &env_maxctxt)) {
 
 		_HFI_INFO
-		    ("This env variable is deprecated. Please use PSM2_MAX_CONTEXTS_PER_JOB in future.\n");
+		    ("The PSM2_SHAREDCONTEXTS_MAX env variable is deprecated. Please use PSM2_MAX_CONTEXTS_PER_JOB in future.\n");
 
 		max_contexts = max(env_maxctxt.e_int, 1);		/* needs to be non-negative */
 		ask_contexts = min(max_contexts, avail_contexts);	/* needs to be available */
@@ -717,7 +877,7 @@ psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
 		if (contexts > ask_contexts) {
 			err = psmi_handle_error(NULL, PSM2_EP_NO_DEVICE,
 						"Incompatible settings for "
-						"(PSM2_SHAREDCONTEXTS_MAX / PSM2_MAX_CONTEXTS_PER_JOB) and PSM2_RANKS_PER_CONTEXT");
+						"PSM2_MAX_CONTEXTS_PER_JOB and PSM2_RANKS_PER_CONTEXT");
 			goto fail;
 		}
 		ask_contexts = contexts;

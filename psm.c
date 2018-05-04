@@ -77,11 +77,22 @@ static int psmi_isinit = PSMI_NOT_INITIALIZED;
  * will not work on an endpoint which is in a middle of closing). */
 psmi_lock_t psmi_creation_lock;
 
+sem_t *sem_affinity_shm_rw = NULL;
+int psmi_affinity_shared_file_opened = 0;
+int psmi_affinity_semaphore_open = 0;
+uint64_t *shared_affinity_ptr;
+char *sem_affinity_shm_rw_name;
+char *affinity_shm_name;
+
 #ifdef PSM_CUDA
 int is_cuda_enabled;
+int is_gdr_copy_enabled;
 int device_support_gpudirect;
 int cuda_runtime_version;
 int is_driver_gpudirect_enabled;
+uint32_t cuda_thresh_rndv;
+uint32_t gdr_copy_threshold_send;
+uint32_t gdr_copy_threshold_recv;
 #endif
 
 /*
@@ -125,7 +136,6 @@ int psmi_cuda_initialize()
 {
 	psm2_error_t err = PSM2_OK;
 	int num_devices, dev;
-	struct cudaDeviceProp dev_prop;
 	char *dlerr;
 
 	PSM2_LOG_MSG("entering");
@@ -154,79 +164,108 @@ int psmi_cuda_initialize()
 		goto fail;
 	}
 
+	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuCtxGetCurrent);
+	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuCtxSetCurrent);
+	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuPointerGetAttribute);
+	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuPointerSetAttribute);
+	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDeviceGetAttribute);
+  	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDeviceGet);
 
-	psmi_cuCtxGetCurrent = dlsym(psmi_cuda_lib, "cuCtxGetCurrent");
-	psmi_cuCtxSetCurrent = dlsym(psmi_cuda_lib, "cuCtxSetCurrent");
-	psmi_cuPointerGetAttribute = dlsym(psmi_cuda_lib, "cuPointerGetAttribute");
-	psmi_cuPointerSetAttribute = dlsym(psmi_cuda_lib, "cuPointerSetAttribute");
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaGetDeviceCount);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaGetDevice);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaSetDevice);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaStreamCreate);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaDeviceSynchronize);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaStreamSynchronize);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaEventCreate);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaEventDestroy);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaEventQuery);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaEventRecord);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaEventSynchronize);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaMalloc);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaHostAlloc);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaFreeHost);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaMemcpy);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaMemcpyAsync);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaIpcGetMemHandle);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaIpcOpenMemHandle);
+	PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaIpcCloseMemHandle);
 
-	psmi_cudaGetDeviceCount = dlsym(psmi_cudart_lib, "cudaGetDeviceCount");
-	psmi_cudaGetDeviceProperties = dlsym(psmi_cudart_lib, "cudaGetDeviceProperties");
-	psmi_cudaGetDevice = dlsym(psmi_cudart_lib, "cudaGetDevice");
-	psmi_cudaSetDevice = dlsym(psmi_cudart_lib, "cudaSetDevice");
-	psmi_cudaStreamCreate = dlsym(psmi_cudart_lib, "cudaStreamCreate");
-	psmi_cudaDeviceSynchronize = dlsym(psmi_cudart_lib, "cudaDeviceSynchronize");
-	psmi_cudaStreamSynchronize = dlsym(psmi_cudart_lib, "cudaStreamSynchronize");
-	psmi_cudaEventCreate = dlsym(psmi_cudart_lib, "cudaEventCreate");
-	psmi_cudaEventDestroy = dlsym(psmi_cudart_lib, "cudaEventDestroy");
-	psmi_cudaEventQuery = dlsym(psmi_cudart_lib, "cudaEventQuery");
-	psmi_cudaEventRecord = dlsym(psmi_cudart_lib, "cudaEventRecord");
-	psmi_cudaEventSynchronize = dlsym(psmi_cudart_lib, "cudaEventSynchronize");
-	psmi_cudaMalloc = dlsym(psmi_cudart_lib, "cudaMalloc");
-	psmi_cudaHostAlloc = dlsym(psmi_cudart_lib, "cudaHostAlloc");
-	psmi_cudaFreeHost = dlsym(psmi_cudart_lib, "cudaFreeHost");
-	psmi_cudaMemcpy = dlsym(psmi_cudart_lib, "cudaMemcpy");
-	psmi_cudaMemcpyAsync = dlsym(psmi_cudart_lib, "cudaMemcpyAsync");
-
-	psmi_cudaIpcGetMemHandle = dlsym(psmi_cudart_lib, "cudaIpcGetMemHandle");
-	psmi_cudaIpcOpenMemHandle = dlsym(psmi_cudart_lib, "cudaIpcOpenMemHandle");
-	psmi_cudaIpcCloseMemHandle = dlsym(psmi_cudart_lib, "cudaIpcCloseMemHandle");
-
-	if (!psmi_cuCtxGetCurrent || !psmi_cuCtxSetCurrent ||
-	    !psmi_cuPointerGetAttribute || !psmi_cuPointerSetAttribute ||
-	    !psmi_cudaGetDeviceCount || !psmi_cudaGetDeviceProperties ||
-	    !psmi_cudaGetDevice || !psmi_cudaSetDevice ||
-	    !psmi_cudaStreamCreate ||
-	    !psmi_cudaDeviceSynchronize || !psmi_cudaStreamSynchronize ||
-	    !psmi_cudaEventCreate || !psmi_cudaEventDestroy ||
-	    !psmi_cudaEventQuery || !psmi_cudaEventRecord ||
-	    !psmi_cudaEventSynchronize ||
-	    !psmi_cudaMalloc || !psmi_cudaHostAlloc || !psmi_cudaFreeHost ||
-	    !psmi_cudaMemcpy || !psmi_cudaMemcpyAsync || !psmi_cudaIpcGetMemHandle ||
-	    !psmi_cudaIpcOpenMemHandle || !psmi_cudaIpcCloseMemHandle) {
-		_HFI_ERROR
-			("Unable to resolve symbols in CUDA libraries.\n");
-		goto fail;
-	}
-
-	if (cuda_runtime_version > 7000) {
-		psmi_cudaStreamCreateWithFlags = dlsym(psmi_cudart_lib,
-						       "cudaStreamCreateWithFlags");
-		if (!psmi_cudaStreamCreateWithFlags) {
-			_HFI_ERROR
-				("Unable to resolve symbols in CUDA libraries.\n");
-			goto fail;
-		}
-	}
+	if (cuda_runtime_version > 7000)
+		PSMI_CUDA_DLSYM(psmi_cudart_lib, cudaStreamCreateWithFlags);
 
 	/* Check if all devices support Unified Virtual Addressing. */
 	PSMI_CUDA_CALL(cudaGetDeviceCount, &num_devices);
 	for (dev = 0; dev < num_devices; dev++) {
-		PSMI_CUDA_CALL(cudaGetDeviceProperties, &dev_prop, dev);
-		if (dev_prop.unifiedAddressing != 1) {
-			_HFI_ERROR("CUDA device %d does not support Unified Virtual Addressing.\n", dev);
-			goto fail;
-		}
-		/* Only devices based on Kepler and
-		 * above can support GPU Direct.
-		 */
-		if (dev_prop.major >= 3 && cuda_runtime_version >= 5000)
-			device_support_gpudirect = 1;
-		else {
-			device_support_gpudirect = 0;
-			_HFI_INFO("Device %d does not GPUDirect RDMA (Non-fatal error) \n", dev);
-		}
+    		CUdevice device;
+    		PSMI_CUDA_DRIVER_API_CALL(cuDeviceGet, &device, dev);
+    		int unifiedAddressing;
+    		PSMI_CUDA_DRIVER_API_CALL(cuDeviceGetAttribute,
+                              		&unifiedAddressing,
+                              		CU_DEVICE_ATTRIBUTE_UNIFIED_ADDRESSING,
+                             		device);
+
+    		if (unifiedAddressing !=1){
+      			_HFI_ERROR("CUDA device %d does not support Unified Virtual Addressing.\n", dev);
+      			goto fail;
+   		}
+
+    		int major;
+	    	PSMI_CUDA_DRIVER_API_CALL(cuDeviceGetAttribute,
+                              		&major,
+                              		CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
+                              		device);
+    		if (major >= 3 && cuda_runtime_version >= 5000)
+      			device_support_gpudirect = 1;
+    		else {
+		      	device_support_gpudirect = 0;
+      			_HFI_INFO("Device %d does not support GPUDirect RDMA (Non-fatal error) \n", dev);
+    		}
+
 	}
+
+#ifdef PSM_CUDA
+	union psmi_envvar_val env_enable_gdr_copy;
+	psmi_getenv("PSM2_GDRCOPY",
+				"Enable (set envvar to 1) for gdr copy support in PSM (Enabled by default)",
+				PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_INT,
+				(union psmi_envvar_val)1, &env_enable_gdr_copy);
+	is_gdr_copy_enabled = env_enable_gdr_copy.e_int;
+
+	union psmi_envvar_val env_cuda_thresh_rndv;
+	psmi_getenv("PSM2_CUDA_THRESH_RNDV",
+				"RNDV protocol is used for message sizes greater than the threshold \n",
+				PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_INT,
+				(union psmi_envvar_val)CUDA_THRESH_RNDV, &env_cuda_thresh_rndv);
+	cuda_thresh_rndv = env_cuda_thresh_rndv.e_int;
+
+	if (cuda_thresh_rndv < 0 || cuda_thresh_rndv > CUDA_THRESH_RNDV)
+	    cuda_thresh_rndv = CUDA_THRESH_RNDV;
+
+	union psmi_envvar_val env_gdr_copy_thresh_send;
+	psmi_getenv("PSM2_GDRCOPY_THRESH_SEND",
+				"GDR Copy is turned off on the send side"
+				" for message sizes greater than the threshold \n",
+				PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_INT,
+				(union psmi_envvar_val)GDR_COPY_THRESH_SEND, &env_gdr_copy_thresh_send);
+	gdr_copy_threshold_send = env_gdr_copy_thresh_send.e_int;
+
+	if (gdr_copy_threshold_send < 8 || gdr_copy_threshold_send > cuda_thresh_rndv)
+		gdr_copy_threshold_send = GDR_COPY_THRESH_SEND;
+
+	union psmi_envvar_val env_gdr_copy_thresh_recv;
+	psmi_getenv("PSM2_GDRCOPY_THRESH_RECV",
+				"GDR Copy is turned off on the recv side"
+				" for message sizes greater than the threshold \n",
+				PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_INT,
+				(union psmi_envvar_val)GDR_COPY_THRESH_RECV, &env_gdr_copy_thresh_recv);
+	gdr_copy_threshold_recv = env_gdr_copy_thresh_recv.e_int;
+
+	if (gdr_copy_threshold_recv < 8)
+		gdr_copy_threshold_recv = GDR_COPY_THRESH_RECV;
+
+#endif
+
 	PSM2_LOG_MSG("leaving");
 	return err;
 fail:
@@ -243,11 +282,13 @@ psm2_error_t __psm2_init(int *major, int *minor)
 	psmi_log_initialize();
 
 	PSM2_LOG_MSG("entering");
-#ifdef RDPMC_PERF_FRAMEWORK
-	psmi_rdpmc_perf_framework_init();
-#endif /* RDPMC_PERF_FRAMEWORK */
 
+	/* When PSM_PERF is enabled, the following code causes the
+	   PMU to be programmed to measure instruction cycles of the
+	   TX/RX speedpaths of PSM. */
 	GENERIC_PERF_INIT();
+	GENERIC_PERF_SET_SLOT_NAME(PSM_TX_SPEEDPATH_CTR, "TX");
+	GENERIC_PERF_SET_SLOT_NAME(PSM_RX_SPEEDPATH_CTR, "RX");
 
 	if (psmi_isinit == PSMI_INITIALIZED)
 		goto update;
@@ -457,6 +498,9 @@ psm2_error_t __psm2_finalize(void)
 
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
 
+	/* When PSM_PERF is enabled, the following line causes the
+	   instruction cycles gathered in the current run to be dumped
+	   to stderr. */
 	GENERIC_PERF_DUMP(stderr);
 	ep = psmi_opened_endpoint;
 	while (ep != NULL) {
@@ -475,6 +519,43 @@ psm2_error_t __psm2_finalize(void)
 	while ((hostname = psmi_epid_itor_next(&itor)))
 		psmi_free(hostname);
 	psmi_epid_itor_fini(&itor);
+
+	/* unmap shared mem object for affinity */
+	if (psmi_affinity_shared_file_opened) {
+		/*
+		 * Start critical section to decrement ref count and unlink
+		 * affinity shm file.
+		 */
+		psmi_sem_timedwait(sem_affinity_shm_rw, sem_affinity_shm_rw_name);
+
+		shared_affinity_ptr[AFFINITY_SHM_REF_COUNT_LOCATION] -= 1;
+		if (shared_affinity_ptr[AFFINITY_SHM_REF_COUNT_LOCATION] <= 0) {
+			_HFI_VDBG("Unlink shm file for HFI affinity as there are no more users\n");
+			shm_unlink(affinity_shm_name);
+		} else {
+			_HFI_VDBG("Number of affinity shared memory users left=%ld\n",
+				  shared_affinity_ptr[AFFINITY_SHM_REF_COUNT_LOCATION]);
+		}
+
+		msync(shared_affinity_ptr, AFFINITY_SHMEMSIZE, MS_SYNC);
+
+		/* End critical section */
+		psmi_sem_post(sem_affinity_shm_rw, sem_affinity_shm_rw_name);
+
+		munmap(shared_affinity_ptr, AFFINITY_SHMEMSIZE);
+		psmi_free(affinity_shm_name);
+		affinity_shm_name = NULL;
+		psmi_affinity_shared_file_opened = 0;
+	}
+
+	if (psmi_affinity_semaphore_open) {
+		_HFI_VDBG("Closing and Unlinking Semaphore: %s.\n", sem_affinity_shm_rw_name);
+		sem_close(sem_affinity_shm_rw);
+		sem_unlink(sem_affinity_shm_rw_name);
+		psmi_free(sem_affinity_shm_rw_name);
+		sem_affinity_shm_rw_name = NULL;
+		psmi_affinity_semaphore_open = 0;
+	}
 
 	psmi_isinit = PSMI_FINALIZED;
 	PSM2_LOG_MSG("leaving");

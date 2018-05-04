@@ -58,6 +58,10 @@
 #include "psm_user.h"
 #include "psm_mq_internal.h"
 
+#ifdef PSM_CUDA
+#include "psm_gdrcpy.h"
+#endif
+
 /*
  * Functions to manipulate the expected queue in mq_ep.
  */
@@ -859,12 +863,18 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 	case MQ_STATE_COMPLETE:
 		if (req->buf != NULL) {	/* 0-byte messages don't alloc a sysbuf */
 			copysz = mq_set_msglen(req, len, req->send_msglen);
+			void *ubuf = buf;
 #ifdef PSM_CUDA
-			psmi_mtucpy_fn
+			if (PSMI_USE_GDR_COPY(req, len)) {
+				ubuf = gdr_convert_gpu_to_host_addr(GDR_FD, (unsigned long)buf,
+								    len, 1,
+								    mq->ep->epaddr->proto);
+				psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
+			}
+			psmi_mtucpy_fn(ubuf, (const void *)req->buf, copysz);
 #else
-			psmi_mq_mtucpy
+			psmi_mq_mtucpy(ubuf, (const void *)req->buf, copysz);
 #endif
-				(buf, (const void *)req->buf, copysz);
 			psmi_mq_sysbuf_free(mq, req->buf);
 		}
 		req->buf = buf;
@@ -878,6 +888,16 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 		 * any more than copysz.  After that, swap system with user buffer
 		 */
 		req->recv_msgoff = min(req->recv_msgoff, copysz);
+
+#ifdef PSM_CUDA
+		if (PSMI_USE_GDR_COPY(req, req->send_msglen)) {
+			buf = gdr_convert_gpu_to_host_addr(GDR_FD, (unsigned long)req->user_gpu_buffer,
+							   req->send_msglen, 1,
+							   mq->ep->epaddr->proto);
+			psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
+		}
+#endif
+
 		if (req->recv_msgoff) {
 #ifdef PSM_CUDA
 			psmi_mtucpy_fn
@@ -994,6 +1014,10 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 
 #ifdef PSM_CUDA
 		req->is_buf_gpu_mem = gpu_mem;
+		if (gpu_mem)
+			req->user_gpu_buffer = buf;
+		else
+			req->user_gpu_buffer = NULL;
 #endif
 
 		/* Nobody should touch the buffer after it's posted */
@@ -1011,6 +1035,10 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 			  tagsel->tag[0], tagsel->tag[1], tagsel->tag[2], req);
 #ifdef PSM_CUDA
 		req->is_buf_gpu_mem = gpu_mem;
+		if (gpu_mem)
+			req->user_gpu_buffer = buf;
+		else
+			req->user_gpu_buffer = NULL;
 #endif
 
 		req->context = context;
@@ -1363,7 +1391,7 @@ psm2_error_t psmi_mq_malloc(psm2_mq_t *mqo)
 	mq->hfi_thresh_tiny = MQ_HFI_THRESH_TINY;
 #ifdef PSM_CUDA
 	if (PSMI_IS_CUDA_ENABLED)
-		mq->hfi_base_window_rv = MQ_HFI_THRESH_RNDV_CUDA;
+		mq->hfi_base_window_rv = MQ_HFI_WINDOW_RNDV_CUDA;
 #endif
 	mq->shm_thresh_rv = MQ_SHM_THRESH_RNDV;
 
