@@ -57,6 +57,10 @@
 #include "psm_mq_internal.h"
 #include "ptl_ips/ips_proto_header.h"
 
+#ifdef PSM_CUDA
+#include "psm_gdrcpy.h"
+#endif
+
 #if 0
 /* Not exposed in public psm, but may extend parts of PSM 2.1 to support
  * this feature before 2.3 */
@@ -362,8 +366,25 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 			PSM_VALGRIND_DEFINE_MQ_RECV(req->buf, req->buf_len,
 						    msglen);
 			/* mq_copy_tiny() can handle zero byte */
+
+#ifdef PSM_CUDA
+			if (PSMI_USE_GDR_COPY(req, msglen)) {
+				void* mmaped_host = gdr_convert_gpu_to_host_addr(GDR_FD,
+								(unsigned long)req->buf,
+								msglen, 1, src->proto);
+				mq_copy_tiny((uint32_t *) mmaped_host,
+							 (uint32_t *) payload, msglen);
+			}
+			else {
+				mq_copy_tiny((uint32_t *) req->buf,
+							 (uint32_t *) payload, msglen);
+			}
+#else
+
 			mq_copy_tiny((uint32_t *) req->buf,
-				     (uint32_t *) payload, msglen);
+						 (uint32_t *) payload, msglen);
+#endif
+
 			req->state = MQ_STATE_COMPLETE;
 			ips_barrier();
 			mq_qq_append(&mq->completed_q, req);
@@ -372,16 +393,34 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		case MQ_MSG_SHORT:	/* message fits in 1 payload */
 			PSM_VALGRIND_DEFINE_MQ_RECV(req->buf, req->buf_len,
 						    msglen);
+			void* user_buffer = req->buf;
+#ifdef PSM_CUDA
+			psmi_mtucpy_fn_t psmi_mtucpy_fn = psmi_mq_mtucpy;
+			if (PSMI_USE_GDR_COPY(req, msglen)) {
+				user_buffer = gdr_convert_gpu_to_host_addr(GDR_FD,
+							(unsigned long)req->buf,
+							msglen, 1, src->proto);
+				psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
+			}
+#endif
 			if (msglen <= paylen) {
-				psmi_mq_mtucpy(req->buf, payload, msglen);
+#ifdef PSM_CUDA
+				psmi_mtucpy_fn(user_buffer, payload, msglen);
+#else
+				psmi_mq_mtucpy(user_buffer, payload, msglen);
+#endif
 			} else {
 				psmi_assert((msglen & ~0x3) == paylen);
-				psmi_mq_mtucpy(req->buf, payload, paylen);
+#ifdef PSM_CUDA
+				psmi_mtucpy_fn(user_buffer, payload, paylen);
+#else
+				psmi_mq_mtucpy(user_buffer, payload, paylen);
+#endif
 				/*
 				 * there are nonDW bytes attached in header,
 				 * copy after the DW payload.
 				 */
-				mq_copy_tiny((uint32_t *)(req->buf+paylen),
+				mq_copy_tiny((uint32_t *)(user_buffer+paylen),
 					(uint32_t *)&offset, msglen & 0x3);
 			}
 			req->state = MQ_STATE_COMPLETE;
@@ -396,6 +435,13 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 			STAILQ_INSERT_TAIL(&mq->eager_q, req, nextq);
 			_HFI_VDBG("exp MSG_EAGER of length %d bytes pay=%d\n",
 				  msglen, paylen);
+#ifdef PSM_CUDA
+			if (PSMI_USE_GDR_COPY(req, req->send_msglen)) {
+				req->buf = gdr_convert_gpu_to_host_addr(GDR_FD,
+						(unsigned long)req->user_gpu_buffer,
+						req->send_msglen, 1, src->proto);
+			}
+#endif
 			if (paylen > 0)
 				psmi_mq_handle_data(mq, req, offset, payload,
 						    paylen);

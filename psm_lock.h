@@ -139,4 +139,52 @@ PSMI_ALWAYS_INLINE(void psmi_init_lock(psmi_lock_t *lock))
 #endif
 }
 
+PSMI_ALWAYS_INLINE(int psmi_sem_post(sem_t *sem, const char *name))
+{
+	if (sem_post(sem) == -1) {
+		_HFI_VDBG("Semaphore %s: post failed\n", name ? name : "NULL" );
+		return -1;
+	}
+
+	_HFI_VDBG("Semaphore %s: post succeeded\n", name ? name : "NULL");
+
+	return 0;
+}
+
+PSMI_ALWAYS_INLINE(int psmi_sem_timedwait(sem_t *sem, const char *name))
+{
+	/* Wait 5 seconds for shm read-write lock to open */
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	ts.tv_sec += 5;
+
+	if (sem_timedwait(sem, &ts) == -1) {
+		_HFI_VDBG("Semaphore %s: Timedwait failed\n", name ? name : "NULL" );
+		return -1;
+	}
+
+	_HFI_VDBG("Semaphore %s: Timedwait succeeded\n", name ? name : "NULL");
+
+	return 0;
+}
+
+PSMI_ALWAYS_INLINE(int psmi_init_semaphore(sem_t **sem, const char *name,
+					   mode_t mode, int value))
+{
+	*sem = sem_open(name, O_CREAT | O_EXCL, mode, value);
+	if ((*sem == SEM_FAILED) && (errno == EEXIST)) {
+		*sem = sem_open(name, O_CREAT, mode, value);
+		if (*sem == SEM_FAILED) {
+			_HFI_VDBG("Cannot open semaphore %s, errno=%d\n",
+				  name, errno);
+			return -1;
+		}
+	} else if (*sem == SEM_FAILED) {
+		_HFI_VDBG("Cannot create semaphore %s, errno=%d\n", name, errno);
+		return -1;
+	}
+
+	return 0;
+}
+
 #endif /* _PSMI_LOCK_H */

@@ -213,34 +213,31 @@ RELATED SOFTWARE TO PSM2
 
 MPI Libraries supported
 -----------------------
-A large number of open source (OpenMPI, MVAPICH2) and Vendor MPI
+A large number of open source (Open MPI, MVAPICH2) and Vendor MPI
 implementations support PSM2 for optimized communication on HCAs. Vendor MPI
 implementations (HP-MPI, Intel MPI 4.0 with PMI, Platform/Scali MPI)
 require that the PSM2 runtime libraries be installed and available on
 each node. Usually a configuration file or a command line switch to mpirun
 needs to be specified to utilize the PSM2 transport.
 
-OpenMPI support
+Open MPI support
 ---------------
-It is recommended to use the v1.10.4 or newer version of OpenMPI.
-Prior versions of OpenMPI have an issue with support PSM2 network transports
-mixed with standard Verbs transport (BTL openib). This prevents an OpenMPI
-installation with network modules available for PSM2 and Verbs to work
-correctly on nodes with no HFI hardware. This has been fixed in the
-latest development branch allowing a single OpenMPI installation to target
-HFI hardware via PSM2 or Verbs as well as alternate transports seamlessly.
+If using a version of Open MPI that is not packaged within IFS release, it
+is required to use at least v1.10.4. Older versions are not supported. Since
+v1.10.4 is not in active development, it is further recommended to use upstream
+versions v2.1.2 or newer.
 
-If NVIDIA CUDA support is desired, you can use the OpenMPI build
-(v1.10.4-cuda-hfi) provided by Intel in the IFS installer v10.4.X or newer.
-The changes have also been accepted into v3.0.x branch of upstream OpenMPI
-repository. Therefore subsequent v3.0.x versions of OpenMPI should carry the
-required OpenMPI support for PSM2 GPUDirect feature.
+If NVIDIA* CUDA* support is desired, you can use Open MPI built with CUDA*
+support provided by Intel in the IFS installer 10.4 or newer. This Open MPI
+build is identified with the "-cuda-hfi" tag to the Open MPI base version
+name.  The NVIDIA* CUDA* support changes have also been accepted into v2.1.3,
+v3.0.1 and v3.1.0 branches of upstream Open MPI repository.
 
-PSM2 header and runtime files need to be installed on a node where the OpenMPI
+PSM2 header and runtime files need to be installed on a node where the Open MPI
 build is performed. All compute nodes additionally should have the PSM2 runtime
-libraries available on them. OpenMPI provides a standard configure, make and
+libraries available on them. Open MPI provides a standard configure, make and
 make install mechanism which will detect and build the relevant PSM2 network
-modules for OpenMPI once the header and runtime files are detected.
+modules for Open MPI once the header and runtime files are detected.
 
 MVAPICH2 support
 ----------------
@@ -251,29 +248,24 @@ compute nodes should also have the PSM2 runtime libraries available on them.
 
 For building and installing MVAPICH2 with OPA support, refer to MVAPICH2
 user guides here:
-http://mvapich.cse.ohio-state.edu/static/media/mvapich/mvapich2-2.2rc1-userguide.html
+http://mvapich.cse.ohio-state.edu/userguide/
 
-(Note: Support for PSM2 is currently on v2.2rc1 of OSU MVAPICH2 code base.
-The above link might change when a stable v2.2 is released.)
+(Note: Support for PSM2 is included in v2.2 and newer)
 
 OFED Support
 ------------
 Intel OPA is not yet included within OFED. But the hfi1 driver is available
-publicly at kernel.org. Please do pull the driver from either kernel.org or
-the github page for opa-hfi1 driver (https://github.com/01org/opa-hfi1)
+publicly at kernel.org.
 
 SUPPORTING DOCUMENTATION
 ------------------------
 PSM2 Programmer's Guide is published along with documentation for "Intel® Omni-Path
 Host Fabric Interface PCIe Adapter 100 Series"
-(http://www.intel.com/content/www/us/en/support/network-and-i-o/fabric-products/000016242.html)
+(https://www.intel.com/content/www/us/en/support/articles/000016242/network-and-i-o/fabric-products.html)
 
 Refer to this document for description on APIs and environment variables that
 are available for use. For sample code on writing applications leveraging the
 PSM2 APIs, refer to Section 5.
-
-Link to latest (as of Sep 2017) PSM2 Programmer's Guide:
-https://www.intel.com/content/dam/support/us/en/documents/network-and-i-o/fabric-products/Intel_PSM2_PG_H76473_v7_0.pdf
 
 PSM Compatibility Support
 ------------

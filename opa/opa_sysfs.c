@@ -374,6 +374,10 @@ bail:
 	if (ret == -1) {
 		free(data);
 	} else {
+		if (ret < sysfs_page_size)
+			data[ret] = 0;
+		else
+			data[sysfs_page_size-1] = 0;
 		*datap = data;
 	}
 

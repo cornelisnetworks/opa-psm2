@@ -66,6 +66,10 @@
 #include "ips_proto_help.h"
 #include "psmi_wrappers.h"
 
+#ifdef PSM_CUDA
+#include "psm_gdrcpy.h"
+#endif
+
 /*
  * Control message types have their own flag to determine whether a message of
  * that type is queued or not.  These flags are kept in a state bitfield.
@@ -620,6 +624,14 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 				PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
 				(union psmi_envvar_val)0, /* Disabled by default */
 				&env_gpudirect_rdma);
+	/* The following cases need to be handled:
+	 * 1) GPU DIRECT is turned off but GDR COPY is turned on by the user or
+	 *    by default - Turn off GDR COPY
+	 * 2) GPU DIRECT is on but GDR COPY is turned off by the user - Leave
+	 *.   this config as it is.
+	 */
+	if (!env_gpudirect_rdma.e_uint)
+		is_gdr_copy_enabled = 0;
 
 	/* Default Send threshold for Gpu-direct set to 30000 */
 	union psmi_envvar_val env_gpudirect_send_thresh;
@@ -1688,10 +1700,28 @@ handle_ENOMEM_on_DMA_completion(struct ips_proto *proto)
 
 		if (lengthEvicted)
 			return PSM2_OK; /* signals a retry of the writev command. */
-		else
-			return PSM2_EP_NO_RESOURCES;  /* should signal a return of
+		else {
+#ifdef PSM_CUDA
+			if (PSMI_IS_GDR_COPY_ENABLED && gdr_cache_evict()) {
+				return PSM2_OK;
+			} else
+#endif
+				return PSM2_EP_NO_RESOURCES;  /* should signal a return of
 							no progress, and retry later */
+		}
 	}
+#ifdef PSM_CUDA
+	else if (PSMI_IS_GDR_COPY_ENABLED) {
+		uint64_t lengthEvicted = gdr_cache_evict();
+		if (!proto->writevFailTime)
+			proto->writevFailTime = now;
+
+		if (lengthEvicted)
+			return PSM2_OK;
+		else
+			return PSM2_EP_NO_RESOURCES;
+	}
+#endif
 	else if (!proto->writevFailTime)
 	{
 		proto->writevFailTime = now;

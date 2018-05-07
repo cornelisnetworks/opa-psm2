@@ -77,11 +77,22 @@ static int psmi_isinit = PSMI_NOT_INITIALIZED;
  * will not work on an endpoint which is in a middle of closing). */
 psmi_lock_t psmi_creation_lock;
 
+sem_t *sem_affinity_shm_rw = NULL;
+int psmi_affinity_shared_file_opened = 0;
+int psmi_affinity_semaphore_open = 0;
+uint64_t *shared_affinity_ptr;
+char *sem_affinity_shm_rw_name;
+char *affinity_shm_name;
+
 #ifdef PSM_CUDA
 int is_cuda_enabled;
+int is_gdr_copy_enabled;
 int device_support_gpudirect;
 int cuda_runtime_version;
 int is_driver_gpudirect_enabled;
+uint32_t cuda_thresh_rndv;
+uint32_t gdr_copy_threshold_send;
+uint32_t gdr_copy_threshold_recv;
 #endif
 
 /*
@@ -212,6 +223,49 @@ int psmi_cuda_initialize()
     		}
 
 	}
+
+#ifdef PSM_CUDA
+	union psmi_envvar_val env_enable_gdr_copy;
+	psmi_getenv("PSM2_GDRCOPY",
+				"Enable (set envvar to 1) for gdr copy support in PSM (Enabled by default)",
+				PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_INT,
+				(union psmi_envvar_val)1, &env_enable_gdr_copy);
+	is_gdr_copy_enabled = env_enable_gdr_copy.e_int;
+
+	union psmi_envvar_val env_cuda_thresh_rndv;
+	psmi_getenv("PSM2_CUDA_THRESH_RNDV",
+				"RNDV protocol is used for message sizes greater than the threshold \n",
+				PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_INT,
+				(union psmi_envvar_val)CUDA_THRESH_RNDV, &env_cuda_thresh_rndv);
+	cuda_thresh_rndv = env_cuda_thresh_rndv.e_int;
+
+	if (cuda_thresh_rndv < 0 || cuda_thresh_rndv > CUDA_THRESH_RNDV)
+	    cuda_thresh_rndv = CUDA_THRESH_RNDV;
+
+	union psmi_envvar_val env_gdr_copy_thresh_send;
+	psmi_getenv("PSM2_GDRCOPY_THRESH_SEND",
+				"GDR Copy is turned off on the send side"
+				" for message sizes greater than the threshold \n",
+				PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_INT,
+				(union psmi_envvar_val)GDR_COPY_THRESH_SEND, &env_gdr_copy_thresh_send);
+	gdr_copy_threshold_send = env_gdr_copy_thresh_send.e_int;
+
+	if (gdr_copy_threshold_send < 8 || gdr_copy_threshold_send > cuda_thresh_rndv)
+		gdr_copy_threshold_send = GDR_COPY_THRESH_SEND;
+
+	union psmi_envvar_val env_gdr_copy_thresh_recv;
+	psmi_getenv("PSM2_GDRCOPY_THRESH_RECV",
+				"GDR Copy is turned off on the recv side"
+				" for message sizes greater than the threshold \n",
+				PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_INT,
+				(union psmi_envvar_val)GDR_COPY_THRESH_RECV, &env_gdr_copy_thresh_recv);
+	gdr_copy_threshold_recv = env_gdr_copy_thresh_recv.e_int;
+
+	if (gdr_copy_threshold_recv < 8)
+		gdr_copy_threshold_recv = GDR_COPY_THRESH_RECV;
+
+#endif
+
 	PSM2_LOG_MSG("leaving");
 	return err;
 fail:
@@ -465,6 +519,43 @@ psm2_error_t __psm2_finalize(void)
 	while ((hostname = psmi_epid_itor_next(&itor)))
 		psmi_free(hostname);
 	psmi_epid_itor_fini(&itor);
+
+	/* unmap shared mem object for affinity */
+	if (psmi_affinity_shared_file_opened) {
+		/*
+		 * Start critical section to decrement ref count and unlink
+		 * affinity shm file.
+		 */
+		psmi_sem_timedwait(sem_affinity_shm_rw, sem_affinity_shm_rw_name);
+
+		shared_affinity_ptr[AFFINITY_SHM_REF_COUNT_LOCATION] -= 1;
+		if (shared_affinity_ptr[AFFINITY_SHM_REF_COUNT_LOCATION] <= 0) {
+			_HFI_VDBG("Unlink shm file for HFI affinity as there are no more users\n");
+			shm_unlink(affinity_shm_name);
+		} else {
+			_HFI_VDBG("Number of affinity shared memory users left=%ld\n",
+				  shared_affinity_ptr[AFFINITY_SHM_REF_COUNT_LOCATION]);
+		}
+
+		msync(shared_affinity_ptr, AFFINITY_SHMEMSIZE, MS_SYNC);
+
+		/* End critical section */
+		psmi_sem_post(sem_affinity_shm_rw, sem_affinity_shm_rw_name);
+
+		munmap(shared_affinity_ptr, AFFINITY_SHMEMSIZE);
+		psmi_free(affinity_shm_name);
+		affinity_shm_name = NULL;
+		psmi_affinity_shared_file_opened = 0;
+	}
+
+	if (psmi_affinity_semaphore_open) {
+		_HFI_VDBG("Closing and Unlinking Semaphore: %s.\n", sem_affinity_shm_rw_name);
+		sem_close(sem_affinity_shm_rw);
+		sem_unlink(sem_affinity_shm_rw_name);
+		psmi_free(sem_affinity_shm_rw_name);
+		sem_affinity_shm_rw_name = NULL;
+		psmi_affinity_semaphore_open = 0;
+	}
 
 	psmi_isinit = PSMI_FINALIZED;
 	PSM2_LOG_MSG("leaving");

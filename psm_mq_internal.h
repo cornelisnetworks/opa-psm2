@@ -81,6 +81,14 @@ typedef psm2_error_t(*psm_mq_unexpected_callback_fn_t)
 #define NUM_HASH_CONFIGS 3
 #define NUM_MQ_SUBLISTS (NUM_HASH_CONFIGS + 1)
 #define REMOVE_ENTRY 1
+#define MICRO_SEC 1000000
+#define MSG_BUFFER_LEN 100
+
+struct psm2_mq_perf_data
+{
+	pthread_t perf_print_thread;
+	int perf_print_stats;
+};
 
 enum psm2_mq_tag_pattern {
 	PSM2_TAG_SRC = 0,
@@ -118,8 +126,12 @@ struct psm2_mq {
 	int memmode;
 
 	uint64_t timestamp;
+
 	psm2_mq_stats_t stats;	/**> MQ stats, accumulated by each PTL */
+
 	int print_stats;
+	struct psm2_mq_perf_data mq_perf_data;
+
 	int nohash_fastpath;
 	unsigned unexpected_hash_len;
 	unsigned unexpected_list_len;
@@ -146,7 +158,7 @@ struct psm2_mq {
 #define MQ_HFI_WINDOW_RNDV_XEON  131072
 
 #ifdef PSM_CUDA
-#define MQ_HFI_THRESH_RNDV_CUDA 2097152
+#define MQ_HFI_WINDOW_RNDV_CUDA 2097152
 #endif
 
 #define MQ_SHM_THRESH_RNDV 16000
@@ -268,6 +280,13 @@ struct psm2_mq_req {
 	uintptr_t rts_sbuf;
 
 #ifdef PSM_CUDA
+	uint8_t* user_gpu_buffer;
+	STAILQ_HEAD(sendreq_spec_, ips_cuda_hostbuf) sendreq_prefetch;
+	uint32_t prefetch_send_msgoff;
+	int cuda_hostbuf_used;
+	cudaIpcMemHandle_t cuda_ipc_handle;
+	cudaEvent_t cuda_ipc_event;
+	uint8_t cuda_ipc_handle_attached;
 	/* is_buf_gpu_mem - used to indicate if the send or receive is issued
 	 * on a device/host buffer.
 	 * is_sendbuf_gpu_mem - Used to always select TID path on the receiver
@@ -275,12 +294,6 @@ struct psm2_mq_req {
 	 */
 	uint8_t is_buf_gpu_mem;
 	uint8_t is_sendbuf_gpu_mem;
-	STAILQ_HEAD(sendreq_spec_, ips_cuda_hostbuf) sendreq_prefetch;
-	uint32_t prefetch_send_msgoff;
-	int cuda_hostbuf_used;
-	cudaIpcMemHandle_t cuda_ipc_handle;
-	cudaEvent_t cuda_ipc_event;
-	uint8_t cuda_ipc_handle_attached;
 #endif
 
 	uint64_t user_reserved[4];

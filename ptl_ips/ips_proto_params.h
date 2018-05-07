@@ -159,7 +159,7 @@
  * in a special case where the send is on a device
  * buffer and the receive is on a host buffer.
  */
-#define IPS_SEND_FLAG_GPU_BUF           0x08
+#define IPS_SEND_FLAG_USER_BUF_GPU      0x08
 #endif
 
 #define IPS_SEND_FLAG_PROTO_OPTS        0x3f	/* only 6bits wire flags */
@@ -167,6 +167,15 @@
 /* scb flags */
 #define IPS_SEND_FLAG_PENDING		0x0100
 #define IPS_SEND_FLAG_PERSISTENT	0x0200
+
+/* This flag is used to indicate if the send is on
+ * a GPU buffer. This helps PIO/SDMA paths to detect
+ * if payload is GPU buffer without having to call
+ * cudaGetPointerAttribute.
+ */
+#ifdef PSM_CUDA
+#define IPS_SEND_FLAG_PAYLOAD_BUF_GPU   0x0400
+#endif
 
 /* 0x10000000, interrupt when done */
 #define IPS_SEND_FLAG_INTR		(1<<HFI_KHDR_INTR_SHIFT)

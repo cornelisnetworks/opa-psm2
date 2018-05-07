@@ -79,12 +79,16 @@ function usage()
     echo "           Sets PSM_CUDA=1, creating -cuda based spec and rpms"
     echo "     -d <path>, -dir <path>"
     echo "           Optionally sets output folder for rpmbuild to use"
+    echo "     -h <hal_gen>, -hal_gen <hal_gen>"
+    echo "           Optional, default is includes all HAL generations"
+    echo "           Sets hal generations for rpmbuild to use"
     echo "     Examples:"
     echo "           $0 b"
     echo "           $0 s -cuda"
     echo "           $0 -cuda"
     echo "           $0 -d ./temp"
     echo "           $0 b -cuda -dir output"
+    echo "           $0 -h gen1"
     exit 1
 }
 
@@ -97,6 +101,8 @@ OUTDIR=build_release
 # This is where rpmbuild places rpm(s) and uses its build meta-data.
 # It can be set the same as OUTDIR, and work just fine if desired.
 TEMPDIR=temp.$$
+
+HAL_GENS=""
 
 while [ "$1" != "" ]; do
     case $1 in
@@ -116,6 +122,9 @@ while [ "$1" != "" ]; do
                         RPM_NAME_BASEEXT="$1"
                         export RPM_NAME_BASEEXT="$1"
                         ;;
+        -h | -halgen)   shift
+                        HAL_GENS="$1 $HAL_GENS"
+	                ;;
         -r | -rpmname)  shift
                         if [ -z "$1" ]; then
                             usage
@@ -132,11 +141,15 @@ while [ "$1" != "" ]; do
     shift
 done
 
+if [ "$HAL_GENS" = "" ]; then
+    HAL_GENS="*"
+fi
+
 # Generic cleanup, build, and tmp folder creation
 make distclean OUTDIR=$OUTDIR
-make RPM_NAME=$RPM_NAME RPM_NAME_BASEEXT=$RPM_NAME_BASEEXT dist OUTDIR=$OUTDIR
+make RPM_NAME=$RPM_NAME RPM_NAME_BASEEXT=$RPM_NAME_BASEEXT "PSM_HAL_ENABLE=$HAL_GENS" dist OUTDIR=$OUTDIR
 mkdir -p ./$TEMPDIR/{BUILD,RPMS,SOURCES,SPECS,SRPMS,BUILDROOT}
-# Differnet paths based on RPM_EXT
+# Different paths based on RPM_EXT
 cp ${OUTDIR}/$RPM_NAME-*.tar.gz $TEMPDIR/SOURCES
 make RPM_NAME=$RPM_NAME RPM_NAME_BASEEXT=$RPM_NAME_BASEEXT specfile OUTDIR=$OUTDIR
 cp ${OUTDIR}/$RPM_NAME.spec $TEMPDIR/SPECS

@@ -489,7 +489,8 @@ ${TARGLIB}-objs := ptl_am/am_reqrep_shmem.o	\
 		   ptl_self/ptl.o		\
 		   opa/*.o			\
 		   psm_diags.o 			\
-		   psmi_wrappers.o
+		   psmi_wrappers.o              \
+		   psm_gdrcpy.o
 
 ${TARGLIB}-objs := $(patsubst %.o, ${OUTDIR}/%.o, ${${TARGLIB}-objs})
 

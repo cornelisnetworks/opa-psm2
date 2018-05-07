@@ -61,6 +61,8 @@
 
 #include <sched.h>
 #include <numa.h>
+#include <semaphore.h>
+#include <fcntl.h>
 
 #include "psm2.h"
 #include "psm2_mq.h"
@@ -145,8 +147,21 @@ int psmi_get_current_proc_location();
 extern int psmi_epid_ver;
 extern uint32_t non_dw_mul_sdma;
 extern psmi_lock_t psmi_creation_lock;
-
 extern psm2_ep_t psmi_opened_endpoint;
+
+extern int psmi_affinity_shared_file_opened;
+extern uint64_t *shared_affinity_ptr;
+extern char *affinity_shm_name;
+
+extern sem_t *sem_affinity_shm_rw;
+extern int psmi_affinity_semaphore_open;
+extern char *sem_affinity_shm_rw_name;
+
+#define AFFINITY_SHM_BASENAME			"/psm2_hfi_affinity_shm"
+#define AFFINITY_SHMEMSIZE			sysconf(_SC_PAGE_SIZE)
+#define AFFINITY_SHM_REF_COUNT_LOCATION		0
+#define AFFINITY_SHM_HFI_INDEX_LOCATION		1
+#define SEM_AFFINITY_SHM_RW_BASENAME		"/psm2_hfi_affinity_shm_rw_mutex"
 
 PSMI_ALWAYS_INLINE(
 int
@@ -337,6 +352,7 @@ void psmi_profile_reblock(int did_no_progress) __attribute__ ((weak));
 #endif
 
 extern int is_cuda_enabled;
+extern int is_gdr_copy_enabled;
 extern int device_support_gpudirect;
 extern int cuda_runtime_version;
 
@@ -454,6 +470,15 @@ _psmi_is_cuda_enabled())
 
 #define PSMI_IS_CUDA_ENABLED _psmi_is_cuda_enabled()
 
+PSMI_ALWAYS_INLINE(
+int
+_psmi_is_gdr_copy_enabled())
+{
+        return is_gdr_copy_enabled;
+}
+
+#define PSMI_IS_GDR_COPY_ENABLED _psmi_is_gdr_copy_enabled()
+
 #define PSMI_IS_CUDA_MEM(p) _psmi_is_cuda_mem(p)
 /* XXX TODO: Getting the gpu page size from driver at init time */
 #define PSMI_GPU_PAGESIZE 65536
@@ -493,6 +518,29 @@ void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *context, void *obj);
 
 extern uint32_t gpudirect_send_threshold;
 extern uint32_t gpudirect_recv_threshold;
+extern uint32_t cuda_thresh_rndv;
+/* This threshold dictates when the sender turns off
+ * GDR Copy. The threshold needs to be less than
+ * CUDA RNDV threshold.
+ */
+extern uint32_t gdr_copy_threshold_send;
+/* This threshold dictates when the reciever turns off
+ * GDR Copy. The threshold needs to be less than
+ * CUDA RNDV threshold.
+ */
+extern uint32_t gdr_copy_threshold_recv;
+
+#define GDR_COPY_THRESH_SEND 32
+#define GDR_COPY_THRESH_RECV 64000
+
+#define PSMI_USE_GDR_COPY(req, len) req->is_buf_gpu_mem &&       \
+				    PSMI_IS_GDR_COPY_ENABLED  && \
+				    len >=1 && len <= gdr_copy_threshold_recv
+
+/* All GPU transfers beyond this threshold use
+ * RNDV protocol. It is mostly a send side knob.
+ */
+#define CUDA_THRESH_RNDV 32768
 
 enum psm2_chb_match_type {
 	/* Complete data found in a single chb */

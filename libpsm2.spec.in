@@ -53,10 +53,10 @@ Name: @RPM_NAME@
 Version: @VERSION@
 Release: 1@SPEC_FILE_RELEASE_DIST@
 License: BSD or GPLv2
-URL: https://github.com/01org/opa-psm2/
+URL: https://github.com/intel/opa-psm2/
 
 # The tarball can be created by:
-# git clone https://github.com/01org/opa-psm2
+# git clone https://github.com/intel/opa-psm2
 # cd opa-psm2
 # git checkout @DIST_SHA@
 # make dist
