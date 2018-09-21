@@ -116,10 +116,12 @@ MOCK_DEF_EPILOGUE(psmi_mq_req_alloc);
 #ifdef PSM_CUDA
 void psmi_cuda_recvreq_alloc_func(int is_alloc, void* context, void* obj) {
 	psm2_mq_req_t recvreq = (psm2_mq_req_t)obj;
-	if (is_alloc)
-		PSMI_CUDA_CALL(cudaEventCreate, &recvreq->cuda_ipc_event);
-	else
-		PSMI_CUDA_CALL(cudaEventDestroy, recvreq->cuda_ipc_event);
+	if (PSMI_IS_CUDA_ENABLED) {
+		if (is_alloc)
+			PSMI_CUDA_CALL(cuEventCreate, &recvreq->cuda_ipc_event, CU_EVENT_DEFAULT);
+		else
+			PSMI_CUDA_CALL(cuEventDestroy, recvreq->cuda_ipc_event);
+	}
 	return;
 }
 #endif

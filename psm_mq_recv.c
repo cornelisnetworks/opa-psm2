@@ -54,6 +54,7 @@
 /* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
+#include "psm2_hal.h"
 #include "psm_mq_internal.h"
 #include "ptl_ips/ips_proto_header.h"
 
@@ -84,13 +85,7 @@ void psmi_mq_handle_rts_complete(psm2_mq_req_t req)
 	ips_barrier();
 	if(!psmi_is_req_internal(req))
 		mq_qq_append(&mq->completed_q, req);
-#ifdef PSM_VALGRIND
-	if (MQE_TYPE_IS_RECV(req->type))
-		PSM_VALGRIND_DEFINE_MQ_RECV(req->buf, req->buf_len,
-					    req->recv_msglen);
-	else
-		VALGRIND_MAKE_MEM_DEFINED(req->buf, req->buf_len);
-#endif
+
 	_HFI_VDBG("RTS complete, req=%p, recv_msglen = %d\n",
 		  req, req->recv_msglen);
 	return;
@@ -118,7 +113,6 @@ psmi_mq_req_copy(psm2_mq_req_t req,
 		msglen_this = nbytes;
 	}
 
-	VALGRIND_MAKE_MEM_DEFINED(msgptr, msglen_this);
 	psmi_mq_mtucpy(msgptr, buf, msglen_this);
 
 	if (req->recv_msgoff < end) {
@@ -279,7 +273,7 @@ psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		}
 		req->recv_msgoff = req->send_msgoff = paylen;
 		*req_o = req;	/* yes match */
-		PSM2_LOG_EPM(OPCODE_LONG_RTS,PSM2_LOG_EPM_RX,src->epid,mq->ep->epid,
+		PSM2_LOG_EPM(OPCODE_LONG_RTS,PSM2_LOG_RX,src->epid,mq->ep->epid,
 			    "req->rts_reqidx_peer: %d",req->rts_reqidx_peer);
 		rc = MQ_RET_MATCH_OK;
 	} else if (msgorder > 1) {
@@ -297,7 +291,7 @@ psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		 * mq_iprobe */
 		req->send_msglen = req->recv_msglen = send_msglen;
 		PSM2_LOG_EPM_COND(req->send_msglen > mq->hfi_thresh_rv,
-				 OPCODE_LONG_RTS,PSM2_LOG_EPM_RX,src->epid,mq->ep->epid,
+				 OPCODE_LONG_RTS,PSM2_LOG_RX,src->epid,mq->ep->epid,
 				    "req->rts_reqidx_peer: %d",req->rts_reqidx_peer);
 		req->state = MQ_STATE_UNEXP_RV;
 		req->peer = src;
@@ -306,6 +300,7 @@ psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		if (paylen > send_msglen) paylen = send_msglen;
 		if (paylen) {
 			req->buf = psmi_mq_sysbuf_alloc(mq, paylen);
+			psmi_assert(paylen == 0 || req->buf != NULL);
 			mq->stats.rx_sysbuf_num++;
 			mq->stats.rx_sysbuf_bytes += paylen;
 			psmi_mq_mtucpy(req->buf, payload, paylen);
@@ -361,10 +356,10 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 			  tag->tag[0], tag->tag[1], tag->tag[2], msglen,
 			  paylen);
 
+		void* user_buffer = NULL;
+
 		switch (opcode) {
 		case MQ_MSG_TINY:
-			PSM_VALGRIND_DEFINE_MQ_RECV(req->buf, req->buf_len,
-						    msglen);
 			/* mq_copy_tiny() can handle zero byte */
 
 #ifdef PSM_CUDA
@@ -391,9 +386,7 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 			break;
 
 		case MQ_MSG_SHORT:	/* message fits in 1 payload */
-			PSM_VALGRIND_DEFINE_MQ_RECV(req->buf, req->buf_len,
-						    msglen);
-			void* user_buffer = req->buf;
+			user_buffer = req->buf;
 #ifdef PSM_CUDA
 			psmi_mtucpy_fn_t psmi_mtucpy_fn = psmi_mq_mtucpy;
 			if (PSMI_USE_GDR_COPY(req, msglen)) {
@@ -504,6 +497,7 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 	case MQ_MSG_TINY:
 		if (msglen > 0) {
 			req->buf = psmi_mq_sysbuf_alloc(mq, msglen);
+			psmi_assert(msglen == 0 || req->buf != NULL);
 			mq->stats.rx_sysbuf_num++;
 			mq->stats.rx_sysbuf_bytes += paylen;
 			mq_copy_tiny((uint32_t *) req->buf,
@@ -515,6 +509,7 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 
 	case MQ_MSG_SHORT:
 		req->buf = psmi_mq_sysbuf_alloc(mq, msglen);
+		psmi_assert(msglen == 0 || req->buf != NULL);
 		mq->stats.rx_sysbuf_num++;
 		mq->stats.rx_sysbuf_bytes += paylen;
 		if (msglen <= paylen) {
@@ -535,6 +530,7 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 	case MQ_MSG_EAGER:
 		req->send_msgoff = 0;
 		req->buf = psmi_mq_sysbuf_alloc(mq, msglen);
+		psmi_assert(msglen == 0 || req->buf != NULL);
 		mq->stats.rx_sysbuf_num++;
 		mq->stats.rx_sysbuf_bytes += paylen;
 		req->state = MQ_STATE_UNEXP;

@@ -259,11 +259,13 @@ static uint32_t hfi_timebase_from_cpuinfo(uint32_t old_pico_per_cycle)
 		while (!feof(fp) && fgets(input, 255, fp)) {
 			if (strstr(input, "cpu MHz")) {
 				p = strchr(input, ':');
-				double MHz = 0.0;
 				if (p)
-					MHz = atof(p + 1);
-				new_pico_per_cycle =
-				    (uint32_t) (1000000. / MHz);
+				{
+					double MHz = atof(p + 1);
+					if (MHz != 0.0)
+						new_pico_per_cycle =
+							(uint32_t) (1000000. / MHz);
+				}
 				break;
 			}
 		}

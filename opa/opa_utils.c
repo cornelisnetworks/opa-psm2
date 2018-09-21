@@ -68,11 +68,6 @@
 #include <malloc.h>
 #include <time.h>
 
-#ifdef PSM_VALGRIND
-#include <valgrind/valgrind.h>
-#include <valgrind/memcheck.h>
-#endif
-
 #include "ipserror.h"
 #include "opa_user.h"
 
@@ -186,19 +181,39 @@ int hfi_poll_type(struct _hfi_ctrl *ctrl, uint16_t poll_type)
 int hfi_set_pkey(struct _hfi_ctrl *ctrl, uint16_t pkey)
 {
 	struct hfi1_cmd cmd;
+	struct hfi1_base_info tbinfo;
 
 	cmd.type = PSMI_HFI_CMD_SET_PKEY;
 	cmd.len = 0;
 	cmd.addr = (uint64_t) pkey;
 
-	_HFI_VDBG("Setting context pkey to %x.\n", (unsigned int) pkey);
+	_HFI_VDBG("Setting context pkey to 0x%04x.\n", pkey);
 	if (hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd)) == -1) {
-		_HFI_INFO("Setting context pkey to %x failed: %s\n",
-			  (unsigned int) pkey, strerror(errno));
+		_HFI_INFO("Setting context pkey to 0x%04x failed: %s\n",
+			  pkey, strerror(errno));
 		return -1;
 	} else {
-		_HFI_VDBG("Successfully set context pkey to %x.\n",
-			(unsigned int) pkey);
+		_HFI_VDBG("Successfully set context pkey to 0x%04x.\n", pkey);
+	}
+
+        if (getenv("PSM2_SELINUX")) {
+		/*
+		 * If SELinux is in use the kernel may have changed our JKey based on
+		 * what we supply for the PKey so go ahead and interrogate the user info
+		 * again and update our saved copy. In the future there may be a new
+		 * IOCTL to get the JKey only. For now, this temporary workaround works.
+		 */
+		cmd.type = PSMI_HFI_CMD_USER_INFO;
+		cmd.len = sizeof(tbinfo);
+		cmd.addr = (uint64_t) &tbinfo;
+
+		if (hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd)) == -1) {
+			_HFI_VDBG("BASE_INFO command failed in setpkey: %s\n",
+				  strerror(errno));
+			return -1;
+		}
+		_HFI_VDBG("PSM2_SELINUX is set, updating jkey to 0x%04x\n", tbinfo.jkey);
+		ctrl->base_info.jkey = tbinfo.jkey;
 	}
 	return 0;
 }

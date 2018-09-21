@@ -56,10 +56,6 @@
 #ifndef _IPS_PROTO_HELP_H
 #define _IPS_PROTO_HELP_H
 
-#include "ips_recvhdrq.h"
-#include "ips_proto.h"
-#include "ipserror.h"
-#include "psm_mq_internal.h"	/* psmi_mq_handle_tiny_envelope */
 #include "ptl_ips.h"
 
 /* hfi_opcode is not the ips-level opcode. */
@@ -79,19 +75,19 @@ ips_flow_gen_ackflags(ips_scb_t *scb, struct ips_flow *flow))
 	 * Setup ACK request if more than ack_interval packets
 	 * have not been requested an ACK
 	 */
-	if (scb->flags & IPS_SEND_FLAG_ACKREQ || scb->nfrag > 1) {
+	if (scb->scb_flags & IPS_SEND_FLAG_ACKREQ || scb->nfrag > 1) {
 		flow->ack_counter = 0;
 	} else {
 		flow->ack_counter++;
 		if (flow->ack_counter > flow->ack_interval) {
 			flow->ack_counter = 0;
-			scb->flags |= IPS_SEND_FLAG_ACKREQ;
+			scb->scb_flags |= IPS_SEND_FLAG_ACKREQ;
 		}
 	}
 
 	/* Bottom 6 bits wind up in protocol header fields, other bits
 	 * control other aspects of packet composition */
-	return (uint8_t) (scb->flags & IPS_SEND_FLAG_PROTO_OPTS);
+	return (uint8_t) (scb->scb_flags & IPS_SEND_FLAG_PROTO_OPTS);
 }
 
 PSMI_ALWAYS_INLINE(
@@ -134,88 +130,6 @@ ips_do_cksum(struct ips_proto *proto, struct ips_message_header *p_hdr,
 	return 0;
 }
 
-/* Get pbc static rate value for flow for a given message length */
-PSMI_ALWAYS_INLINE(
-uint16_t
-ips_proto_pbc_static_rate(struct ips_proto *proto, struct ips_flow *flow,
-			  uint32_t msgLen))
-{
-	uint32_t rate = 0;
-
-	/* The PBC rate is based on which HFI type as different media have different
-	 * mechanism for static rate control.
-	 */
-
-	switch (proto->epinfo.ep_hfi_type) {
-	case PSMI_HFI_TYPE_OPA1:
-		{
-		/*
-		 * time_to_send is:
-		 *
-		 *  (packet_length) [bits] / (pkt_egress_rate) [bits/sec]
-		 *  -----------------------------------------------------
-		 *     fabric_clock_period == (1 / 805 * 10^6) [1/sec]
-		 *
-		 *   (where pkt_egress_rate is assumed to be 100 Gbit/s.)
-		 */
-		uint32_t time_to_send = (8 * msgLen * 805) / (100000);
-		rate = (time_to_send >> flow->path->pr_cca_divisor) *
-				(flow->path->pr_active_ipd);
-
-		if (rate > 65535)
-			rate = 65535;
-
-		}
-		break;
-
-	default:
-		rate = 0;
-	}
-
-	return (uint16_t) rate;
-}
-
-/* This is a helper function to convert Per Buffer Control to little-endian */
-PSMI_ALWAYS_INLINE(
-void ips_proto_pbc_to_le(struct hfi_pbc *pbc))
-{
-	pbc->pbc0 = __cpu_to_le32(pbc->pbc0);
-	pbc->PbcStaticRateControlCnt = __cpu_to_le16(pbc->PbcStaticRateControlCnt);
-	pbc->fill1 = __cpu_to_le16(pbc->fill1);
-}
-
-/* This is only used for SDMA cases; pbc is really a pointer to
- * struct ips_pbc_header * or the equivalent un-named structure
- * in ips_scb. Please note pcb will be in little-endian byte
- * order on return */
-PSMI_ALWAYS_INLINE(
-void
-ips_proto_pbc_update(struct ips_proto *proto, struct ips_flow *flow,
-		     uint32_t isCtrlMsg, struct hfi_pbc *pbc, uint32_t hdrlen,
-		     uint32_t paylen))
-{
-	int dw = (sizeof(struct hfi_pbc) + hdrlen + paylen) >> BYTE2DWORD_SHIFT;
-	int sc = proto->sl2sc[flow->path->pr_sl];
-	int vl = proto->sc2vl[sc];
-	uint16_t static_rate = 0;
-
-	if_pf(!isCtrlMsg && flow->path->pr_active_ipd)
-	    static_rate =
-	    ips_proto_pbc_static_rate(proto, flow, hdrlen + paylen);
-
-	pbc->pbc0 = (dw & HFI_PBC_LENGTHDWS_MASK) |
-	    ((vl & HFI_PBC_VL_MASK) << HFI_PBC_VL_SHIFT) |
-	    (((sc >> HFI_PBC_SC4_SHIFT) &
-	      HFI_PBC_SC4_MASK) << HFI_PBC_DCINFO_SHIFT);
-
-	pbc->PbcStaticRateControlCnt = static_rate & HFI_PBC_STATICRCC_MASK;
-
-	/* Per Buffer Control must be in little-endian */
-	ips_proto_pbc_to_le(pbc);
-
-	return;
-}
-
 PSMI_ALWAYS_INLINE(
 uint32_t
 ips_proto_dest_context_from_header(struct ips_proto *proto,
@@ -229,11 +143,11 @@ void
 ips_proto_hdr(struct ips_proto *proto, struct ips_epaddr *ipsaddr,
 	      struct ips_flow *flow, ips_scb_t *scb, uint8_t flags))
 {
+	uint16_t slid, dlid;
 	uint32_t paywords = (sizeof(struct ips_message_header) +
 			     scb->payload_size + HFI_CRC_SIZE_IN_BYTES) >>
 	    BYTE2DWORD_SHIFT;
 	struct ips_message_header *p_hdr = &scb->ips_lrh;
-
 #if 0
 	/*
 	 * This scb has been used by this connection last time,
@@ -249,7 +163,7 @@ ips_proto_hdr(struct ips_proto *proto, struct ips_epaddr *ipsaddr,
 					       BTH_EXTRA_BYTE_SHIFT));
 		p_hdr->bth[2] =
 		    __cpu_to_be32(flow->xmit_seq_num.
-				  psn | (scb->flags & IPS_SEND_FLAG_ACKREQ));
+				  psn | (scb->scb_flags & IPS_SEND_FLAG_ACKREQ));
 
 		p_hdr->khdr.kdeth0 = __cpu_to_le32(scb->offset |
 						   (scb->
@@ -276,6 +190,12 @@ ips_proto_hdr(struct ips_proto *proto, struct ips_epaddr *ipsaddr,
 		return;
 	}
 #endif
+	slid = flow->path->pr_slid;
+	dlid = flow->path->pr_dlid;
+	if (scb->scb_flags & IPS_SEND_FLAG_NO_LMC) {
+        	slid = ipsaddr->pathgrp->pg_base_slid;
+        	dlid = ipsaddr->pathgrp->pg_base_dlid;
+	}
 
 	/* Setup LRH fields */
 	p_hdr->lrh[0] = __cpu_to_be16(HFI_LRH_BTH |
@@ -283,17 +203,18 @@ ips_proto_hdr(struct ips_proto *proto, struct ips_epaddr *ipsaddr,
 				       HFI_LRH_SL_SHIFT) |
 				      ((proto->sl2sc[flow->path->pr_sl] &
 					HFI_LRH_SC_MASK) << HFI_LRH_SC_SHIFT));
-	p_hdr->lrh[1] = flow->path->pr_dlid;
+	p_hdr->lrh[1] = dlid;
 	p_hdr->lrh[2] = __cpu_to_be16(paywords & HFI_LRH_PKTLEN_MASK);
-	p_hdr->lrh[3] = flow->path->pr_slid;
+	p_hdr->lrh[3] = slid;
 
 	/* Setup BTH fields */
 	p_hdr->bth[0] = __cpu_to_be32(flow->path->pr_pkey |
 			      (scb->opcode << HFI_BTH_OPCODE_SHIFT));
 	p_hdr->bth[2] = __cpu_to_be32(flow->xmit_seq_num.psn_num |
-				      (scb->flags & IPS_SEND_FLAG_ACKREQ));
+				      (scb->scb_flags & IPS_SEND_FLAG_ACKREQ));
 
 	if (scb->tidctrl) {	/* expected receive packet */
+		psmi_assert(scb->tidsendc != NULL);
 		p_hdr->bth[1] = __cpu_to_be32(ipsaddr->context |
 					      (ipsaddr->
 					       subcontext <<
@@ -307,13 +228,11 @@ ips_proto_hdr(struct ips_proto *proto, struct ips_epaddr *ipsaddr,
 
 		/* Setup KHDR fields */
 		p_hdr->khdr.kdeth0 = __cpu_to_le32(p_hdr->khdr.kdeth0 |
-						   (scb->
-						    tidctrl <<
+						   (scb->tidctrl <<
 						    HFI_KHDR_TIDCTRL_SHIFT) |
-						   (scb->
-						    flags & IPS_SEND_FLAG_INTR)
-						   | (scb->
-						      flags &
+						   (scb->scb_flags &
+							IPS_SEND_FLAG_INTR)
+						   | (scb->scb_flags &
 						      IPS_SEND_FLAG_HDRSUPP) |
 						   (IPS_PROTO_VERSION <<
 						    HFI_KHDR_KVER_SHIFT));
@@ -330,8 +249,8 @@ ips_proto_hdr(struct ips_proto *proto, struct ips_epaddr *ipsaddr,
 
 		/* Setup KHDR fields */
 		p_hdr->khdr.kdeth0 = __cpu_to_le32(p_hdr->khdr.kdeth0 |
-						   (scb->
-						    flags & IPS_SEND_FLAG_INTR)
+						   (scb->scb_flags &
+							IPS_SEND_FLAG_INTR)
 						   | (IPS_PROTO_VERSION <<
 						      HFI_KHDR_KVER_SHIFT));
 
@@ -364,7 +283,7 @@ ips_scb_prepare_flow_inner(struct ips_proto *proto, struct ips_epaddr *ipsaddr,
 
 	scb->ack_timeout = proto->epinfo.ep_timeout_ack;
 	scb->abs_timeout = TIMEOUT_INFINITE;
-	scb->flags |= IPS_SEND_FLAG_PENDING;
+	scb->scb_flags |= IPS_SEND_FLAG_PENDING;
 
 	if (flow->protocol == PSM_PROTOCOL_TIDFLOW) {
 		flow->xmit_seq_num.psn_seq += scb->nfrag;
@@ -430,7 +349,7 @@ ips_proto_send_ack(struct ips_recvhdrq *recvq, struct ips_flow *flow))
 	else {
 		ips_scb_t ctrlscb;
 
-		ctrlscb.flags = 0;
+		ctrlscb.scb_flags = 0;
 		ctrlscb.ips_lrh.ack_seq_num = flow->recv_seq_num.psn_num;
 		/* Coalesced ACKs disabled. Send ACK immediately */
 		ips_proto_send_ctrl_message(flow, OPCODE_ACK,
@@ -455,7 +374,7 @@ ips_proto_send_nak(struct ips_recvhdrq *recvq, struct ips_flow *flow))
 	else {
 		ips_scb_t ctrlscb;
 
-		ctrlscb.flags = 0;
+		ctrlscb.scb_flags = 0;
 		ctrlscb.ips_lrh.ack_seq_num = flow->recv_seq_num.psn_num;
 		/* Coalesced ACKs disabled. Send NAK immediately */
 		ips_proto_send_ctrl_message(flow, OPCODE_NAK,
@@ -526,7 +445,7 @@ ips_proto_is_expected_or_nak(struct ips_recvhdrq_event *rcv_ev))
 				     flow->recv_seq_num.psn_num,
 				     sequence_num.psn_num);
 
-				ctrlscb.flags = 0;
+				ctrlscb.scb_flags = 0;
 				ctrlscb.ips_lrh.data[0].u32w0 =
 						flow->cca_ooo_pkts;
 				/* Send Control message to throttle flow. Will clear flow flag and
@@ -644,10 +563,12 @@ ips_proto_process_packet(const struct ips_recvhdrq_event *rcv_ev))
 
 PSMI_ALWAYS_INLINE(
 psm2_error_t
-ips_recv_progress_if_busy(ptl_t *ptl, psm2_error_t err))
+ips_recv_progress_if_busy(ptl_t *ptl_gen, psm2_error_t err))
 {
+	struct ptl_ips *ptl = (struct ptl_ips *) ptl_gen;
+
 	if (err == PSM2_EP_NO_RESOURCES) {
-		ptl->ctl->ep_poll(ptl, 0);
+		ptl->ctl->ep_poll(ptl_gen, 0);
 		return PSM2_OK;
 	} else
 		return err;
@@ -682,9 +603,9 @@ ips_select_path(struct ips_proto *proto, ips_path_type_t path_type,
 	uint32_t path_idx;
 
 	if (proto->flags & IPS_PROTO_FLAG_PPOLICY_ADAPTIVE) {
-		/* If dispersive routes are configured then select the routes in round
-		 * robin order. We may want to use congestion information to select the
-		 * least lightly loaded path.
+		/* If dispersive routes are configured then select the routes
+		 * in round robin order. We may want to use congestion
+		 * information to select the least lightly loaded path.
 		 */
 		path_idx = pathgrp->pg_next_path[path_type];
 		if (++pathgrp->pg_next_path[path_type] >=

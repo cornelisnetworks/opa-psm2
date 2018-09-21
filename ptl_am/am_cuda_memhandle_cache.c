@@ -193,17 +193,17 @@ am_cuda_idleq_reorder(cl_map_item_t* memcache_item)
  */
 static psm2_error_t
 am_cuda_memhandle_cache_validate(cl_map_item_t* memcache_item,
-				 uintptr_t sbuf, cudaIpcMemHandle_t* handle,
+				 uintptr_t sbuf, CUipcMemHandle* handle,
 				 uint32_t length, psm2_epid_t epid)
 {
 	if ((0 == memcmp(handle, &memcache_item->payload.cuda_ipc_handle,
-			 sizeof(cudaIpcMemHandle_t )))
+			 sizeof(CUipcMemHandle)))
 			 && sbuf == memcache_item->payload.start
 			 && epid == memcache_item->payload.epid) {
 		return PSM2_OK;
 	}
 	ips_cl_qmap_remove_item(&cuda_memhandle_cachemap, memcache_item);
-	PSMI_CUDA_CALL(cudaIpcCloseMemHandle,
+	PSMI_CUDA_CALL(cuIpcCloseMemHandle,
 		       memcache_item->payload.cuda_ipc_dev_ptr);
 	am_cuda_idleq_remove(memcache_item);
 	psmi_mpool_put(memcache_item);
@@ -218,16 +218,16 @@ am_cuda_memhandle_cache_evict()
 {
 	cl_map_item_t *p_item = LAST;
 	ips_cl_qmap_remove_item(&cuda_memhandle_cachemap, p_item);
-	PSMI_CUDA_CALL(cudaIpcCloseMemHandle, p_item->payload.cuda_ipc_dev_ptr);
+	PSMI_CUDA_CALL(cuIpcCloseMemHandle, p_item->payload.cuda_ipc_dev_ptr);
 	am_cuda_idleq_remove_last(p_item);
 	psmi_mpool_put(p_item);
 	return;
 }
 
 static psm2_error_t
-am_cuda_memhandle_cache_register(uintptr_t sbuf, cudaIpcMemHandle_t* handle,
+am_cuda_memhandle_cache_register(uintptr_t sbuf, CUipcMemHandle* handle,
 				 uint32_t length, psm2_epid_t epid,
-				 void* cuda_ipc_dev_ptr)
+				 CUdeviceptr cuda_ipc_dev_ptr)
 {
 	if (NELEMS == cuda_memhandle_cache_size)
 		am_cuda_memhandle_cache_evict();
@@ -253,11 +253,11 @@ am_cuda_memhandle_cache_register(uintptr_t sbuf, cudaIpcMemHandle_t* handle,
  * Upon a succesful hit in the cache, additional validation is required
  * as multiple senders could potentially send the same buf address value.
  */
-void*
-am_cuda_memhandle_acquire(uintptr_t sbuf, cudaIpcMemHandle_t* handle,
+CUdeviceptr
+am_cuda_memhandle_acquire(uintptr_t sbuf, CUipcMemHandle* handle,
 				uint32_t length, psm2_epid_t epid)
 {
-	void* cuda_ipc_dev_ptr;
+	CUdeviceptr cuda_ipc_dev_ptr;
 	if(cuda_memhandle_cache_enabled) {
 		cl_qmap_t *p_map = &cuda_memhandle_cachemap;
 		cl_map_item_t *p_item;
@@ -277,23 +277,23 @@ am_cuda_memhandle_acquire(uintptr_t sbuf, cudaIpcMemHandle_t* handle,
 #ifdef PSM_DEBUG
 		cache_miss_counter++;
 #endif
-		PSMI_CUDA_CALL(cudaIpcOpenMemHandle, &cuda_ipc_dev_ptr,
-				 *handle, cudaIpcMemLazyEnablePeerAccess);
+		PSMI_CUDA_CALL(cuIpcOpenMemHandle, &cuda_ipc_dev_ptr,
+				 *handle, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
 		am_cuda_memhandle_cache_register(sbuf, handle,
 					       length, epid, cuda_ipc_dev_ptr);
 		return cuda_ipc_dev_ptr;
 	} else {
-		PSMI_CUDA_CALL(cudaIpcOpenMemHandle, &cuda_ipc_dev_ptr,
-				 *handle, cudaIpcMemLazyEnablePeerAccess);
+		PSMI_CUDA_CALL(cuIpcOpenMemHandle, &cuda_ipc_dev_ptr,
+				 *handle, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
 		return cuda_ipc_dev_ptr;
 	}
 }
 
 void
-am_cuda_memhandle_release(void* cuda_ipc_dev_ptr)
+am_cuda_memhandle_release(CUdeviceptr cuda_ipc_dev_ptr)
 {
 	if(!cuda_memhandle_cache_enabled)
-		PSMI_CUDA_CALL(cudaIpcCloseMemHandle, cuda_ipc_dev_ptr);
+		PSMI_CUDA_CALL(cuIpcCloseMemHandle, cuda_ipc_dev_ptr);
 	return;
 }
 
@@ -308,7 +308,7 @@ psmi_cuda_memhandle_cache_alloc_func(int is_alloc, void* context, void* obj)
 	cl_map_item_t* memcache_item = (cl_map_item_t*)obj;
 	if (!is_alloc) {
 		if(memcache_item->payload.start)
-			PSMI_CUDA_CALL(cudaIpcCloseMemHandle,
+			PSMI_CUDA_CALL(cuIpcCloseMemHandle,
 				       memcache_item->payload.cuda_ipc_dev_ptr);
 	}
 }

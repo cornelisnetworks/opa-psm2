@@ -58,6 +58,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "psm_user.h"
 #include "psm_mq_internal.h"
 
 void *psmi_memcpyo(void *dst, const void *src, size_t n)

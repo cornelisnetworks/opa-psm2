@@ -55,50 +55,41 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-
 #include "psm_user.h"
+#include "psm2_hal.h"
 
-#define HFI_USERINIT_RETRY_MAX 3
-#define PSMI_SHARED_CONTEXTS_ENABLED_BY_DEFAULT   1
-ustatic int MOCKABLE(psmi_sharedcontext_params)(int *nranks, int *rankid);
-MOCK_DCL_EPILOGUE(psmi_sharedcontext_params);
 static int psmi_get_hfi_selection_algorithm(void);
-ustatic psm2_error_t psmi_init_userinfo_params(psm2_ep_t ep,
-					     int unit_id,
-					     psm2_uuid_t const unique_job_key,
-					     struct hfi1_user_info_dep *user_info);
 
 psm2_error_t psmi_context_interrupt_set(psmi_context_t *context, int enable)
 {
 	int poll_type;
 	int ret;
 
-	if ((enable && (context->runtime_flags & PSMI_RUNTIME_INTR_ENABLED)) ||
-	    (!enable && !(context->runtime_flags & PSMI_RUNTIME_INTR_ENABLED)))
+	if ((enable && psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_INTR_ENABLED)) ||
+	    (!enable && !psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_INTR_ENABLED)))
 		return PSM2_OK;
 
 	if (enable)
-		poll_type = HFI1_POLL_TYPE_URGENT;
+		poll_type = PSMI_HAL_POLL_TYPE_URGENT;
 	else
 		poll_type = 0;
 
-	ret = hfi_poll_type(context->ctrl, poll_type);
+	ret = psmi_hal_poll_type(poll_type, context->psm_hw_ctxt);
 
 	if (ret != 0)
 		return PSM2_EP_NO_RESOURCES;
 	else {
 		if (enable)
-			context->runtime_flags |= PSMI_RUNTIME_INTR_ENABLED;
+			psmi_hal_add_status(PSM_HAL_PSMI_RUNTIME_INTR_ENABLED);
 		else
-			context->runtime_flags &= ~PSMI_RUNTIME_INTR_ENABLED;
-
+			psmi_hal_sub_status(PSM_HAL_PSMI_RUNTIME_INTR_ENABLED);
 		return PSM2_OK;
 	}
 }
 
 int psmi_context_interrupt_isenabled(psmi_context_t *context)
 {
-	return context->runtime_flags & PSMI_RUNTIME_INTR_ENABLED;
+	return psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_INTR_ENABLED);
 }
 
 /* Returns 1 when all of the active units have their free contexts
@@ -118,12 +109,11 @@ static int psmi_all_active_units_have_max_freecontexts(int nunits)
 
 	for (u=0;u < nunits;u++)
 	{
-		if (hfi_get_unit_active(u) > 0)
+		if (psmi_hal_get_unit_active(u) > 0)
 		{
-			int64_t nfreectxts=0,nctxts=0;
-
-			if (!hfi_sysfs_unit_read_s64(u, "nctxts", &nctxts, 0) &&
-			    !hfi_sysfs_unit_read_s64(u, "nfreectxts", &nfreectxts, 0))
+			int nfreectxts=psmi_hal_get_num_free_contexts(u),
+				nctxts=psmi_hal_get_num_contexts(u);
+			if (nfreectxts > 0 && nctxts > 0)
 			{
 				if (nfreectxts != nctxts)
 					return 0;
@@ -213,6 +203,7 @@ psmi_create_and_open_affinity_shm(psm2_uuid_t const job_key)
 	affinity_shm_name = NULL;
 	affinity_shm_name = (char *) psmi_malloc(PSMI_EP_NONE, UNDEFINED, shm_name_len);
 
+	psmi_assert_always(affinity_shm_name != NULL);
 	snprintf(affinity_shm_name, shm_name_len,
 		 AFFINITY_SHM_BASENAME".%d",
 		 psmi_get_uuid_hash(job_key));
@@ -321,6 +312,8 @@ psmi_spread_hfi_within_socket(long *unit_start, long *unit_end, int node_id,
 	/* End Critical Section */
 	psmi_sem_post(sem_affinity_shm_rw, sem_affinity_shm_rw_name);
 
+	return;
+
 spread_hfi_fallback:
 	*unit_start = *unit_end = saved_hfis[0];
 }
@@ -343,6 +336,7 @@ psmi_create_affinity_semaphores(psm2_uuid_t const job_key)
 		return;
 
 	sem_affinity_shm_rw_name = (char *) psmi_malloc(PSMI_EP_NONE, UNDEFINED, sem_len);
+	psmi_assert_always(sem_affinity_shm_rw_name != NULL);
 	snprintf(sem_affinity_shm_rw_name, sem_len,
 		 SEM_AFFINITY_SHM_RW_BASENAME".%d",
 		 psmi_get_uuid_hash(job_key));
@@ -368,21 +362,21 @@ psmi_create_affinity_semaphores(psm2_uuid_t const job_key)
 
 static
 psm2_error_t
-psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
-				int nunitsactive,int nunits,psm2_uuid_t const job_key,
+psmi_compute_start_and_end_unit(long unit_param,int nunitsactive,int nunits,
+				psm2_uuid_t const job_key,
 				long *unit_start,long *unit_end)
 {
+	unsigned short hfi_sel_alg = PSMI_UNIT_SEL_ALG_ACROSS;
 	int node_id, unit_id, found = 0;
 	int saved_hfis[nunits];
 
-	context->user_info.hfi1_alg = HFI1_ALG_ACROSS;
 	/* if the user did not set HFI_UNIT then ... */
 	if (unit_param == HFI_UNIT_ID_ANY)
 	{
 		/* Get the actual selection algorithm from the environment: */
-		context->user_info.hfi1_alg = psmi_get_hfi_selection_algorithm();
+		hfi_sel_alg = psmi_get_hfi_selection_algorithm();
 		/* If round-robin is selection algorithm and ... */
-		if ((context->user_info.hfi1_alg == HFI1_ALG_ACROSS) &&
+		if ((hfi_sel_alg == PSMI_UNIT_SEL_ALG_ACROSS) &&
 		    /* there are more than 1 active units then ... */
 		    (nunitsactive > 1))
 		{
@@ -394,12 +388,16 @@ psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
 			node_id = psmi_get_current_proc_location();
 			if (node_id >= 0) {
 				for (unit_id = 0; unit_id < nunits; unit_id++) {
-					if (hfi_get_unit_active(unit_id) <= 0)
+					if (psmi_hal_get_unit_active(unit_id) <= 0)
 						continue;
 
-					if (hfi_sysfs_unit_read_node_s64(unit_id) == node_id) {
-						saved_hfis[found] = unit_id;
-						found++;
+					int node_id_i;
+
+					if (!psmi_hal_get_node_id(unit_id, &node_id_i)) {
+						if (node_id_i == node_id) {
+							saved_hfis[found] = unit_id;
+							found++;
+						}
 					}
 				}
 
@@ -417,7 +415,7 @@ psmi_compute_start_and_end_unit(psmi_context_t *context,long unit_param,
 				psmi_spread_hfi_selection(job_key, unit_start,
 							  unit_end, nunits);
 			}
-		} else if ((context->user_info.hfi1_alg == HFI1_ALG_ACROSS_ALL) &&
+		} else if ((hfi_sel_alg == PSMI_UNIT_SEL_ALG_ACROSS_ALL) &&
 			 (nunitsactive > 1)) {
 				psmi_spread_hfi_selection(job_key, unit_start,
 							  unit_end, nunits);
@@ -445,12 +443,8 @@ psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 		  psmi_context_t *context)
 {
 	long open_timeout = 0, unit_start, unit_end, unit_id, unit_id_prev;
-	int lid, sc, vl;
-	uint64_t gid_hi, gid_lo;
-	char dev_name[MAXPATHLEN];
 	psm2_error_t err = PSM2_OK;
-	uint32_t hfi_type;
-	int nunits = hfi_get_num_units(), nunitsactive=0;
+	int nunits = psmi_hal_get_num_units(), nunitsactive=0;
 
 	/*
 	 * If shared contexts are enabled, try our best to schedule processes
@@ -468,7 +462,7 @@ psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 	/* Calculate the number of active units: */
 	for (unit_id=0;unit_id < nunits;unit_id++)
 	{
-		if (hfi_get_unit_active(unit_id) > 0)
+		if (psmi_hal_get_unit_active(unit_id) > 0)
 			nunitsactive++;
 	}
 	/* if no active units, then no joy. */
@@ -483,9 +477,8 @@ psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 
 
 	unit_start = 0; unit_end = nunits - 1;
-	err = psmi_compute_start_and_end_unit(context, unit_param,
-					      nunitsactive, nunits,
-					      job_key,
+	err = psmi_compute_start_and_end_unit(unit_param, nunitsactive,
+					      nunits, job_key,
 					      &unit_start, &unit_end);
 	if (err != PSM2_OK)
 		return err;
@@ -493,132 +486,80 @@ psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 	/* this is the start of a loop that starts at unit_start and goes to unit_end.
 	   but note that the way the loop computes the loop control variable is by
 	   an expression involving the mod operator. */
-	context->fd = -1;
-	context->ctrl = NULL;
+	int success = 0;
 	unit_id_prev = unit_id = unit_start;
 	do
 	{
 		/* close previous opened unit fd before attempting open of current unit. */
-		if (context->fd > 0)
-		{
-			hfi_context_close(context->fd);
-			context->fd = -1;
-		}
+		if (psmi_hal_get_fd(context->psm_hw_ctxt) > 0)
+			psmi_hal_close_context(&context->psm_hw_ctxt);
 
 		/* if the unit_id is not active, go to next one. */
-		if (hfi_get_unit_active(unit_id) <= 0) {
+		if (psmi_hal_get_unit_active(unit_id) <= 0) {
 			unit_id_prev = unit_id;
 			unit_id = (unit_id + 1) % nunits;
 			continue;
 		}
 
 		/* open this unit. */
-		context->fd = hfi_context_open_ex(unit_id, port, open_timeout,
-				       dev_name, sizeof(dev_name));
+		int rv = psmi_hal_context_open(unit_id, port, open_timeout,
+					       ep, job_key, context,
+					       psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED),
+					       HAL_CONTEXT_OPEN_RETRY_MAX);
 
 		/* go to next unit if failed to open. */
-		if (context->fd == -1) {
+		if (rv || context->psm_hw_ctxt == NULL) {
 			unit_id_prev = unit_id;
 			unit_id = (unit_id + 1) % nunits;
 			continue;
 		}
 
-		/* collect the userinfo params. */
-		if ((err = psmi_init_userinfo_params(ep,
-						     (int)unit_id, job_key,
-						     &context->user_info)))
-			goto bail;
+		success = 1;
+		break;
 
-		/* attempt to assign the context via hfi_userinit() */
-		int retry = 0;
-		do {
-			if (retry > 0)
-				_HFI_INFO("hfi_userinit: failed, trying again (%d/%d)\n",
-					  retry, HFI_USERINIT_RETRY_MAX);
-			context->ctrl = hfi_userinit(context->fd, &context->user_info);
-		} while (context->ctrl == NULL && ++retry <= HFI_USERINIT_RETRY_MAX);
-		unit_id_prev = unit_id;
-		unit_id = (unit_id + 1) % nunits;
-	} while (unit_id_prev != unit_end && context->ctrl == NULL);
+	} while (unit_id_prev != unit_end);
 
-	if (context->ctrl == NULL)
+	if (!success)
 	{
 		err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
 					"PSM2 can't open hfi unit: %ld",unit_param);
-		goto ret;
-	}
-	_HFI_VDBG("hfi_userinit() passed.\n");
-
-	if ((lid = hfi_get_port_lid(context->ctrl->__hfi_unit,
-				    context->ctrl->__hfi_port)) <= 0) {
-		err = psmi_handle_error(NULL,
-					PSM2_EP_DEVICE_FAILURE,
-					"Can't get HFI LID in psm2_ep_open: is SMA running?");
 		goto bail;
 	}
-	if (hfi_get_port_gid(context->ctrl->__hfi_unit,
-			     context->ctrl->__hfi_port, &gid_hi,
-			     &gid_lo) == -1) {
-		err =
-		    psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
-				      "Can't get HFI GID in psm2_ep_open: is SMA running?");
-		goto bail;
-	}
-	ep->unit_id = context->ctrl->__hfi_unit;
-	ep->portnum = context->ctrl->__hfi_port;
-	ep->gid_hi = gid_hi;
-	ep->gid_lo = gid_lo;
 
 	context->ep = (psm2_ep_t) ep;
-	context->runtime_flags = context->ctrl->ctxt_info.runtime_flags;
 
 #ifdef PSM_CUDA
 	/* Check backward compatibility bits here and save the info */
-	if (context->ctrl->ctxt_info.runtime_flags & HFI1_CAP_GPUDIRECT_OT)
+	if (psmi_hal_has_cap(PSM_HAL_CAP_GPUDIRECT_OT))
 		is_driver_gpudirect_enabled = 1;
 #endif
+	_HFI_VDBG("hfi_userinit() passed.\n");
 
-	/* Get type of hfi assigned to context */
-	hfi_type = psmi_get_hfi_type(context);
+	/* Fetch hw parameters from HAL (that were obtained during opening the context above. */
 
-	/* Endpoint out_sl contains the default SL to use for this endpoint. */
-	/* Get the MTU for this SL. */
-	if ((sc = hfi_get_port_sl2sc(ep->unit_id,
-				     context->ctrl->__hfi_port,
-				     ep->out_sl)) < 0) {
-		sc = PSMI_SC_DEFAULT;
-	}
-	if ((vl = hfi_get_port_sc2vl(ep->unit_id,
-				     context->ctrl->__hfi_port, sc)) < 0) {
-		vl = PSMI_VL_DEFAULT;
-	}
-	if (sc == PSMI_SC_ADMIN || vl == PSMI_VL_ADMIN) {
-		err = psmi_handle_error(NULL, PSM2_INTERNAL_ERR,
-			"Invalid sl: %d, please specify correct sl via HFI_SL",
-			ep->out_sl);
-		goto bail;
-	}
-
-	if ((ep->mtu = hfi_get_port_vl2mtu(ep->unit_id,
-					   context->ctrl->__hfi_port,
-					   vl)) < 0) {
-		err =
-		    psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
-				      "Can't get MTU for VL %d", vl);
-		goto bail;
-	}
+	int lid           = psmi_hal_get_lid(context->psm_hw_ctxt);
+	ep->unit_id       = psmi_hal_get_unit_id(context->psm_hw_ctxt);
+	ep->portnum       = psmi_hal_get_port_num(context->psm_hw_ctxt);
+	ep->gid_lo        = psmi_hal_get_gid_lo(context->psm_hw_ctxt);
+	ep->gid_hi        = psmi_hal_get_gid_hi(context->psm_hw_ctxt);
+	int ctxt          = psmi_hal_get_context(context->psm_hw_ctxt);
+	int subctxt       = psmi_hal_get_subctxt(context->psm_hw_ctxt);
+	uint32_t hfi_type = psmi_hal_get_hfi_type(context->psm_hw_ctxt);
+	ep->mtu           = psmi_hal_get_mtu(context->psm_hw_ctxt);
+	context->ep       = (psm2_ep_t) ep;
 
 	/* Construct epid for this Endpoint */
+
 	switch (PSMI_EPID_VERSION) {
 		case PSMI_EPID_V1:
-			context->epid = PSMI_EPID_PACK_V1(lid, context->ctrl->ctxt_info.ctxt,
-								context->ctrl->ctxt_info.subctxt,
-								context->ctrl->__hfi_unit,
+			context->epid = PSMI_EPID_PACK_V1(lid, ctxt,
+								subctxt,
+								ep->unit_id,
 								PSMI_EPID_VERSION, 0x3ffffff);
 			break;
 		case PSMI_EPID_V2:
-			context->epid = PSMI_EPID_PACK_V2(lid, context->ctrl->ctxt_info.ctxt,
-								context->ctrl->ctxt_info.subctxt,
+			context->epid = PSMI_EPID_PACK_V2(lid, ctxt,
+								subctxt,
 								PSMI_EPID_IPS_SHM, /*Not a only-shm epid */
 								PSMI_EPID_VERSION, ep->gid_hi);
 			break;
@@ -628,20 +569,17 @@ psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 			break;
 	}
 
-
 	_HFI_VDBG
 	    ("construct epid: lid %d ctxt %d subctxt %d hcatype %d mtu %d\n",
-	     lid, context->ctrl->ctxt_info.ctxt,
-	     context->ctrl->ctxt_info.subctxt, hfi_type, ep->mtu);
+	     lid, ctxt,
+	     subctxt, hfi_type, ep->mtu);
 
 	goto ret;
 
 bail:
-	_HFI_PRDBG("%s open failed: %d (%s)\n", dev_name, err, strerror(errno));
-	if (context->fd != -1) {
-		hfi_context_close(context->fd);
-		context->fd = -1;
-	}
+	_HFI_PRDBG("open failed: unit_id: %ld, err: %d (%s)\n", unit_id, err, strerror(errno));
+	if (psmi_hal_get_fd(context->psm_hw_ctxt) > 0)
+		psmi_hal_close_context(&context->psm_hw_ctxt);
 ret:
 
 	_HFI_VDBG("psmi_context_open() return %d\n", err);
@@ -650,50 +588,9 @@ ret:
 
 psm2_error_t psmi_context_close(psmi_context_t *context)
 {
-	if (context->fd >= 0) {
-		struct hfi1_base_info *binfo;
-		struct hfi1_ctxt_info *cinfo;
-		int __hfi_pg_sz = sysconf(_SC_PAGESIZE);
-		binfo = &context->ctrl->base_info;
-		cinfo = &context->ctrl->ctxt_info;
+	if (psmi_hal_get_fd(context->psm_hw_ctxt) > 0)
+		psmi_hal_close_context(&context->psm_hw_ctxt);
 
-		munmap((void*)PSMI_ALIGNDOWN(binfo->sc_credits_addr, __hfi_pg_sz),
-		       __hfi_pg_sz);
-		munmap((void*)PSMI_ALIGNDOWN(binfo->pio_bufbase_sop, __hfi_pg_sz),
-		       cinfo->credits * 64);
-		munmap((void*)PSMI_ALIGNDOWN(binfo->pio_bufbase, __hfi_pg_sz),
-		       cinfo->credits * 64);
-		munmap((void*)PSMI_ALIGNDOWN(binfo->rcvhdr_bufbase, __hfi_pg_sz),
-		       cinfo->rcvhdrq_cnt * cinfo->rcvhdrq_entsize);
-		munmap((void*)PSMI_ALIGNDOWN(binfo->rcvegr_bufbase, __hfi_pg_sz),
-		       cinfo->egrtids * cinfo->rcvegr_size);
-		munmap((void*)PSMI_ALIGNDOWN(binfo->sdma_comp_bufbase, __hfi_pg_sz),
-		       cinfo->sdma_ring_size * sizeof(struct hfi1_sdma_comp_entry));
-		/* only unmap the RTAIL if it was enabled in the first place */
-		if (cinfo->runtime_flags & HFI1_CAP_DMA_RTAIL) {
-			munmap((void*)PSMI_ALIGNDOWN(binfo->rcvhdrtail_base, __hfi_pg_sz),
-				__hfi_pg_sz);
-		}
-		munmap((void*)PSMI_ALIGNDOWN(binfo->user_regbase, __hfi_pg_sz),
-			__hfi_pg_sz);
-		munmap((void*)PSMI_ALIGNDOWN(binfo->events_bufbase, __hfi_pg_sz),
-		       __hfi_pg_sz);
-		munmap((void*)PSMI_ALIGNDOWN(binfo->status_bufbase, __hfi_pg_sz),
-		       __hfi_pg_sz);
-
-		/* only unmap subcontext-related stuff it subcontexts are enabled */
-		if (context->user_info.subctxt_cnt > 0) {
-			munmap((void*)PSMI_ALIGNDOWN(binfo->subctxt_uregbase, __hfi_pg_sz),
-			       __hfi_pg_sz);
-			munmap((void*)PSMI_ALIGNDOWN(binfo->subctxt_rcvhdrbuf, __hfi_pg_sz),
-			       __hfi_pg_sz);
-			munmap((void*)PSMI_ALIGNDOWN(binfo->subctxt_rcvegrbuf, __hfi_pg_sz),
-			       __hfi_pg_sz);
-		}
-
-		hfi_context_close(context->fd);
-		context->fd = -1;
-	}
 	return PSM2_OK;
 }
 
@@ -715,25 +612,27 @@ psm2_error_t psmi_context_check_status(const psmi_context_t *contexti)
 {
 	psm2_error_t err = PSM2_OK;
 	psmi_context_t *context = (psmi_context_t *) contexti;
-	struct hfi1_status *status =
-	    (struct hfi1_status *)context->ctrl->base_info.status_bufbase;
 	char *errmsg = NULL;
+	uint64_t status = psmi_hal_get_hw_status(context->psm_hw_ctxt);
 
 	/* Fatal chip-related errors */
-	if (!(status->dev & HFI1_STATUS_CHIP_PRESENT) ||
-	    !(status->dev & HFI1_STATUS_INITTED) ||
-	    (status->dev & HFI1_STATUS_HWERROR)) {
+	if (!(status & PSM_HAL_HW_STATUS_CHIP_PRESENT) ||
+	    !(status & PSM_HAL_HW_STATUS_INITTED) ||
+	    (status & PSM_HAL_HW_STATUS_HWERROR)) {
 
 		err = PSM2_EP_DEVICE_FAILURE;
 		if (err != context->status_lasterr) {	/* report once */
-			volatile char *errmsg_sp =
-			    (volatile char *)status->freezemsg;
+			volatile char *errmsg_sp="no err msg";
+
+			psmi_hal_get_hw_status_freezemsg(&errmsg_sp,
+							 context->psm_hw_ctxt);
+
 			if (*errmsg_sp)
 				psmi_handle_error(context->ep, err,
 						  "Hardware problem: %s",
 						  errmsg_sp);
 			else {
-				if (status->dev & HFI1_STATUS_HWERROR)
+				if (status & PSM_HAL_HW_STATUS_HWERROR)
 					errmsg = "Hardware error";
 				else
 					errmsg = "Hardware not found";
@@ -744,8 +643,8 @@ psm2_error_t psmi_context_check_status(const psmi_context_t *contexti)
 		}
 	}
 	/* Fatal network-related errors with timeout: */
-	else if (!(status->port & HFI1_STATUS_IB_CONF) ||
-		 !(status->port & HFI1_STATUS_IB_READY)) {
+	else if (!(status & PSM_HAL_HW_STATUS_IB_CONF) ||
+		 !(status & PSM_HAL_HW_STATUS_IB_READY)) {
 		err = PSM2_EP_NO_NETWORK;
 		if (err != context->status_lasterr) {	/* report once */
 			context->networkLostTime = time(NULL);
@@ -762,8 +661,10 @@ psm2_error_t psmi_context_check_status(const psmi_context_t *contexti)
 			   (we add 5 seconds of margin.) */
 			if (difftime(now,context->networkLostTime) > seventySeconds)
 			{
-				volatile char *errmsg_sp =
-					(volatile char *)status->freezemsg;
+				volatile char *errmsg_sp="no err msg";
+
+				psmi_hal_get_hw_status_freezemsg(&errmsg_sp,
+								 context->psm_hw_ctxt);
 
 				psmi_handle_error(context->ep, err, "%s",
 						  *errmsg_sp ? errmsg_sp :
@@ -780,216 +681,11 @@ psm2_error_t psmi_context_check_status(const psmi_context_t *contexti)
 	return err;
 }
 
-/*
- * Prepare user_info params for driver open, used only in psmi_context_open
- */
-ustatic
-psm2_error_t
-psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
-			  psm2_uuid_t const unique_job_key,
-			  struct hfi1_user_info_dep *user_info)
-{
-	/* static variables, shared among rails */
-	static int shcontexts_enabled = -1, rankid, nranks;
-
-	int avail_contexts = 0, max_contexts, ask_contexts;
-	int ranks_per_context = 0;
-	psm2_error_t err = PSM2_OK;
-	union psmi_envvar_val env_maxctxt, env_ranks_per_context;
-	static int subcontext_id_start;
-
-	memset(user_info, 0, sizeof(*user_info));
-	user_info->userversion = HFI1_USER_SWMINOR|(hfi_get_user_major_version()<<HFI1_SWMAJOR_SHIFT);
-
-	user_info->subctxt_id = 0;
-	user_info->subctxt_cnt = 0;
-	memcpy(user_info->uuid, unique_job_key, sizeof(user_info->uuid));
-
-	if (shcontexts_enabled == -1) {
-		shcontexts_enabled =
-		    psmi_sharedcontext_params(&nranks, &rankid);
-	}
-	if (!shcontexts_enabled)
-		return err;
-
-	avail_contexts = hfi_get_num_contexts(unit_id);
-
-	if (avail_contexts == 0) {
-		err = psmi_handle_error(NULL, PSM2_EP_NO_DEVICE,
-					"PSM2 found 0 available contexts on opa device(s).");
-		goto fail;
-	}
-
-	/* See if the user wants finer control over context assignments */
-	if (!psmi_getenv("PSM2_MAX_CONTEXTS_PER_JOB",
-			 "Maximum number of contexts for this PSM2 job",
-			 PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
-			 (union psmi_envvar_val)avail_contexts, &env_maxctxt)) {
-		max_contexts = max(env_maxctxt.e_int, 1);		/* needs to be non-negative */
-		ask_contexts = min(max_contexts, avail_contexts);	/* needs to be available */
-	} else if (!psmi_getenv("PSM2_SHAREDCONTEXTS_MAX",
-				"",  /* deprecated */
-				PSMI_ENVVAR_LEVEL_HIDDEN | PSMI_ENVVAR_LEVEL_NEVER_PRINT,
-				PSMI_ENVVAR_TYPE_INT,
-				(union psmi_envvar_val)avail_contexts, &env_maxctxt)) {
-
-		_HFI_INFO
-		    ("The PSM2_SHAREDCONTEXTS_MAX env variable is deprecated. Please use PSM2_MAX_CONTEXTS_PER_JOB in future.\n");
-
-		max_contexts = max(env_maxctxt.e_int, 1);		/* needs to be non-negative */
-		ask_contexts = min(max_contexts, avail_contexts);	/* needs to be available */
-	} else
-		ask_contexts = max_contexts = avail_contexts;
-
-	if (!psmi_getenv("PSM2_RANKS_PER_CONTEXT",
-			 "Number of ranks per context",
-			 PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
-			 (union psmi_envvar_val)1, &env_ranks_per_context)) {
-		ranks_per_context = max(env_ranks_per_context.e_int, 1);
-		ranks_per_context = min(ranks_per_context, HFI1_MAX_SHARED_CTXTS);
-	}
-
-	/*
-	 * See if we could get a valid ppn.  If not, approximate it to be the
-	 * number of cores.
-	 */
-	if (nranks == -1) {
-		long nproc = sysconf(_SC_NPROCESSORS_ONLN);
-		if (nproc < 1)
-			nranks = 1;
-		else
-			nranks = nproc;
-	}
-
-	/*
-	 * Make sure that our guesses are good educated guesses
-	 */
-	if (rankid >= nranks) {
-		_HFI_PRDBG
-		    ("PSM2_SHAREDCONTEXTS disabled because lrank=%d,ppn=%d\n",
-		     rankid, nranks);
-		goto fail;
-	}
-
-	if (ranks_per_context) {
-		int contexts =
-		    (nranks + ranks_per_context - 1) / ranks_per_context;
-		if (contexts > ask_contexts) {
-			err = psmi_handle_error(NULL, PSM2_EP_NO_DEVICE,
-						"Incompatible settings for "
-						"PSM2_MAX_CONTEXTS_PER_JOB and PSM2_RANKS_PER_CONTEXT");
-			goto fail;
-		}
-		ask_contexts = contexts;
-	}
-
-	/* group id based on total groups and local rank id */
-	user_info->subctxt_id = subcontext_id_start + rankid % ask_contexts;
-	/* this is for multi-rail, when we setup a new rail,
-	 * we can not use the same subcontext ID as the previous
-	 * rail, otherwise, the driver will match previous rail
-	 * and fail.
-	 */
-	subcontext_id_start += ask_contexts;
-
-	/* Need to compute with how many *other* peers we will be sharing the
-	 * context */
-	if (nranks > ask_contexts) {
-		user_info->subctxt_cnt = nranks / ask_contexts;
-		/* If ppn != multiple of contexts, some contexts get an uneven
-		 * number of subcontexts */
-		if (nranks % ask_contexts > rankid % ask_contexts)
-			user_info->subctxt_cnt++;
-		/* The case of 1 process "sharing" a context (giving 1 subcontext)
-		 * is supcontexted by the driver and PSM. However, there is no
-		 * need to share in this case so disable context sharing. */
-		if (user_info->subctxt_cnt == 1)
-			user_info->subctxt_cnt = 0;
-		if (user_info->subctxt_cnt > HFI1_MAX_SHARED_CTXTS) {
-			err = psmi_handle_error(NULL, PSM2_INTERNAL_ERR,
-						"Calculation of subcontext count exceeded maximum supported");
-			goto fail;
-		}
-	}
-	/* else subcontext_cnt remains 0 and context sharing is disabled. */
-
-	_HFI_PRDBG("PSM2_SHAREDCONTEXTS lrank=%d,ppn=%d,avail_contexts=%d,"
-		   "max_contexts=%d,ask_contexts=%d,"
-		   "ranks_per_context=%d,id=%u,cnt=%u\n",
-		   rankid, nranks, avail_contexts, max_contexts,
-		   ask_contexts, ranks_per_context,
-		   user_info->subctxt_id, user_info->subctxt_cnt);
-fail:
-	return err;
-}
-
-ustatic
-int MOCKABLE(psmi_sharedcontext_params)(int *nranks, int *rankid)
-{
-	union psmi_envvar_val enable_shcontexts;
-	char *ppn_env = NULL, *lrank_env = NULL, *c;
-
-	*rankid = -1;
-	*nranks = -1;
-
-#if 0
-	/* DEBUG: Used to selectively test possible shared context and shm-only
-	 * settings */
-	unsetenv("PSC_MPI_NODE_RANK");
-	unsetenv("PSC_MPI_PPN");
-	unsetenv("MPI_LOCALRANKID");
-	unsetenv("MPI_LOCALRANKS");
-#endif
-
-	/* We do not support context sharing for multiple endpoints */
-	if (psmi_multi_ep_enabled) {
-		return 0;
-	}
-
-	/* New name in 2.0.1, keep observing old name */
-	psmi_getenv("PSM2_SHAREDCONTEXTS", "Enable shared contexts",
-		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_YESNO,
-		    (union psmi_envvar_val)
-		    PSMI_SHARED_CONTEXTS_ENABLED_BY_DEFAULT,
-		    &enable_shcontexts);
-	if (!enable_shcontexts.e_int)
-		return 0;
-
-	/* We support two types of syntaxes to let users give us a hint what
-	 * our local rankid is.  Moving towards MPI_, but still support PSC_ */
-	if ((c = getenv("MPI_LOCALRANKID")) && *c != '\0') {
-		lrank_env = "MPI_LOCALRANKID";
-		ppn_env = "MPI_LOCALNRANKS";
-	} else if ((c = getenv("PSC_MPI_PPN")) && *c != '\0') {
-		ppn_env = "PSC_MPI_PPN";
-		lrank_env = "PSC_MPI_NODE_RANK";
-	}
-
-	if (ppn_env != NULL && lrank_env != NULL) {
-		union psmi_envvar_val env_rankid, env_nranks;
-
-		psmi_getenv(lrank_env, "Shared context rankid",
-			    PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_INT,
-			    (union psmi_envvar_val)-1, &env_rankid);
-
-		psmi_getenv(ppn_env, "Shared context numranks",
-			    PSMI_ENVVAR_LEVEL_HIDDEN, PSMI_ENVVAR_TYPE_INT,
-			    (union psmi_envvar_val)-1, &env_nranks);
-
-		*rankid = env_rankid.e_int;
-		*nranks = env_nranks.e_int;
-
-		return 1;
-	} else
-		return 0;
-}
-MOCK_DEF_EPILOGUE(psmi_sharedcontext_params);
-
 static
 int psmi_get_hfi_selection_algorithm(void)
 {
 	union psmi_envvar_val env_hfi1_alg;
-	int hfi1_alg = HFI1_ALG_ACROSS;
+	int hfi1_alg = PSMI_UNIT_SEL_ALG_ACROSS;
 
 	/* If a specific unit is set in the environment, use that one. */
 	psmi_getenv("HFI_SELECTION_ALG",
@@ -999,16 +695,16 @@ int psmi_get_hfi_selection_algorithm(void)
 		    (union psmi_envvar_val)"Round Robin", &env_hfi1_alg);
 
 	if (!strcasecmp(env_hfi1_alg.e_str, "Round Robin"))
-		hfi1_alg = HFI1_ALG_ACROSS;
+		hfi1_alg = PSMI_UNIT_SEL_ALG_ACROSS;
 	else if (!strcasecmp(env_hfi1_alg.e_str, "Packed"))
-		hfi1_alg = HFI1_ALG_WITHIN;
+		hfi1_alg = PSMI_UNIT_SEL_ALG_WITHIN;
 	else if (!strcasecmp(env_hfi1_alg.e_str, "Round Robin All"))
-		hfi1_alg = HFI1_ALG_ACROSS_ALL;
+		hfi1_alg = PSMI_UNIT_SEL_ALG_ACROSS_ALL;
 	else {
 		_HFI_ERROR
 		    ("Unknown HFI selection algorithm %s. Defaulting to Round Robin "
 		     "allocation of HFIs.\n", env_hfi1_alg.e_str);
-		hfi1_alg = HFI1_ALG_ACROSS;
+		hfi1_alg = PSMI_UNIT_SEL_ALG_ACROSS;
 	}
 
 	return hfi1_alg;

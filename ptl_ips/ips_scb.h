@@ -65,12 +65,10 @@
 #define IPS_SCB_FLAG_ADD_BUFFER 0x1
 
 /* macros to update scb */
-#define ips_scb_hdrdata(scb)   scb->ips_lrh.hdr_data
-#define ips_scb_uwords(scb)    scb->ips_lrh.data
 #define ips_scb_opcode(scb)    scb->opcode
 #define ips_scb_buffer(scb)    scb->payload
 #define ips_scb_length(scb)    scb->payload_size
-#define ips_scb_flags(scb)     scb->flags
+#define ips_scb_flags(scb)     scb->scb_flags
 #define ips_scb_dma_cntr(scb)  scb->dma_cntr
 #define ips_scb_epaddr(scb)    scb->epaddr
 #define ips_scb_cb(scb)        scb->callback
@@ -145,7 +143,7 @@ struct ips_scb {
 	/* Used when composing packet */
 	psmi_seqnum_t seq_num;
 	uint32_t cksum[2];
-	uint32_t flags;
+	uint32_t scb_flags;
 	uint32_t payload_size;	/* remaining first packet size */
 	uint32_t chunk_size;	/* total buffer size if nfrag > 1 */
 	/* initially chunk_size_remaining = chunk_size. */
@@ -157,11 +155,10 @@ struct ips_scb {
 	uint16_t tidctrl;
 	uint16_t frag_size;	/* max packet size in sequence */
 	uint16_t opcode;
-
+	uint16_t tsess_length;
+	uint32_t *tsess;
 	struct ips_flow *flow;
 	struct ips_tid_send_desc *tidsendc;
-	uint32_t *tsess;
-	uint16_t tsess_length;
 
 	struct ips_scbctrl *scbc;
 	void *imm_payload;
@@ -174,7 +171,6 @@ struct ips_scb {
 #ifdef PSM_CUDA
 	psm2_mq_req_t mq_req;		/* back pointer to original request */
 #endif
-
 	/* sdma header place holder, PSM2 code should access
 	 * the sdma_req_info only using the psmi_get_sdma_req_info()
 	 * accessor function. */
@@ -195,6 +191,12 @@ struct ips_scb {
 	} PSMI_CACHEALIGN;
 };
 
+/* Make sure pbc is at the right place before the message header */
+
+COMPILE_TIME_ASSERT(PBC_ABUTS_IPS_MSG_HDR,(sizeof(struct hfi_pbc) ==
+    (size_t) (offsetof(struct ips_scb, ips_lrh) -
+              offsetof(struct ips_scb, pbc))));
+
 #ifdef PSM_CUDA
 #define IS_TRANSFER_BUF_GPU_MEM(scb) (ips_scb_flags(scb) & IPS_SEND_FLAG_PAYLOAD_BUF_GPU)
 #endif
@@ -203,7 +205,7 @@ void ips_scbctrl_free(ips_scb_t *scb);
 int ips_scbctrl_bufalloc(ips_scb_t *scb);
 int ips_scbctrl_avail(struct ips_scbctrl *scbc);
 ips_scb_t *MOCKABLE(ips_scbctrl_alloc)(struct ips_scbctrl *scbc,
-			     int scbnum, int len, uint32_t flags);
+				int scbnum, int len, uint32_t flags);
 MOCK_DCL_EPILOGUE(ips_scbctrl_alloc);
 ips_scb_t *MOCKABLE(ips_scbctrl_alloc_tiny)(struct ips_scbctrl *scbc);
 MOCK_DCL_EPILOGUE(ips_scbctrl_alloc_tiny);

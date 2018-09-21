@@ -54,10 +54,7 @@
 /* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
-#include "ips_proto.h"
-#include "ips_proto_header.h"
 #include "ips_proto_params.h"
-#include "ips_recvq.h"
 
 #ifndef _IPS_RECVHDRQ_H
 #define _IPS_RECVHDRQ_H
@@ -73,9 +70,6 @@ struct ips_epstate;
 /* keep current packet, revisit the same packet next time */
 #define IPS_RECVHDRQ_REVISIT	2
 
-#define IPS_RECVHDRQ_ELEMSZ_MAX 32	/* 128 bytes */
-#define LAST_RHF_SEQNO 13
-
 /* CCA related receive events */
 #define IPS_RECV_EVENT_FECN 0x1
 #define IPS_RECV_EVENT_BECN 0x2
@@ -83,19 +77,17 @@ struct ips_epstate;
 struct ips_recvhdrq_event {
 	struct ips_proto *proto;
 	const struct ips_recvhdrq *recvq;	/* where message received */
-	const uint32_t *rcv_hdr;	/* rcv_hdr ptr */
-	const __le32 *rhf;	/* receive header flags */
+	psmi_hal_rhf_t psm_hal_rhf;
 	struct ips_message_header *p_hdr;	/* protocol header in rcv_hdr */
 	struct ips_epaddr *ipsaddr;	/* peer ipsaddr, if available */
-	uint32_t error_flags;	/* error flags */
 	uint8_t has_cksum;	/* payload has cksum */
 	uint8_t is_congested;	/* Packet faced congestion */
-	uint16_t ptype;		/* packet type */
+	psmi_hal_cl_q psm_hal_hdr_q;
 };
 
 struct ips_recvhdrq_callbacks {
 	int (*callback_packet_unknown) (const struct ips_recvhdrq_event *);
-	int (*callback_subcontext) (const struct ips_recvhdrq_event *,
+	int (*callback_subcontext) (struct ips_recvhdrq_event *,
 				    uint32_t subcontext);
 	int (*callback_error) (struct ips_recvhdrq_event *);
 };
@@ -104,20 +96,15 @@ psm2_error_t
 ips_recvhdrq_init(const psmi_context_t *context,
 		  const struct ips_epstate *epstate,
 		  const struct ips_proto *proto,
-		  const struct ips_recvq_params *hdrq_params,
-		  const struct ips_recvq_params *egrq_params,
 		  const struct ips_recvhdrq_callbacks *callbacks,
-		  uint32_t flags,
 		  uint32_t subcontext,
 		  struct ips_recvhdrq *recvq,
-		  struct ips_recvhdrq_state *recvq_state);
+		  struct ips_recvhdrq_state *recvq_state,
+		  psmi_hal_cl_q cl_q);
 
 psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq);
 
-psm2_error_t ips_recvhdrq_fini(struct ips_recvhdrq *recvq);
-
-/*
- * This function is designed to implement RAPID CCA. It iterates
+ /* This function is designed to implement RAPID CCA. It iterates
  * through the recvq, checking each element for set FECN or BECN bits.
  * In the case of finding one, the proper response is executed, and the bits
  * are cleared.
@@ -134,9 +121,8 @@ psm2_error_t ips_recvhdrq_scan_cca(struct ips_recvhdrq *recvq);
  */
 #define NO_EAGER_UPDATE ~0U
 struct ips_recvhdrq_state {
-	uint32_t hdrq_head;	/* software copy of head */
-	uint32_t rcv_egr_index_head;	/* software copy of eager index head */
-	uint32_t hdrq_rhf_seq;	/* last seq */
+	psmi_hal_cl_idx hdrq_head; /* software copy of head */
+	psmi_hal_cl_idx rcv_egr_index_head; /* software copy of eager index head */
 	uint32_t head_update_interval;	/* Header update interval */
 	uint32_t num_hdrq_done;	/* Num header queue done */
 	uint32_t egrq_update_interval; /* Eager buffer update interval */
@@ -152,21 +138,12 @@ struct ips_recvhdrq {
 	struct ips_proto *proto;
 	const psmi_context_t *context;	/* error handling, epid id, etc. */
 	struct ips_recvhdrq_state *state;
-	uint32_t context_flags;	/* derived from base_info.spi_runtime_flags */
 	uint32_t subcontext;	/* messages that don't match subcontext call
 				 * recv_callback_subcontext */
-
+	psmi_hal_cl_q psm_hal_cl_hdrq;
 	/* Header queue handling */
 	pthread_spinlock_t hdrq_lock;	/* Lock for thread-safe polling */
-	uint32_t hdrq_rhf_off;	/* rhf offset */
-	int hdrq_rhf_notail;	/* rhf notail enabled */
 	uint32_t hdrq_elemlast;	/* last element precomputed */
-	struct ips_recvq_params hdrq;
-
-	/* Eager queue handling */
-	void **egrq_buftable;	/* table of eager idx-to-ptr */
-	struct ips_recvq_params egrq;
-
 	/* Lookup endpoints epid -> ptladdr (rank)) */
 	const struct ips_epstate *epstate;
 
@@ -174,35 +151,30 @@ struct ips_recvhdrq {
 	struct ips_recvhdrq_callbacks recvq_callbacks;
 
 	/* List of flows with pending acks for receive queue */
-	 SLIST_HEAD(pending_flows, ips_flow) pending_acks;
+	SLIST_HEAD(pending_flows, ips_flow) pending_acks;
 
-	uint32_t runtime_flags;
 	volatile __u64 *spi_status;
 };
 
 PSMI_INLINE(int ips_recvhdrq_isempty(const struct ips_recvhdrq *recvq))
 {
-	if (recvq->hdrq_rhf_notail)	/* use rhf-based reads */
-		return recvq->state->hdrq_rhf_seq !=
-		    hfi_hdrget_seq(recvq->hdrq.base_addr +
-				   recvq->state->hdrq_head +
-				   recvq->hdrq_rhf_off);
-	else
-		return ips_recvq_tail_get(&recvq->hdrq) ==
-		    recvq->state->hdrq_head;
+	return psmi_hal_cl_q_empty(recvq->state->hdrq_head,
+				   recvq->psm_hal_cl_hdrq,
+		recvq->context->psm_hw_ctxt);
 }
 
 PSMI_INLINE(
 void *
 ips_recvhdrq_event_payload(const struct ips_recvhdrq_event *rcv_ev))
 {
-	/* XXX return NULL if no eager buffer allocated */
-	if (hfi_hdrget_use_egrbfr(rcv_ev->rhf))
-		return ips_recvq_egr_index_2_ptr(rcv_ev->recvq->egrq_buftable,
-						 hfi_hdrget_egrbfr_index
-						 (rcv_ev->rhf),
-						 hfi_hdrget_egrbfr_offset
-						 (rcv_ev->rhf) * 64);
+	if (psmi_hal_rhf_get_use_egr_buff(rcv_ev->psm_hal_rhf))
+		return psmi_hal_get_egr_buff(
+			psmi_hal_rhf_get_egr_buff_index(rcv_ev->psm_hal_rhf),
+			rcv_ev->psm_hal_hdr_q + 1 /* The circular list q (cl_q) for the
+						     egr buff for any rx hdrq event is
+						     always one more than the hdrq cl q */,
+			rcv_ev->recvq->context->psm_hw_ctxt)+
+			(psmi_hal_rhf_get_egr_buff_offset(rcv_ev->psm_hal_rhf)*64);
 	else
 		return NULL;
 }
@@ -213,7 +185,7 @@ ips_recvhdrq_event_paylen(const struct ips_recvhdrq_event *rcv_ev))
 {
 	uint32_t cksum_len = rcv_ev->has_cksum ? PSM_CRC_SIZE_IN_BYTES : 0;
 
-	return hfi_hdrget_length_in_bytes(rcv_ev->rhf) -
+	return psmi_hal_rhf_get_packet_length(rcv_ev->psm_hal_rhf) -
 	    (sizeof(struct ips_message_header) +
 	     HFI_CRC_SIZE_IN_BYTES + cksum_len);
 	/* PSM does not use bth0].PadCnt, it figures out real datalen other way */

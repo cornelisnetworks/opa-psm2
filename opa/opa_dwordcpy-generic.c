@@ -167,7 +167,7 @@ void hfi_qwordcpy(volatile uint64_t *dest, const uint64_t *src, uint32_t nqwords
 	}
 }
 
-#ifdef __AVX512F__
+#ifdef PSM_AVX512
 void hfi_pio_blockcpy_512(volatile uint64_t *dest, const uint64_t *src, uint32_t nblock)
 {
 	volatile __m512i *dp = (volatile __m512i *) dest;
@@ -192,7 +192,6 @@ void hfi_pio_blockcpy_512(volatile uint64_t *dest, const uint64_t *src, uint32_t
 }
 #endif
 
-#ifdef __AVX2__
 void hfi_pio_blockcpy_256(volatile uint64_t *dest, const uint64_t *src, uint32_t nblock)
 {
 	volatile __m256i *dp = (volatile __m256i *) dest;
@@ -219,9 +218,7 @@ void hfi_pio_blockcpy_256(volatile uint64_t *dest, const uint64_t *src, uint32_t
 		} while ((--nblock) && (dp = dp+2) && (sp = sp+2));
 	}
 }
-#endif
 
-#ifdef __SSE2__
 void hfi_pio_blockcpy_128(volatile uint64_t *dest, const uint64_t *src, uint32_t nblock)
 {
 	volatile __m128i *dp = (volatile __m128i *) dest;
@@ -256,7 +253,6 @@ void hfi_pio_blockcpy_128(volatile uint64_t *dest, const uint64_t *src, uint32_t
 		} while ((--nblock) && (dp = dp+4) && (sp = sp+4));
 	}
 }
-#endif
 
 void hfi_pio_blockcpy_64(volatile uint64_t *dest, const uint64_t *src, uint32_t nblock)
 {

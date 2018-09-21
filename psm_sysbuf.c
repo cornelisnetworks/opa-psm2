@@ -70,7 +70,6 @@ struct psmi_mem_block_ctrl {
 		psmi_mem_ctrl_t *mem_handler;
 		struct psmi_mem_block_ctrl *next;
 	};
-	char _redzone[PSM_VALGRIND_REDZONE_SZ];
 };
 
 
@@ -102,9 +101,6 @@ void psmi_mq_sysbuf_init(psm2_mq_t mq)
         }
     }
 
-    VALGRIND_CREATE_MEMPOOL(mq, PSM_VALGRIND_REDZONE_SZ,
-                            PSM_VALGRIND_MEM_UNDEFINED);
-
     /* Hit once on each block size so we have a pool that's allocated */
     for (i=0; i < MM_NUM_OF_POOLS; i++) {
         void *ptr;
@@ -122,8 +118,6 @@ void psmi_mq_sysbuf_fini(psm2_mq_t mq)  // free all buffers that is currently no
 
     if (mq->mem_ctrl_is_init == 0)
         return;
-
-    VALGRIND_DESTROY_MEMPOOL(mq);
 
     for (i=0; i < MM_NUM_OF_POOLS; i++) {
         while ((block = mq->handler_index[i].free_list) != NULL) {
@@ -163,8 +157,7 @@ void *psmi_mq_sysbuf_alloc(psm2_mq_t mq, uint32_t alloc_size)
 
     if (mm_handler->current_available == 0) { // allocate more buffers
         if (mm_handler->flags & MM_FLAG_TRANSIENT) {
-            uint32_t newsz = alloc_size + sizeof(struct psmi_mem_block_ctrl)
-                                        + PSM_VALGRIND_REDZONE_SZ;
+            uint32_t newsz = alloc_size + sizeof(struct psmi_mem_block_ctrl);
             new_block = psmi_malloc(mq->ep, UNEXPECTED_BUFFERS, newsz);
 
             if (new_block) {
@@ -172,14 +165,12 @@ void *psmi_mq_sysbuf_alloc(psm2_mq_t mq, uint32_t alloc_size)
                 new_block++;
                 mm_handler->total_alloc++;
                 mq->mem_ctrl_total_bytes += newsz;
-                VALGRIND_MEMPOOL_ALLOC(mq, new_block, alloc_size);
             }
             return new_block;
         }
 
         do {
-            uint32_t newsz = mm_handler->block_size + sizeof(struct psmi_mem_block_ctrl) +
-                             PSM_VALGRIND_REDZONE_SZ;
+            uint32_t newsz = mm_handler->block_size + sizeof(struct psmi_mem_block_ctrl);
 
             new_block = psmi_malloc(mq->ep, UNEXPECTED_BUFFERS, newsz);
             mq->mem_ctrl_total_bytes += newsz;
@@ -204,7 +195,6 @@ void *psmi_mq_sysbuf_alloc(psm2_mq_t mq, uint32_t alloc_size)
         new_block->mem_handler = mm_handler;
         new_block++;
 
-        VALGRIND_MEMPOOL_ALLOC(mq, new_block, mm_handler->block_size);
         return new_block;
     }
     return NULL;
@@ -219,8 +209,6 @@ void psmi_mq_sysbuf_free(psm2_mq_t mq, void * mem_to_free)
 
     block_to_free = (struct psmi_mem_block_ctrl *)mem_to_free - 1;
     mm_handler = block_to_free->mem_handler;
-
-    VALGRIND_MEMPOOL_FREE(mq, mem_to_free);
 
     if (mm_handler->flags & MM_FLAG_TRANSIENT) {
         psmi_free(block_to_free);

@@ -53,9 +53,10 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
+#include "psm_user.h"
+#include "psm2_hal.h"
 #include "ips_proto.h"
-#include "ips_proto_internal.h"
-#include "ips_proto_header.h"
+#include "ips_expected_proto.h"
 #include "ips_proto_help.h"
 
 void ips_proto_dump_frame(void *frame, int lenght, char *message)
@@ -167,19 +168,19 @@ void ips_proto_get_rhf_errstring(uint32_t err, char *msg, size_t len)
 {
 	*msg = '\0';		/* if no errors, and so don't need to check what's first */
 
-	if (err & HFI_RHF_ICRCERR)
+	if (err & PSMI_HAL_RHF_ERR_ICRC)
 		strlcat(msg, "icrcerr ", len);
-	if (err & HFI_RHF_ECCERR)
+	if (err & PSMI_HAL_RHF_ERR_ECC)
 		strlcat(msg, "eccerr ", len);
-	if (err & HFI_RHF_LENERR)
+	if (err & PSMI_HAL_RHF_ERR_LEN)
 		strlcat(msg, "lenerr ", len);
-	if (err & HFI_RHF_TIDERR)
+	if (err & PSMI_HAL_RHF_ERR_TID)
 		strlcat(msg, "tiderr ", len);
-	if (err & HFI_RHF_DCERR)
+	if (err & PSMI_HAL_RHF_ERR_DC)
 		strlcat(msg, "dcerr ", len);
-	if (err & HFI_RHF_DCUNCERR)
+	if (err & PSMI_HAL_RHF_ERR_DCUN)
 		strlcat(msg, "dcuncerr ", len);
-	if (err & HFI_RHF_KHDRLENERR)
+	if (err & PSMI_HAL_RHF_ERR_KHDRLEN)
 		strlcat(msg, "khdrlenerr ", len);
 }
 

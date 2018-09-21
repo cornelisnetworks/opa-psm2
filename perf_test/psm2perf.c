@@ -168,7 +168,8 @@ struct benchmark_info *init_benchmark(int argc, char **argv)
 		perror("gethostname");
 		goto bail;
 	}
-
+	// Guarantee a null termination to info->hostname:
+	info->hostname[HOSTNAME_SZ-1] = 0;
 	info->cpu_freq = get_cpu_rate() * 1e6;
 	if (info->cpu_freq == 0.0)
 		goto bail;
@@ -178,6 +179,8 @@ struct benchmark_info *init_benchmark(int argc, char **argv)
 		info->is_server = 1;
 		info->partner = 1;
 		strncpy(info->server, info->hostname, HOSTNAME_SZ);
+		// Guarantee a null termination to info->server:
+		info->server[HOSTNAME_SZ-1] = 0;
 		if (got_args)
 			printf("WARN: all arguments ignored for server\n");
 	// Found a positional argument, desginates client process
@@ -185,6 +188,8 @@ struct benchmark_info *init_benchmark(int argc, char **argv)
 		info->is_server = 0;
 		info->partner = 0;
 		strncpy(info->server, argv[optind], HOSTNAME_SZ);
+		// Guarantee a null termination to info->server:
+		info->server[HOSTNAME_SZ-1] = 0;
 	} else {
 		print_usage(argv[0]);
 		fprintf(stderr, "Found extra positional arguments\n");

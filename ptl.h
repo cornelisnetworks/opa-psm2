@@ -75,6 +75,10 @@
 /* We can currently initialize up to 3 PTLs */
 #define PTL_MAX_INIT	3
 
+/* struct ptl is an incomplete type, and it serves as a generic or opaque
+   container.  It should remain an incomplete type in the entire psm
+   source base. concrete ptl types need to have a suffix such as ptl_self,
+   ptl_ips. */
 struct ptl;
 typedef struct ptl ptl_t;
 

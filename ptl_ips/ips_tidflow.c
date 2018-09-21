@@ -54,16 +54,17 @@
 /* Copyright (c) 2003-2016 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
+#include "psm2_hal.h"
 #include "ipserror.h"
 #include "ips_proto.h"
-#include "ips_proto_internal.h"
+#include "ips_expected_proto.h"
+#include "ips_tidflow.h"
 
 psm2_error_t ips_tf_init(struct ips_protoexp *protoexp,
 			const psmi_context_t *context,
 			struct ips_tf *tfc,
 			ips_tf_avail_cb_fn_t cb)
 {
-	const struct hfi1_ctxt_info *ctxt_info = &context->ctrl->ctxt_info;
 	int tf_idx;
 
 #if TF_ADD
@@ -79,7 +80,7 @@ psm2_error_t ips_tf_init(struct ips_protoexp *protoexp,
 	tfc->tf_num_inuse = 0;
 	tfc->tf_avail_cb = cb;
 	tfc->tf_avail_context = (void *)protoexp;
-	if ((context->runtime_flags & HFI1_CAP_EXTENDED_PSN)) {
+	if (psmi_hal_has_cap(PSM_HAL_CAP_EXTENDED_PSN)) {
 		tfc->tf_gen_mask = 0xFFFFF;
 	} else {
 		tfc->tf_gen_mask = 0x1FFF;
@@ -116,7 +117,7 @@ psm2_error_t ips_tf_init(struct ips_protoexp *protoexp,
 	/*
 	 * Only the master process can initialize.
 	 */
-	if (ctxt_info->subctxt == 0) {
+	if (psmi_hal_get_subctxt(context->psm_hw_ctxt) == 0) {
 		pthread_spin_init(&tfc->tf_ctrl->tf_ctrl_lock,
 					PTHREAD_PROCESS_SHARED);
 		tfc->tf_ctrl->tf_num_max = HFI_TF_NFLOWS;
@@ -129,8 +130,8 @@ psm2_error_t ips_tf_init(struct ips_protoexp *protoexp,
 			tfc->tf_ctrl->tf[tf_idx].next_gen = 0;
 			tfc->tf_ctrl->tf[tf_idx].next_free = tf_idx + 1;
 
-			hfi_tidflow_reset(context->ctrl, tf_idx,
-					  tfc->tf_gen_mask, 0x7FF);
+			psmi_hal_tidflow_reset(tfc->context->psm_hw_ctxt, tf_idx,
+					       tfc->tf_gen_mask, 0x7FF);
 		}
 		tfc->tf_ctrl->tf_head = 0;
 	}
@@ -222,7 +223,8 @@ psm2_error_t ips_tf_deallocate(struct ips_tf *tfc, uint32_t tf_idx)
 	tfc->tidrecvc[tf_idx].rdescid.u16w3++;
 
 	/* Mark invalid generation for flow (stale packets will be dropped) */
-	hfi_tidflow_reset(tfc->context->ctrl, tf_idx, tfc->tf_gen_mask, 0x7FF);
+	psmi_hal_tidflow_reset(tfc->context->psm_hw_ctxt, tf_idx,
+			       tfc->tf_gen_mask, 0x7FF);
 
 	if (tfc->context->tf_ctrl)
 		pthread_spin_lock(&ctrl->tf_ctrl_lock);

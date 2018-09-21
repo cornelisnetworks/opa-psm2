@@ -54,27 +54,15 @@
 /* Copyright (c) 2016 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
-#include "ipserror.h"
+#include "psm2_hal.h"
+
+#include "ips_scb.h"
+#include "ips_tid.h"
+#include "ips_tidflow.h"
 #include "ips_proto.h"
-#include "ips_proto_internal.h"
-
-static uint32_t hfi1_supports_dma_no_hdrsupp_for_msgs_leq_8dw = 0;
-
-void
-ips_protoexp_hfi1_check_dma_no_hdrsupp_for_msgs_leq_8dw(void)
-{
-	if ((hfi_get_user_major_version() >  6) ||
-	    (hfi_get_user_major_version() == 6  &&
-	     hfi_get_user_minor_version() >= 3)) {
-		hfi1_supports_dma_no_hdrsupp_for_msgs_leq_8dw = 1;
-	}
-}
-
-/*
- * Easy switch to (say) _HFI_INFO if debugging in the expected protocol is
- * needed
- */
-#define _HFI_EXP _HFI_VDBG
+#include "ips_expected_proto.h"
+#include "ips_proto_help.h"
+#include "psm_mq_internal.h"
 
 /*
  * Timer callbacks.  When we need work to be done out of the receive process
@@ -87,12 +75,16 @@ static psm2_error_t
 ips_tid_pendtids_timer_callback(struct psmi_timer *timer, uint64_t current);
 
 static void
-ips_protoexp_do_tf_seqerr(struct ips_protoexp *protoexp,
-			   struct ips_tid_recv_desc *tidrecvc,
-			   struct ips_message_header *p_hdr);
+ips_protoexp_do_tf_seqerr(void *vpprotoexp
+			  /* actually: struct ips_protoexp *protoexp */,
+			  void *vptidrecvc
+			  /* actually: struct ips_tid_recv_desc *tidrecvc */,
+			  struct ips_message_header *p_hdr);
 static void
-ips_protoexp_do_tf_generr(struct ips_protoexp *protoexp,
-			   struct ips_tid_recv_desc *tidrecvc,
+ips_protoexp_do_tf_generr(void *vpprotoexp
+			  /* actually: struct ips_protoexp *protoexp */,
+			  void *vptidrecvc
+			  /* actually: struct ips_tid_recv_desc *tidrecvc */,
 			   struct ips_message_header *p_hdr);
 
 static void ips_tid_scbavail_callback(struct ips_scbctrl *scbc, void *context);
@@ -127,8 +119,6 @@ MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 		  int num_of_send_bufs,
 		  int num_of_send_desc, struct ips_protoexp **protoexp_o)
 {
-	ips_protoexp_hfi1_check_dma_no_hdrsupp_for_msgs_leq_8dw();
-
 	struct ips_protoexp *protoexp = NULL;
 	uint32_t tidmtu_max;
 	psm2_error_t err = PSM2_OK;
@@ -146,7 +136,7 @@ MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 	protoexp->timerq = proto->timerq;
 	srand48_r((long int) getpid(), &protoexp->tidflow_drand48_data);
 	protoexp->tid_flags = protoexp_flags;
-	if (context->runtime_flags & HFI1_CAP_HDRSUPP) {
+	if (psmi_hal_has_cap(PSM_HAL_CAP_HDRSUPP)) {
 		union psmi_envvar_val env_hdrsupp;
 
 		psmi_getenv("PSM2_HDRSUPP",
@@ -157,7 +147,7 @@ MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 			protoexp->tid_flags |= IPS_PROTOEXP_FLAG_HDR_SUPP;
 		else
 			/* user wants to turn off header suppression */
-			context->ctrl->__hfi_tfvalid = 0;
+		  psmi_hal_set_tf_valid(0, context->psm_hw_ctxt);
 	}
 
 	if (context->ep->memmode == PSMI_MEMMODE_MINIMAL) {
@@ -195,10 +185,6 @@ MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 	   proto->ep->mq->sreq_pool != NULL);
 	 */
 	psmi_assert_always(proto->timerq != NULL);
-	/* Make sure pbc is at the right place before the message header */
-	psmi_assert_always(sizeof(struct hfi_pbc) == (size_t)
-			   (offsetof(struct ips_scb, ips_lrh) -
-			    offsetof(struct ips_scb, pbc)));
 
 	/* These request pools are managed by the MQ component */
 	protoexp->tid_sreq_pool = proto->ep->mq->sreq_pool;
@@ -423,14 +409,9 @@ MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 				goto fail;
 			}
 
-			if (cuda_runtime_version >= 7000) {
-				PSMI_CUDA_CALL(cudaStreamCreateWithFlags,
-					&protoexp->cudastream_recv,
-					cudaStreamNonBlocking);
-			} else {
-				PSMI_CUDA_CALL(cudaStreamCreate,
-					&protoexp->cudastream_recv);
-			}
+			PSMI_CUDA_CALL(cuStreamCreate,
+				&protoexp->cudastream_recv,
+				CU_STREAM_NON_BLOCKING);
 			STAILQ_INIT(&protoexp->cudapend_getreqsq);
 		} else {
 			protoexp->cuda_hostbuf_pool_recv = NULL;
@@ -555,7 +536,8 @@ ips_protoexp_tid_get_from_token(struct ips_protoexp *protoexp,
 				void *context)
 {
 	struct ips_tid_get_request *getreq;
-	int count, nbytes, tids, tidflows;
+	int count, tids, tidflows;
+	uint64_t nbytes;
 
 	PSM2_LOG_MSG("entering");
 	psmi_assert((((ips_epaddr_t *) epaddr)->window_rv % PSMI_PAGESIZE) == 0);
@@ -691,11 +673,11 @@ ips_protoexp_send_tid_grant(struct ips_tid_recv_desc *tidrecvc)
 {
 	ips_epaddr_t *ipsaddr = tidrecvc->ipsaddr;
 	struct ips_proto *proto = tidrecvc->protoexp->proto;
+	psmi_assert(proto->msgflowid < EP_FLOW_LAST);
 	struct ips_flow *flow = &ipsaddr->flows[proto->msgflowid];
 	ips_scb_t *scb;
 
 	scb = tidrecvc->grantscb;
-
 	ips_scb_opcode(scb) = OPCODE_LONG_CTS;
 	scb->ips_lrh.khdr.kdeth0 = 0;
 	scb->ips_lrh.mdata = tidrecvc->tidflow_genseq.psn_val;
@@ -706,7 +688,7 @@ ips_protoexp_send_tid_grant(struct ips_tid_recv_desc *tidrecvc)
 	ips_scb_buffer(scb) = (void *)&tidrecvc->tid_list;
 	ips_scb_length(scb) = tidrecvc->tsess_tidlist_length;
 
-	PSM2_LOG_EPM(OPCODE_LONG_CTS,PSM2_LOG_EPM_TX, proto->ep->epid,
+	PSM2_LOG_EPM(OPCODE_LONG_CTS,PSM2_LOG_TX, proto->ep->epid,
 		    flow->ipsaddr->epaddr.epid ,"tidrecvc->getreq->tidgr_sendtoken; %d",
 		    tidrecvc->getreq->tidgr_sendtoken);
 
@@ -720,10 +702,11 @@ ips_protoexp_send_tid_completion(struct ips_tid_recv_desc *tidrecvc,
 {
 	ips_epaddr_t *ipsaddr = tidrecvc->ipsaddr;
 	struct ips_proto *proto = tidrecvc->protoexp->proto;
+	psmi_assert(proto->msgflowid < EP_FLOW_LAST);
 	struct ips_flow *flow = &ipsaddr->flows[proto->msgflowid];
 	ips_scb_t *scb;
 
-	PSM2_LOG_EPM(OPCODE_EXPTID_COMPLETION,PSM2_LOG_EPM_TX, proto->ep->epid,
+	PSM2_LOG_EPM(OPCODE_EXPTID_COMPLETION,PSM2_LOG_TX, proto->ep->epid,
 		    flow->ipsaddr->epaddr.epid ,"sdescid._desc_idx: %d",
 		    sdescid._desc_idx);
 	scb = tidrecvc->completescb;
@@ -748,8 +731,8 @@ ips_protoexp_send_tid_completion(struct ips_tid_recv_desc *tidrecvc,
 static
 void psmi_deallocate_chb(struct ips_cuda_hostbuf* chb)
 {
-	PSMI_CUDA_CALL(cudaFreeHost, chb->host_buf);
-	PSMI_CUDA_CALL(cudaEventDestroy, chb->copy_status);
+	PSMI_CUDA_CALL(cuMemFreeHost, chb->host_buf);
+	PSMI_CUDA_CALL(cuEventDestroy, chb->copy_status);
 	psmi_free(chb);
 	return;
 }
@@ -765,7 +748,7 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 	struct ips_tid_send_desc *tidsendc;
 
 	PSM2_LOG_MSG("entering");
-	PSM2_LOG_EPM(OPCODE_EXPTID_COMPLETION,PSM2_LOG_EPM_RX,rcv_ev->ipsaddr->epaddr.epid,
+	PSM2_LOG_EPM(OPCODE_EXPTID_COMPLETION,PSM2_LOG_RX,rcv_ev->ipsaddr->epaddr.epid,
 		    rcv_ev->proto->ep->mq->ep->epid,"desc_id._desc_idx: %d",desc_id._desc_idx);
 
 	if (!ips_proto_is_expected_or_nak(rcv_ev))
@@ -830,6 +813,7 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 
 		/* Keep KW happy. */
 		rcv_ev->p_hdr = NULL;
+		/* Prove that the scb will not leak in the unacked queue: */
 		psmi_assert(STAILQ_EMPTY(&tidsendc->tidflow.scb_unacked));
 	}
 
@@ -878,14 +862,14 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 	struct ips_message_header *p_hdr = rcv_ev->p_hdr;
 	struct ips_tid_recv_desc *tidrecvc;
 	ptl_arg_t desc_id;
-	psmi_seqnum_t sequence_num, tf_sequence_num;
+	psmi_seqnum_t sequence_num;
 
 	psmi_assert(_get_proto_hfi_opcode(p_hdr) == OPCODE_EXPTID);
 
 	PSM2_LOG_MSG("entering");
 
 	desc_id._desc_idx = ips_proto_flowid(p_hdr);
-	PSM2_LOG_EPM(OPCODE_EXPTID,PSM2_LOG_EPM_RX,rcv_ev->ipsaddr->epaddr.epid,
+	PSM2_LOG_EPM(OPCODE_EXPTID,PSM2_LOG_RX,rcv_ev->ipsaddr->epaddr.epid,
 		    proto->ep->mq->ep->epid,"desc_id._desc_idx: %d", desc_id._desc_idx);
 
 	desc_id._desc_genc = p_hdr->exp_rdescid_genc;
@@ -909,86 +893,10 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 
 	sequence_num.psn_val = __be32_to_cpu(p_hdr->bth[2]);
 
-	if_pf(protoexp->tid_flags & IPS_PROTOEXP_FLAG_HDR_SUPP) {
-		/* Drop packet if generation number does not match. There
-		 * is a window that before we program the hardware tidflow
-		 * table with new gen/seq, hardware might receive some
-		 * packets with the old generation.
-		 */
-		if (sequence_num.psn_gen != tidrecvc->tidflow_genseq.psn_gen)
-		{
-			PSM2_LOG_MSG("leaving");
+	if_pf (PSM_HAL_ERROR_OK != psmi_hal_tidflow_check_update_pkt_seq(
+		    protoexp,sequence_num,tidrecvc,p_hdr,
+		    ips_protoexp_do_tf_generr,ips_protoexp_do_tf_seqerr))
 			return IPS_RECVHDRQ_CONTINUE;
-		}
-
-#ifdef PSM_DEBUG
-		/* Check if new packet falls into expected seq range, we need
-		 * to deal with wrap around of the seq value from 2047 to 0
-		 * because seq is only 11 bits. */
-		int16_t seq_off = (int16_t)(sequence_num.psn_seq -
-					tidrecvc->tidflow_genseq.psn_seq);
-		if (seq_off < 0)
-			seq_off += 2048; /* seq is 11 bits */
-		psmi_assert(seq_off < 1024);
-#endif
-		/* NOTE: with RSM in use, we should not automatically update
-		 * our PSN from the HFI's PSN.  The HFI doesn't know about
-		 * RSM interceptions.
-		 */
-		/* (DON'T!) Update the shadow tidflow_genseq */
-		/* tidrecvc->tidflow_genseq.psn_seq = sequence_num.psn_seq + 1; */
-
-	}
-	/* Always check the sequence number if we get a header, even if SH. */
-	if_pt(sequence_num.psn_num == tidrecvc->tidflow_genseq.psn_num) {
-		/* Update the shadow tidflow_genseq */
-		tidrecvc->tidflow_genseq.psn_seq = sequence_num.psn_seq + 1;
-
-		/* update the fake tidflow table with new seq, this is for
-		 * seqerr and err_chk_gen processing to get the latest
-		 * valid sequence number */
-		hfi_tidflow_set_entry(tidrecvc->context->ctrl,
-			tidrecvc->rdescid._desc_idx,
-			tidrecvc->tidflow_genseq.psn_gen,
-			tidrecvc->tidflow_genseq.psn_seq);
-	} else {
-		/* Generation mismatch */
-		if (sequence_num.psn_gen != tidrecvc->tidflow_genseq.psn_gen) {
-			ips_protoexp_do_tf_generr(protoexp,
-						tidrecvc, p_hdr);
-			PSM2_LOG_MSG("leaving");
-			return IPS_RECVHDRQ_CONTINUE;
-		} else {
-			/* Possible sequence mismatch error */
-			/* First, check if this is a recoverable SeqErr -
-			 * caused by a good packet arriving in a tidflow that
-			 * has had a FECN bit set on some earlier packet.
-			 */
-
-			/* If this is the first RSM packet, our own PSN state
-			 * is probably old.  Pull from the HFI if it has
-			 * newer data.
-			 */
-			tf_sequence_num.psn_val =
-				hfi_tidflow_get_seqnum(
-					hfi_tidflow_get(tidrecvc->context->ctrl,
-							tidrecvc->rdescid._desc_idx));
-			if (tf_sequence_num.psn_val > tidrecvc->tidflow_genseq.psn_seq)
-				tidrecvc->tidflow_genseq.psn_seq = tf_sequence_num.psn_seq;
-
-			/* Now re-check the sequence numbers. */
-			if (sequence_num.psn_seq > tidrecvc->tidflow_genseq.psn_seq) {
-				/* It really was a sequence error.  Restart. */
-				ips_protoexp_do_tf_seqerr(protoexp, tidrecvc, p_hdr);
-				PSM2_LOG_MSG("leaving");
-				return IPS_RECVHDRQ_CONTINUE;
-			} else {
-				/* False SeqErr.  We can accept this packet. */
-				if (sequence_num.psn_seq == tidrecvc->tidflow_genseq.psn_seq)
-					tidrecvc->tidflow_genseq.psn_seq++;
-			}
-		}
-	}
 
 	/* Reset the swapped generation count as we received a valid packet */
 	tidrecvc->tidflow_nswap_gen = 0;
@@ -1008,7 +916,7 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 		ips_scb_t ctrlscb;
 
 		/* Ack sender with descriptor index */
-		ctrlscb.flags = 0;
+		ctrlscb.scb_flags = 0;
 		ctrlscb.ips_lrh.data[0] = p_hdr->exp_sdescid;
 		ctrlscb.ips_lrh.ack_seq_num = tidrecvc->tidflow_genseq.psn_val;
 
@@ -1018,14 +926,15 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 					    &ctrlscb, ctrlscb.cksum, 0);
 	}
 
-	/* If RSM has found a TID packet marked with FECN, the payload
-	 * will be written to the eager buffer, and we will have a payload
-	 * pointer here.  In that case, copy the payload into the user's
-	 * buffer.  If RSM did not intercept this EXPTID packet, the HFI
-	 * will handle the packet payload.
-	 * Possibly should assert(0 < paylen < MTU).
+	/* If RSM is a HW capability, and RSM has found a TID packet marked
+	 * with FECN, the payload will be written to the eager buffer, and
+	 * we will have a payload pointer here.  In that case, copy the payload
+	 * into the user's buffer.  If RSM did not intercept this EXPTID
+	 * packet, the HFI will handle the packet payload. Possibly should
+	 * assert(0 < paylen < MTU).
 	 */
-	if (ips_recvhdrq_event_payload(rcv_ev) &&
+	if (psmi_hal_has_cap(PSM_HAL_CAP_RSM_FECN_SUPP) &&
+	    ips_recvhdrq_event_payload(rcv_ev) &&
 	    ips_recvhdrq_event_paylen(rcv_ev))
 		psmi_mq_mtucpy(tidrecvc->buffer + p_hdr->exp_offset,
 			       ips_recvhdrq_event_payload(rcv_ev),
@@ -1046,9 +955,8 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 			src = (uint8_t *)p_hdr->exp_ustart;
 #ifdef PSM_CUDA
 			if (tidrecvc->is_ptr_gpu_backed) {
-				PSMI_CUDA_CALL(cudaMemcpy, dst, src,
-					       tidrecvc->tid_list.tsess_unaligned_start,
-					       cudaMemcpyHostToDevice);
+				PSMI_CUDA_CALL(cuMemcpyHtoD, (CUdeviceptr)dst, src,
+					       tidrecvc->tid_list.tsess_unaligned_start);
 			} else
 #endif
 				ips_protoexp_unaligned_copy(dst, src,
@@ -1062,9 +970,8 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 			src = (uint8_t *)p_hdr->exp_uend;
 #ifdef PSM_CUDA
 			if (tidrecvc->is_ptr_gpu_backed) {
-				PSMI_CUDA_CALL(cudaMemcpy, dst, src,
-					       tidrecvc->tid_list.tsess_unaligned_end,
-					       cudaMemcpyHostToDevice);
+				PSMI_CUDA_CALL(cuMemcpyHtoD, (CUdeviceptr)dst, src,
+					       tidrecvc->tid_list.tsess_unaligned_end);
 			} else
 #endif
 			  ips_protoexp_unaligned_copy(dst, src,
@@ -1139,13 +1046,13 @@ psmi_cuda_reclaim_hostbufs(struct ips_tid_get_request *getreq)
 	struct ips_tid_getreq_cuda_hostbuf_pend *cmemcpyhead =
 		&getreq->pend_cudabuf;
 	struct ips_cuda_hostbuf *chb;
-	cudaError_t status;
+	CUresult status;
 
 	/* Get the getreq's first memcpy op */
 	while (!STAILQ_EMPTY(cmemcpyhead)) {
 		chb = STAILQ_FIRST(cmemcpyhead);
 		PSMI_CUDA_CHECK_EVENT(chb->copy_status, status);
-		if (status != cudaSuccess) {
+		if (status != CUDA_SUCCESS) {
 			/* At least one of the copies is still
 			 * in progress. Schedule the timer,
 			 * then leave the CUDA progress phase
@@ -1175,11 +1082,11 @@ struct ips_cuda_hostbuf* psmi_allocate_chb(uint32_t window_len)
 		psmi_handle_error(PSMI_EP_NORETURN, PSM2_NO_MEMORY,
 						"Couldn't allocate cuda host buffers ");
 	}
-	PSMI_CUDA_CALL(cudaHostAlloc,
+	PSMI_CUDA_CALL(cuMemHostAlloc,
 			       (void **) &chb->host_buf,
 			       window_len,
-			       cudaHostAllocPortable);
-	PSMI_CUDA_CALL(cudaEventCreate, &chb->copy_status);
+			       CU_MEMHOSTALLOC_PORTABLE);
+	PSMI_CUDA_CALL(cuEventCreate, &chb->copy_status, CU_EVENT_DEFAULT);
 	return chb;
 }
 
@@ -1212,14 +1119,13 @@ void psmi_cuda_run_prefetcher(struct ips_protoexp *protoexp,
 		chb->offset = offset;
 		chb->size = window_len;
 		chb->req = req;
-		chb->gpu_buf = (void *) req->buf + offset;
+		chb->gpu_buf = (CUdeviceptr) req->buf + offset;
 		chb->bytes_read = 0;
-		PSMI_CUDA_CALL(cudaMemcpyAsync,
+		PSMI_CUDA_CALL(cuMemcpyDtoHAsync,
 			       chb->host_buf, chb->gpu_buf,
 			       window_len,
-			       cudaMemcpyDeviceToHost,
 			       proto->cudastream_send);
-		PSMI_CUDA_CALL(cudaEventRecord, chb->copy_status,
+		PSMI_CUDA_CALL(cuEventRecord, chb->copy_status,
 			       proto->cudastream_send);
 
 		STAILQ_INSERT_TAIL(&req->sendreq_prefetch, chb, req_next);
@@ -1265,14 +1171,13 @@ void psmi_attach_chb_to_tidsendc(struct ips_protoexp *protoexp,
 		chb->offset = offset;
 		chb->size = window_len;
 		chb->req = req;
-		chb->gpu_buf = (void *) req->buf + offset;
+		chb->gpu_buf = (CUdeviceptr) req->buf + offset;
 		chb->bytes_read = 0;
-		PSMI_CUDA_CALL(cudaMemcpyAsync,
+		PSMI_CUDA_CALL(cuMemcpyDtoHAsync,
 			       chb->host_buf, chb->gpu_buf,
 			       window_len,
-			       cudaMemcpyDeviceToHost,
 			       proto->cudastream_send);
-		PSMI_CUDA_CALL(cudaEventRecord, chb->copy_status,
+		PSMI_CUDA_CALL(cuEventRecord, chb->copy_status,
 			       proto->cudastream_send);
 
 		STAILQ_INSERT_TAIL(&req->sendreq_prefetch, chb, req_next);
@@ -1412,6 +1317,7 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 	 * 3. first tid (i) has tidctrl=1;
 	 * 4. second tid (i+1) has tidctrl=2;
 	 * 5. total length does not exceed 512 pages (2M);
+	 * 6. The h/w supports merged tid_ctrl's.
 	 *
 	 * The restriction of 512 pages comes from the limited number
 	 * of bits we have for KDETH.OFFSET:
@@ -1427,34 +1333,42 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 	ips_dump_tids(tid_list, "Received %d tids: ",
 				tid_list->tsess_tidcount);
 
-	src = tid_list->tsess_list;
-	dst = tidsendc->tid_list.tsess_list;
-	dst[0] = src[0];
-	j = 0; i = 1;
-	while (i < tid_list->tsess_tidcount) {
-		if ((((dst[j]>>IPS_TIDINFO_TIDCTRL_SHIFT)+1) ==
-		      (src[i]>>IPS_TIDINFO_TIDCTRL_SHIFT)) &&
-		    (((dst[j]&IPS_TIDINFO_LENGTH_MASK)+
-		      (src[i]&IPS_TIDINFO_LENGTH_MASK)) <=
-				PSM_MAX_NUM_PAGES_IN_TIDPAIR)) {
-			/*
-			 * merge 'i' to 'j'
-			 * (We need to specify "tidctrl" value as 3
-			 *  if we merge the individual tid-pairs.
-			 *  Doing that here)
-			 */
-			dst[j] += (2 << IPS_TIDINFO_TIDCTRL_SHIFT) +
-				(src[i] & IPS_TIDINFO_LENGTH_MASK);
+	if (psmi_hal_has_cap(PSM_HAL_CAP_MERGED_TID_CTRLS))
+	{
+		src = tid_list->tsess_list;
+		dst = tidsendc->tid_list.tsess_list;
+		dst[0] = src[0];
+		j = 0; i = 1;
+		while (i < tid_list->tsess_tidcount) {
+			if ((((dst[j]>>IPS_TIDINFO_TIDCTRL_SHIFT)+1) ==
+			     (src[i]>>IPS_TIDINFO_TIDCTRL_SHIFT)) &&
+			    (((dst[j]&IPS_TIDINFO_LENGTH_MASK)+
+			      (src[i]&IPS_TIDINFO_LENGTH_MASK)) <=
+			     		PSM_MAX_NUM_PAGES_IN_TIDPAIR)) {
+				/* merge 'i' to 'j'
+				 * (We need to specify "tidctrl" value as 3
+				 *  if we merge the individual tid-pairs.
+				 *  Doing that here) */
+				dst[j] += (2 << IPS_TIDINFO_TIDCTRL_SHIFT) +
+					(src[i] & IPS_TIDINFO_LENGTH_MASK);
+				i++;
+				if (i == tid_list->tsess_tidcount) break;
+			}
+			j++;
+			/* copy 'i' to 'j' */
+			dst[j] = src[i];
 			i++;
-			if (i == tid_list->tsess_tidcount) break;
 		}
-		j++;
-		/* copy 'i' to 'j' */
-		dst[j] = src[i];
-		i++;
+		tidsendc->tid_list.tsess_tidcount = j + 1;
+		tid_list = &tidsendc->tid_list;
 	}
-	tidsendc->tid_list.tsess_tidcount = j + 1;
-	tid_list = &tidsendc->tid_list;
+	else
+	{
+		tidsendc->tid_list.tsess_tidcount = tid_list->tsess_tidcount;
+		psmi_mq_mtucpy(&tidsendc->tid_list.tsess_list, tid_list->tsess_list,
+			       tid_list->tsess_tidcount * sizeof(tid_list->tsess_list[0]));
+		tid_list = &tidsendc->tid_list;
+	}
 
 	/* Initialize tidflow for window. Use path requested by remote endpoint */
 	ips_flow_init(&tidsendc->tidflow, protoexp->proto, ipsaddr,
@@ -1585,6 +1499,7 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 	uint32_t frame_len, nfrag;
 	uint8_t *bufptr = tidsendc->buffer;
 	ips_scb_t *scb;
+
 	uint8_t is_payload_per_frag_leq_8dw = 0;
 	 /* If payload in the first and last nfrag is less then or equal
 	  * to 8DW we disable header suppression so as to detect uncorrectable
@@ -1644,7 +1559,7 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 	/*
 	 * Other packet fields.
 	 */
-	PSM2_LOG_EPM(OPCODE_EXPTID,PSM2_LOG_EPM_TX, protoexp->proto->ep->epid,
+	PSM2_LOG_EPM(OPCODE_EXPTID,PSM2_LOG_TX, protoexp->proto->ep->epid,
 		    flow->ipsaddr->epaddr.epid,
 		    "psmi_mpool_get_obj_index(tidsendc->mqreq): %d, tidsendc->rdescid._desc_idx: %d, tidsendc->sdescid._desc_idx: %d",
 		    psmi_mpool_get_obj_index(tidsendc->mqreq),tidsendc->rdescid._desc_idx,tidsendc->sdescid._desc_idx);
@@ -1676,12 +1591,14 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 		/* Update in current tid */
 		tidsendc->remaining_bytes_in_tid -= frame_len;
 		tidsendc->offset_in_tid += frame_len;
-		psmi_assert((tidsendc->offset_in_tid % 64) == 0);
+		psmi_assert((tidsendc->offset_in_tid >= 128*1024) ?
+			    ((tidsendc->offset_in_tid % 64) == 0) :
+			    ((tidsendc->offset_in_tid %  4) == 0));
 
 		/* Done with this tid, move on to the next tid */
 		if (!tidsendc->remaining_bytes_in_tid) {
 			tidsendc->tid_idx++;
-			psmi_assert(tidsendc->tid_idx <
+			psmi_assert_always(tidsendc->tid_idx <
 				    tidsendc->tid_list.tsess_tidcount);
 			tidsendc->remaining_bytes_in_tid =
 			    IPS_TIDINFO_GET_LENGTH(tsess_list
@@ -1716,7 +1633,7 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 	tidsendc->tidbytes += chunk_size;
 
 	if (flow->transfer == PSM_TRANSFER_DMA &&
-		hfi1_supports_dma_no_hdrsupp_for_msgs_leq_8dw) {
+	    psmi_hal_has_cap(PSM_HAL_CAP_DMA_HSUPP_FOR_32B_MSGS)) {
 		is_payload_per_frag_leq_8dw = 0;
 	}
 
@@ -1729,15 +1646,13 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 			dst = (uint8_t *)scb->ips_lrh.exp_ustart;
 			src = (uint8_t *)tidsendc->userbuf;
 #ifdef PSM_CUDA
-			if (!tidsendc->mqreq->cuda_hostbuf_used) {
-				PSMI_CUDA_CALL(cudaMemcpy, dst, src,
-					       tidsendc->tid_list.tsess_unaligned_start,
-					       cudaMemcpyDeviceToHost);
+			if (IS_TRANSFER_BUF_GPU_MEM(scb) && !tidsendc->mqreq->cuda_hostbuf_used) {
+				PSMI_CUDA_CALL(cuMemcpyDtoH, dst, (CUdeviceptr)src,
+						tidsendc->tid_list.tsess_unaligned_start);
 			} else
 #endif
 				ips_protoexp_unaligned_copy(dst, src,
-							    tidsendc->tid_list.tsess_unaligned_start);
-
+						tidsendc->tid_list.tsess_unaligned_start);
 		}
 
 		if (tidsendc->tid_list.tsess_unaligned_end) {
@@ -1746,23 +1661,22 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 				tidsendc->length -
 				tidsendc->tid_list.tsess_unaligned_end;
 #ifdef PSM_CUDA
-			if (!tidsendc->mqreq->cuda_hostbuf_used) {
-				PSMI_CUDA_CALL(cudaMemcpy, dst, src,
-					       tidsendc->tid_list.tsess_unaligned_end,
-					       cudaMemcpyDeviceToHost);
+			if (IS_TRANSFER_BUF_GPU_MEM(scb) && !tidsendc->mqreq->cuda_hostbuf_used) {
+				PSMI_CUDA_CALL(cuMemcpyDtoH, dst, (CUdeviceptr)src,
+						tidsendc->tid_list.tsess_unaligned_end);
 			} else
 #endif
 				ips_protoexp_unaligned_copy(dst, src,
-							    tidsendc->tid_list.tsess_unaligned_end);
+						tidsendc->tid_list.tsess_unaligned_end);
 		}
 		/*
 		 * If the number of fragments is greater then one and
 		 * "no header suppression" flag is unset then we go
 		 * ahead and suppress the header */
 		if ((scb->nfrag > 1) && (!is_payload_per_frag_leq_8dw))
-			scb->flags |= IPS_SEND_FLAG_HDRSUPP;
+			scb->scb_flags |= IPS_SEND_FLAG_HDRSUPP;
 		else
-			scb->flags |= IPS_SEND_FLAG_ACKREQ;
+			scb->scb_flags |= IPS_SEND_FLAG_ACKREQ;
 
 		tidsendc->is_complete = 1;
 	} else {
@@ -1770,11 +1684,11 @@ ips_scb_prepare_tid_sendctrl(struct ips_flow *flow,
 		if ((++tidsendc->frame_send %
 				protoexp->hdr_pkt_interval) == 0)
 			/* Request an ACK */
-			scb->flags |= IPS_SEND_FLAG_ACKREQ;
+			scb->scb_flags |= IPS_SEND_FLAG_ACKREQ;
 		else {
 			if (!is_payload_per_frag_leq_8dw) {
 				/* Request hdr supp */
-				scb->flags |= IPS_SEND_FLAG_HDRSUPP;
+				scb->scb_flags |= IPS_SEND_FLAG_HDRSUPP;
 			}
 		}
 		/* assert only single packet per scb */
@@ -1819,13 +1733,13 @@ psm2_error_t ips_tid_send_exp(struct ips_tid_send_desc *tidsendc)
 
 #ifdef PSM_CUDA
 	struct ips_cuda_hostbuf *chb, *chb_next;
-	cudaError_t chb_status;
+	CUresult chb_status;
 	uint32_t offset_in_chb, i;
 	for (i = 0; i < tidsendc->cuda_num_buf; i++) {
 		chb = tidsendc->cuda_hostbuf[i];
 		if (chb) {
 			PSMI_CUDA_CHECK_EVENT(chb->copy_status, chb_status);
-			if (chb_status != cudaSuccess) {
+			if (chb_status != CUDA_SUCCESS) {
 				err = PSM2_OK_NO_PROGRESS;
 				PSM2_LOG_MSG("leaving");
 				return err;
@@ -1888,7 +1802,7 @@ psm2_error_t ips_tid_send_exp(struct ips_tid_send_desc *tidsendc)
 		if_pf(tidsendc->tid_list.tsess_tidcount &&
 		      (tidsendc->tid_idx >= tidsendc->tid_list.tsess_tidcount ||
 		       tidsendc->tid_idx < 0))
-		    ips_expsend_tiderr(tidsendc);
+			ips_expsend_tiderr(tidsendc);
 
 		if ((scb =
 		     ips_scb_prepare_tid_sendctrl(flow, tidsendc)) == NULL) {
@@ -2174,8 +2088,8 @@ ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 		tidrecvc->cuda_hostbuf = chb;
 		tidrecvc->buffer = chb->host_buf;
 		chb->size = 0;
-		chb->gpu_buf = (void *)((uintptr_t) getreq->tidgr_lbuf +
-					getreq->tidgr_offset);
+		chb->gpu_buf = (CUdeviceptr) getreq->tidgr_lbuf +
+					getreq->tidgr_offset;
 	} else {
 		chb = NULL;
 		tidrecvc->buffer = (void *)((uintptr_t) getreq->tidgr_lbuf +
@@ -2240,10 +2154,11 @@ ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 	tidrecvc->tidflow_genseq.psn_gen = tidrecvc->tidflow_active_gen;
 	tidrecvc->tidflow_genseq.psn_seq = 0;	/* Always start sequence number at 0 (zero),
 	 	 	 	 	 	   in order to prevent wraparound sequence numbers */
-	hfi_tidflow_set_entry(tidrecvc->context->ctrl,
+	psmi_hal_tidflow_set_entry(
 			      tidrecvc->rdescid._desc_idx,
 			      tidrecvc->tidflow_genseq.psn_gen,
-			      tidrecvc->tidflow_genseq.psn_seq);
+			      tidrecvc->tidflow_genseq.psn_seq,
+			      tidrecvc->context->psm_hw_ctxt);
 
 	tidrecvc->tid_list.tsess_srcoff = getreq->tidgr_offset;
 	tidrecvc->tid_list.tsess_length = tidrecvc->recv_msglen;
@@ -2353,6 +2268,7 @@ ipsaddr_next:
 		protoexp = ((psm2_epaddr_t) ipsaddr)->proto->protoexp;
 
 		if (protoexp->tid_flags & IPS_PROTOEXP_FLAG_CTS_SERIALIZED) {
+			psmi_assert(protoexp->proto->msgflowid < EP_FLOW_LAST);
 			struct ips_flow *flow = &ipsaddr->flows[protoexp->proto->msgflowid];
 			if (flow->flags & IPS_FLOW_FLAG_SKIP_CTS) {
 				break;                                    /* skip sending next CTS */
@@ -2441,6 +2357,7 @@ ipsaddr_next:
 				 * not to proceed with next CTSes until that one is done.
 				 */
 				struct ips_proto *proto = tidrecvc->protoexp->proto;
+				psmi_assert(proto->msgflowid < EP_FLOW_LAST);
 				struct ips_flow *flow = &ipsaddr->flows[proto->msgflowid];
 				flow->flags |= IPS_FLOW_FLAG_SKIP_CTS;
 			}
@@ -2523,13 +2440,12 @@ void psmi_cudamemcpy_tid_to_device(struct ips_tid_recv_desc *tidrecvc)
 	chb->size += tidrecvc->recv_tidbytes + tidrecvc->tid_list.tsess_unaligned_start +
 			tidrecvc->tid_list.tsess_unaligned_end;
 
-	PSMI_CUDA_CALL(cudaMemcpyAsync,
+	PSMI_CUDA_CALL(cuMemcpyHtoDAsync,
 		       chb->gpu_buf, chb->host_buf,
 		       tidrecvc->recv_tidbytes + tidrecvc->tid_list.tsess_unaligned_start +
 							tidrecvc->tid_list.tsess_unaligned_end,
-		       cudaMemcpyHostToDevice,
 		       protoexp->cudastream_recv);
-	PSMI_CUDA_CALL(cudaEventRecord, chb->copy_status,
+	PSMI_CUDA_CALL(cuEventRecord, chb->copy_status,
 		       protoexp->cudastream_recv);
 
 	STAILQ_INSERT_TAIL(&tidrecvc->getreq->pend_cudabuf, chb, next);
@@ -2656,12 +2572,12 @@ ips_protoexp_handle_tiderr(const struct ips_recvhdrq_event *rcv_ev)
 
 	/* Not doing extra tid debugging or not really a tiderr */
 	if (!(protoexp->tid_flags & IPS_PROTOEXP_FLAG_TID_DEBUG) ||
-	    !(rcv_ev->error_flags & HFI_RHF_TIDERR))
+	    !(psmi_hal_rhf_get_all_err_flags(rcv_ev->psm_hal_rhf) & PSMI_HAL_RHF_ERR_TID))
 		return;
 
-	if (rcv_ev->ptype != RCVHQ_RCV_TYPE_EXPECTED) {
+	if (psmi_hal_rhf_get_rx_type(rcv_ev->psm_hal_rhf) != PSM_HAL_RHF_RX_TYPE_EXPECTED) {
 		_HFI_ERROR("receive type %d is not "
-			   "expected in tid debugging\n", rcv_ev->ptype);
+			   "expected in tid debugging\n", psmi_hal_rhf_get_rx_type(rcv_ev->psm_hal_rhf));
 		return;
 	}
 
@@ -2714,7 +2630,7 @@ ips_protoexp_handle_data_err(const struct ips_recvhdrq_event *rcv_ev)
 	struct ips_tid_recv_desc *tidrecvc;
 	struct ips_protoexp *protoexp = rcv_ev->proto->protoexp;
 	struct ips_message_header *p_hdr = rcv_ev->p_hdr;
-	int hdr_err = rcv_ev->error_flags & HFI_RHF_KHDRLENERR;
+	int hdr_err = psmi_hal_rhf_get_all_err_flags(rcv_ev->psm_hal_rhf) & PSMI_HAL_RHF_ERR_KHDRLEN;
 	uint8_t op_code = _get_proto_hfi_opcode(p_hdr);
 	char pktmsg[128];
 	char errmsg[256];
@@ -2725,15 +2641,16 @@ ips_protoexp_handle_data_err(const struct ips_recvhdrq_event *rcv_ev)
 	if (protoexp == NULL)
 		return;
 
-	ips_proto_get_rhf_errstring(rcv_ev->error_flags, pktmsg,
+	ips_proto_get_rhf_errstring(psmi_hal_rhf_get_all_err_flags(rcv_ev->psm_hal_rhf), pktmsg,
 				    sizeof(pktmsg));
 
 	snprintf(errmsg, sizeof(errmsg),
 		 "%s pkt type opcode 0x%x at hd=0x%x %s\n",
-		 (rcv_ev->ptype == RCVHQ_RCV_TYPE_EAGER) ? "Eager" :
-		 (rcv_ev->ptype == RCVHQ_RCV_TYPE_EXPECTED) ? "Expected" :
-		 (rcv_ev->ptype == RCVHQ_RCV_TYPE_NON_KD) ? "Non-kd" :
-		 "<Error>", op_code, rcv_ev->recvq->state->hdrq_head, pktmsg);
+		 (psmi_hal_rhf_get_rx_type(rcv_ev->psm_hal_rhf) == PSM_HAL_RHF_RX_TYPE_EAGER) ? "Eager" :
+		 (psmi_hal_rhf_get_rx_type(rcv_ev->psm_hal_rhf) == PSM_HAL_RHF_RX_TYPE_EXPECTED) ? "Expected" :
+		 (psmi_hal_rhf_get_rx_type(rcv_ev->psm_hal_rhf) == PSM_HAL_RHF_RX_TYPE_NON_KD) ? "Non-kd" :
+		 "<Error>", op_code, rcv_ev->recvq->state->hdrq_head,
+		 pktmsg);
 
 	if (!hdr_err) {
 		ptl_arg_t desc_id;
@@ -2796,10 +2713,11 @@ ips_protoexp_flow_newgen(struct ips_tid_recv_desc *tidrecvc)
 
 	/* Update tidflow table with new generation number */
 	tidrecvc->tidflow_genseq.psn_gen = tidrecvc->tidflow_active_gen;
-	hfi_tidflow_set_entry(tidrecvc->context->ctrl,
+	psmi_hal_tidflow_set_entry(
 			      tidrecvc->rdescid._desc_idx,
 			      tidrecvc->tidflow_genseq.psn_gen,
-			      tidrecvc->tidflow_genseq.psn_seq);
+			      tidrecvc->tidflow_genseq.psn_seq,
+			      tidrecvc->context->psm_hw_ctxt);
 
 	/* Increment swapped generation count for tidflow */
 	tidrecvc->tidflow_nswap_gen++;
@@ -2830,10 +2748,14 @@ ips_protoexp_handle_tf_seqerr(const struct ips_recvhdrq_event *rcv_ev)
 }
 
 static
-void ips_protoexp_do_tf_seqerr(struct ips_protoexp *protoexp,
-			struct ips_tid_recv_desc *tidrecvc,
-			struct ips_message_header *p_hdr)
+void ips_protoexp_do_tf_seqerr(void *vpprotoexp
+			       /* actually: struct ips_protoexp *protoexp */,
+			       void *vptidrecvc
+			       /* actually: struct ips_tid_recv_desc *tidrecvc */,
+			       struct ips_message_header *p_hdr)
 {
+	struct ips_protoexp *protoexp = (struct ips_protoexp *) vpprotoexp;
+	struct ips_tid_recv_desc *tidrecvc = (struct ips_tid_recv_desc *) vptidrecvc;
 	psmi_seqnum_t sequence_num, tf_sequence_num;
 	ips_scb_t ctrlscb;
 
@@ -2884,18 +2806,26 @@ void ips_protoexp_do_tf_seqerr(struct ips_protoexp *protoexp,
 	 * it comes from the tidflow table or from PSM's own accounting.
 	 */
 	if (!tidrecvc->context->tf_ctrl) {
-		tf_sequence_num.psn_val =
-			hfi_tidflow_get_seqnum(
-				hfi_tidflow_get(tidrecvc->context->ctrl,
-						tidrecvc->rdescid._desc_idx));
-		if (tf_sequence_num.psn_val > tidrecvc->tidflow_genseq.psn_seq)
+		uint64_t tf;
+		uint32_t seqno=0;
+
+		psmi_hal_tidflow_get(tidrecvc->rdescid._desc_idx, &tf,
+				     tidrecvc->context->psm_hw_ctxt);
+		psmi_hal_tidflow_get_seqnum(tf, &seqno);
+		tf_sequence_num.psn_val = seqno;
+
+		if (psmi_hal_has_cap(PSM_HAL_CAP_RSM_FECN_SUPP)) {
+			if (tf_sequence_num.psn_val > tidrecvc->tidflow_genseq.psn_seq)
+				tidrecvc->tidflow_genseq.psn_seq = tf_sequence_num.psn_seq;
+		}
+		else
 			tidrecvc->tidflow_genseq.psn_seq = tf_sequence_num.psn_seq;
 	}
 
 	/* Swap generation for the flow. */
 	ips_protoexp_flow_newgen(tidrecvc);
 
-	ctrlscb.flags = 0;
+	ctrlscb.scb_flags = 0;
 	ctrlscb.ips_lrh.data[0] = p_hdr->exp_sdescid;
 	/* Keep peer generation but use my last received sequence */
 	sequence_num.psn_seq = tidrecvc->tidflow_genseq.psn_seq;
@@ -2943,10 +2873,13 @@ ips_protoexp_handle_tf_generr(const struct ips_recvhdrq_event *rcv_ev)
 }
 
 static
-void ips_protoexp_do_tf_generr(struct ips_protoexp *protoexp,
-			struct ips_tid_recv_desc *tidrecvc,
-			struct ips_message_header *p_hdr)
+void ips_protoexp_do_tf_generr(void *vpprotoexp
+			       /* actually: struct ips_protoexp *protoexp */,
+			       void *vptidrecvc
+			       /* actually: struct ips_tid_recv_desc *tidrecvc */,
+			       struct ips_message_header *p_hdr)
 {
+	struct ips_tid_recv_desc *tidrecvc = (struct ips_tid_recv_desc *) vptidrecvc;
 	/* Update stats for generation errors */
 	tidrecvc->stats.nGenErr++;
 

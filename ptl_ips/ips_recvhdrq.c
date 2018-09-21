@@ -53,9 +53,14 @@
 
 /* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
 
+#include "psm_user.h"
+#include "psm2_hal.h"
+
+#include "ips_epstate.h"
 #include "ips_proto.h"
+#include "ips_expected_proto.h"
+#include "ips_proto_help.h"
 #include "ips_proto_internal.h"
-#include "ips_recvhdrq.h"
 
 /*
  * Receive header queue initialization.
@@ -64,15 +69,12 @@ psm2_error_t
 ips_recvhdrq_init(const psmi_context_t *context,
 		  const struct ips_epstate *epstate,
 		  const struct ips_proto *proto,
-		  const struct ips_recvq_params *hdrq_params,
-		  const struct ips_recvq_params *egrq_params,
 		  const struct ips_recvhdrq_callbacks *callbacks,
-		  uint32_t runtime_flags,
 		  uint32_t subcontext,
 		  struct ips_recvhdrq *recvq,
-		  struct ips_recvhdrq_state *recvq_state)
+		  struct ips_recvhdrq_state *recvq_state,
+		  psmi_hal_cl_q psm_hal_cl_hdrq)
 {
-	const struct hfi1_ctxt_info *ctxt_info = &context->ctrl->ctxt_info;
 	psm2_error_t err = PSM2_OK;
 
 	memset(recvq, 0, sizeof(*recvq));
@@ -80,34 +82,10 @@ ips_recvhdrq_init(const psmi_context_t *context,
 	recvq->state = recvq_state;
 	recvq->context = context;
 	recvq->subcontext = subcontext;
-	/* This runtime flags may be different from the context's runtime flags since
-	 * a receive queue may be initialised to represent a "software" receive
-	 * queue (shared contexts) or a hardware receive queue */
-	recvq->runtime_flags = runtime_flags;
-	recvq->hdrq = *hdrq_params;	/* deep copy */
+	recvq->psm_hal_cl_hdrq = psm_hal_cl_hdrq;
 	pthread_spin_init(&recvq->hdrq_lock, PTHREAD_PROCESS_SHARED);
-	recvq->hdrq_rhf_off =
-	    (ctxt_info->rcvhdrq_entsize - 8) >> BYTE2DWORD_SHIFT;
-
-	if (recvq->runtime_flags & HFI1_CAP_DMA_RTAIL) {
-		recvq->hdrq_rhf_notail = 0;
-		recvq->state->hdrq_rhf_seq = 0;	/* _seq is ignored */
-	} else {
-		recvq->hdrq_rhf_notail = 1;
-		recvq->state->hdrq_rhf_seq = 1;
-	}
-	recvq->hdrq_elemlast = ((recvq->hdrq.elemcnt - 1) * recvq->hdrq.elemsz);
-
-	recvq->egrq = *egrq_params;	/* deep copy */
-	recvq->egrq_buftable =
-	    ips_recvq_egrbuf_table_alloc(context->ep, recvq->egrq.base_addr,
-					 recvq->egrq.elemcnt,
-					 recvq->egrq.elemsz);
-	if (recvq->egrq_buftable == NULL) {
-		err = psmi_handle_error(proto->ep, PSM2_NO_MEMORY,
-					"Couldn't allocate memory for eager buffer index table");
-		goto fail;
-	}
+	recvq->hdrq_elemlast = ((psmi_hal_get_rx_hdr_q_cnt(context->psm_hw_ctxt) - 1) *
+				(psmi_hal_get_rx_hdr_q_ent_size(context->psm_hw_ctxt) >> BYTE2DWORD_SHIFT));
 
 	recvq->epstate = epstate;
 	recvq->recvq_callbacks = *callbacks;	/* deep copy */
@@ -129,19 +107,12 @@ ips_recvhdrq_init(const psmi_context_t *context,
 
 		/* Cap max header update interval to size of header/eager queue */
 		recvq->state->head_update_interval =
-			min(env_hdr_update.e_uint, recvq->hdrq.elemcnt - 1);
+			min(env_hdr_update.e_uint, psmi_hal_get_rx_hdr_q_cnt(context->psm_hw_ctxt) - 1);
 		recvq->state->egrq_update_interval = 1;
 	}
-
-fail:
 	return err;
 }
 
-psm2_error_t ips_recvhdrq_fini(struct ips_recvhdrq *recvq)
-{
-	ips_recvq_egrbuf_table_free(recvq->egrq_buftable);
-	return PSM2_OK;
-}
 
 /* flush the eager buffers, by setting the eager index head to eager index tail
    if eager buffer queue is full.
@@ -179,6 +150,7 @@ _get_proto_subcontext(const struct ips_message_header *p_hdr)
 }
 
 /* Determine if FECN bit is set IBTA 1.2.1 CCA Annex A*/
+
 static __inline__ uint8_t
 _is_cca_fecn_set(const struct ips_message_header *p_hdr)
 {
@@ -192,36 +164,6 @@ _is_cca_becn_set(const struct ips_message_header *p_hdr)
 	return (__be32_to_cpu(p_hdr->bth[1]) >> HFI_BTH_BECN_SHIFT) & 0x1;
 }
 
-static __inline__ struct ips_message_header *_get_proto_hdr_from_rhf(const
-								     uint32_t *
-								     rcv_hdr,
-								     const
-								     __le32 *
-								     rhf)
-{
-	return (struct ips_message_header *)(rcv_hdr +
-					     hfi_hdrget_hdrq_offset(rhf));
-}
-
-static __inline__ struct ips_message_header *_get_proto_hdr(const uint32_t *
-							    rcv_hdr)
-{
-	return (struct ips_message_header *)&rcv_hdr[2];
-}
-
-static __inline__ uint32_t
-_get_rhf_seq(struct ips_recvhdrq *recvq, const __u32 *rcv_hdr)
-{
-	return hfi_hdrget_seq((const __le32 *)rcv_hdr + recvq->hdrq_rhf_off);
-}
-
-static __inline__ uint32_t
-_get_rhf_len_in_bytes(struct ips_recvhdrq *recvq, const __u32 *rcv_hdr)
-{
-	return hfi_hdrget_length_in_bytes((const __le32 *)rcv_hdr +
-					  recvq->hdrq_rhf_off);
-}
-
 static __inline__ void _dump_invalid_pkt(struct ips_recvhdrq_event *rcv_ev)
 {
 	char *payload = ips_recvhdrq_event_payload(rcv_ev);
@@ -230,7 +172,7 @@ static __inline__ void _dump_invalid_pkt(struct ips_recvhdrq_event *rcv_ev)
 
 #ifdef PSM_DEBUG
 	ips_proto_show_header((struct ips_message_header *)
-			      rcv_ev->rcv_hdr, "received invalid pkt");
+			      rcv_ev->p_hdr, "received invalid pkt");
 #endif
 	if (hfi_debug & __HFI_PKTDBG) {
 		ips_proto_dump_frame(rcv_ev->p_hdr, HFI_MESSAGE_HDR_SIZE,
@@ -244,40 +186,44 @@ static __inline__ void _dump_invalid_pkt(struct ips_recvhdrq_event *rcv_ev)
 static __inline__ void
 _update_error_stats(struct ips_proto *proto, uint32_t err)
 {
-	if (err & HFI_RHF_ICRCERR)
+	if (err & PSMI_HAL_RHF_ERR_ICRC)
 		proto->error_stats.num_icrc_err++;
-	if (err & HFI_RHF_ECCERR)
+	if (err & PSMI_HAL_RHF_ERR_ECC)
 		proto->error_stats.num_ecc_err++;
-	if (err & HFI_RHF_LENERR)
+	if (err & PSMI_HAL_RHF_ERR_LEN)
 		proto->error_stats.num_len_err++;
-	if (err & HFI_RHF_TIDERR)
+	if (err & PSMI_HAL_RHF_ERR_TID)
 		proto->error_stats.num_tid_err++;
-	if (err & HFI_RHF_DCERR)
+	if (err & PSMI_HAL_RHF_ERR_DC)
 		proto->error_stats.num_dc_err++;
-	if (err & HFI_RHF_DCUNCERR)
+	if (err & PSMI_HAL_RHF_ERR_DCUN)
 		proto->error_stats.num_dcunc_err++;
-	if (err & HFI_RHF_KHDRLENERR)
+	if (err & PSMI_HAL_RHF_ERR_KHDRLEN)
 		proto->error_stats.num_khdrlen_err++;
 }
 
 #ifdef PSM_DEBUG
-static int _check_headers(struct ips_recvhdrq_event *rcv_ev)
+
+static int _check_headers(struct ips_recvhdrq_event *rcv_ev, psmi_hal_cl_q cl_q)
 {
 	struct ips_recvhdrq *recvq = (struct ips_recvhdrq *)rcv_ev->recvq;
 	struct ips_proto *proto = rcv_ev->proto;
 	uint32_t *lrh = (uint32_t *) rcv_ev->p_hdr;
-	const uint32_t *rcv_hdr = rcv_ev->rcv_hdr;
 	uint32_t dest_context;
 	const uint16_t pkt_dlid = __be16_to_cpu(rcv_ev->p_hdr->lrh[1]);
 	const uint16_t base_dlid =
 	    __be16_to_cpu(recvq->proto->epinfo.ep_base_lid);
 
 	/* Check that the receive header queue entry has a sane sequence number */
-	if (_get_rhf_seq(recvq, rcv_hdr) > LAST_RHF_SEQNO) {
+	if (psmi_hal_check_rhf_sequence_number(psmi_hal_rhf_get_seq(rcv_ev->psm_hal_rhf))
+	    != PSM_HAL_ERROR_OK) {
+		unsigned int seqno=0;
+
+		psmi_hal_get_rhf_expected_sequence_number(&seqno, cl_q, recvq->context->psm_hw_ctxt);
 		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 				  "ErrPkt: Invalid header queue entry! RHF Sequence in Hdrq Seq: %d, Recvq State Seq: %d. LRH[0]: 0x%08x, LRH[1] (PktCount): 0x%08x\n",
-				  _get_rhf_seq(recvq, rcv_hdr),
-				  recvq->state->hdrq_rhf_seq, lrh[0], lrh[1]);
+				  psmi_hal_rhf_get_seq(rcv_ev->psm_hal_rhf),
+				  seqno, lrh[0], lrh[1]);
 		return -1;
 	}
 
@@ -300,11 +246,11 @@ static int _check_headers(struct ips_recvhdrq_event *rcv_ev)
 	}
 
 	/* Verify that rhf packet length matches the length in LRH */
-	if_pf(_get_rhf_len_in_bytes(recvq, rcv_hdr) !=
+	if_pf(psmi_hal_rhf_get_packet_length(rcv_ev->psm_hal_rhf) !=
 	      (__be16_to_cpu(rcv_ev->p_hdr->lrh[2]) << BYTE2DWORD_SHIFT)) {
 		_HFI_EPDBG
 		    ("ErrPkt: RHF Packet Len (0x%x) does not match LRH (0x%x).\n",
-		     _get_rhf_len_in_bytes(recvq, rcv_hdr) >> 2,
+		     psmi_hal_rhf_get_packet_length(rcv_ev->psm_hal_rhf) >> 2,
 		     __be16_to_cpu(rcv_ev->p_hdr->lrh[2]));
 
 		ips_proto_dump_err_stats(proto);
@@ -335,7 +281,6 @@ static __inline__ int do_pkt_cksum(struct ips_recvhdrq_event *rcv_ev)
 	    ((__be32_to_cpu(rcv_ev->p_hdr->bth[0]) >> 20) & 3);
 	uint32_t *ckptr;
 	uint32_t recv_cksum, cksum, dest_subcontext;
-
 	/* With checksum every packet has a payload */
 	psmi_assert_always(payload);
 
@@ -352,32 +297,31 @@ static __inline__ int do_pkt_cksum(struct ips_recvhdrq_event *rcv_ev)
 	if ((cksum != recv_cksum) || (ckptr[0] != ckptr[1])) {
 		struct ips_epstate_entry *epstaddr;
 		uint32_t lcontext;
-		uint32_t hd, tl;
+		psmi_hal_cl_idx hd, tl;
 
 		epstaddr =
 		    ips_epstate_lookup(rcv_ev->recvq->epstate,
 				       rcv_ev->p_hdr->connidx);
 		epstaddr = (epstaddr && epstaddr->ipsaddr) ? epstaddr : NULL;
-
 		lcontext = epstaddr ? rcv_ev->proto->epinfo.ep_context : -1;
 
-		hd = rcv_ev->recvq->context->ctrl->__hfi_rcvhdrhead[0];
-		tl = rcv_ev->recvq->context->ctrl->__hfi_rcvhdrhead[-2];
+		hd = psmi_hal_get_cl_q_head_index(PSM_HAL_CL_Q_RX_HDR_Q,
+					rcv_ev->recvq->context->psm_hw_ctxt);
+		tl = psmi_hal_get_cl_q_tail_index(PSM_HAL_CL_Q_RX_HDR_Q,
+					rcv_ev->recvq->context->psm_hw_ctxt);
 
 		dest_subcontext = _get_proto_subcontext(rcv_ev->p_hdr);
 
 		_HFI_ERROR
-		    ("ErrPkt: SharedContext: %s. Local Context: %i, Checksum mismatch from LID %d! Received Checksum: 0x%08x, Expected: 0x%08x & 0x%08x. Opcode: 0x%08x, Error Flag: 0x%08x. hdrq hd 0x%x tl 0x%x rhf 0x%x,%x, rhfseq 0x%x\n",
+		    ("ErrPkt: SharedContext: %s. Local Context: %i, Checksum mismatch from LID %d! Received Checksum: 0x%08x, Expected: 0x%08x & 0x%08x. Opcode: 0x%08x, Error Flag: 0x%08x. hdrq hd 0x%x tl 0x%x rhf 0x%"
+		     PRIx64 ", rhfseq 0x%x\n",
 		     (dest_subcontext !=
 		      rcv_ev->recvq->subcontext) ? "Yes" : "No", lcontext,
 		     epstaddr ? __be16_to_cpu(epstaddr->ipsaddr->pathgrp->
-					      pg_base_lid) : -1, cksum,
+					      pg_base_dlid) : -1, cksum,
 		     ckptr[0], ckptr[1], _get_proto_hfi_opcode(rcv_ev->p_hdr),
-		     rcv_ev->error_flags, hd, tl, rcv_ev->rhf[0],
-		     rcv_ev->rhf[1],
-		     _get_rhf_seq((struct ips_recvhdrq *)rcv_ev->recvq,
-				  rcv_ev->rcv_hdr));
-
+		     psmi_hal_rhf_get_all_err_flags(rcv_ev->psm_hal_rhf), hd, tl, rcv_ev->psm_hal_rhf.raw_rhf,
+		     psmi_hal_rhf_get_seq(rcv_ev->psm_hal_rhf));
 		/* Dump packet */
 		_dump_invalid_pkt(rcv_ev);
 		return 0;	/* Packet checksum error */
@@ -391,6 +335,7 @@ void
 process_pending_acks(struct ips_recvhdrq *recvq))
 {
 	ips_scb_t ctrlscb;
+	struct ips_message_header *msg_hdr = NULL;
 
 	/* If any pending acks, dispatch them now */
 	while (!SLIST_EMPTY(&recvq->pending_acks)) {
@@ -399,8 +344,9 @@ process_pending_acks(struct ips_recvhdrq *recvq))
 		SLIST_REMOVE_HEAD(&recvq->pending_acks, next);
 		SLIST_NEXT(flow, next) = NULL;
 
-		ctrlscb.flags = 0;
-		ctrlscb.ips_lrh.ack_seq_num = flow->recv_seq_num.psn_num;
+		ctrlscb.scb_flags = 0;
+		msg_hdr = &ctrlscb.ips_lrh;
+		msg_hdr->ack_seq_num = flow->recv_seq_num.psn_num;
 
 		if (flow->flags & IPS_FLOW_FLAG_PENDING_ACK) {
 			psmi_assert_always((flow->
@@ -443,56 +389,42 @@ psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 	   RX speedpath of PSM.  The stop watch is stopped below. */
 	GENERIC_PERF_BEGIN(PSM_RX_SPEEDPATH_CTR);
 	struct ips_recvhdrq_state *state = recvq->state;
-	const __le32 *rhf;
 	PSMI_CACHEALIGN struct ips_recvhdrq_event rcv_ev = {.proto =
 		    recvq->proto,
 		.recvq = recvq
 	};
 	struct ips_epstate_entry *epstaddr;
-
 	uint32_t num_hdrq_done = 0;
-	const int num_hdrq_todo = recvq->hdrq.elemcnt;
-	const uint32_t hdrq_elemsz = recvq->hdrq.elemsz;
+	const uint32_t num_hdrq_todo = psmi_hal_get_rx_hdr_q_cnt(recvq->context->psm_hw_ctxt);
 	uint32_t dest_subcontext;
-
+	const uint32_t hdrq_elemsz = psmi_hal_get_rx_hdr_q_ent_size(recvq->context->psm_hw_ctxt) >> BYTE2DWORD_SHIFT;
 	int ret = IPS_RECVHDRQ_CONTINUE;
-	int done = 0;
+	int done = 0, empty = 0;
 	int do_hdr_update = 0;
-
-	/* Chip features */
-	const int has_rtail = recvq->runtime_flags & HFI1_CAP_DMA_RTAIL;
+	const psmi_hal_cl_q psm_hal_hdr_q = recvq->psm_hal_cl_hdrq;
+	const psmi_hal_cl_q psm_hal_egr_q = psm_hal_hdr_q + 1;
 
 	/* Returns whether the currently set 'rcv_hdr'/head is a readable entry */
-#define next_hdrq_is_ready()						     \
-	(has_rtail ? \
-	 state->hdrq_head != ips_recvq_tail_get(&recvq->hdrq) : \
-	 recvq->state->hdrq_rhf_seq == _get_rhf_seq(recvq, rcv_hdr))
+#define next_hdrq_is_ready()  (! empty )
 
-	const uint32_t *rcv_hdr =
-	    (const uint32_t *)recvq->hdrq.base_addr + state->hdrq_head;
-	uint32_t tmp_hdrq_head;
+	if (psmi_hal_cl_q_empty(state->hdrq_head, psm_hal_hdr_q, recvq->context->psm_hw_ctxt))
+	    return PSM2_OK;
 
 	PSM2_LOG_MSG("entering");
+
 	done = !next_hdrq_is_ready();
 
-	while (!done) {
+	rcv_ev.psm_hal_hdr_q = psm_hal_hdr_q;
 
-		rhf = (const __le32 *)rcv_hdr + recvq->hdrq_rhf_off;
-		rcv_ev.error_flags = hfi_hdrget_err_flags(rhf);
-		rcv_ev.ptype = hfi_hdrget_rcv_type(rhf);
-		rcv_ev.rhf = rhf;
-		rcv_ev.rcv_hdr = rcv_hdr;
-		rcv_ev.p_hdr =
-		    recvq->hdrq_rhf_off ? _get_proto_hdr_from_rhf(rcv_hdr, rhf)
-		    : _get_proto_hdr(rcv_hdr);
+	while (!done) {
+		psmi_hal_get_receive_event(state->hdrq_head, recvq->context->psm_hw_ctxt,
+					   &rcv_ev);
 		rcv_ev.has_cksum =
 		    ((recvq->proto->flags & IPS_PROTO_FLAG_CKSUM) &&
 		     (rcv_ev.p_hdr->flags & IPS_SEND_FLAG_PKTCKSUM));
-
 		_HFI_VDBG
-		    ("new packet: rcv_hdr %p, rhf_off %d, rhf %p (%x,%x), p_hdr %p\n",
-		     rcv_hdr, recvq->hdrq_rhf_off, rhf, rhf[0], rhf[1],
-		     rcv_ev.p_hdr);
+		    ("new packet: rcv_hdr %p, rhf %" PRIx64 "\n",
+		     rcv_ev.p_hdr, rcv_ev.psm_hal_rhf.raw_rhf);
 
 		/* If the hdrq_head is before cachedlastscan, that means that we have
 		 * already prescanned this for BECNs and FECNs, so we should not check
@@ -524,6 +456,7 @@ psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 			 * controlled. The CCA specification allows FECN on
 			 * ACKs to be disregarded as well.
 			 */
+
 			rcv_ev.is_congested =
 			    _is_cca_fecn_set(rcv_ev.
 					     p_hdr) & IPS_RECV_EVENT_FECN;
@@ -534,7 +467,7 @@ psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 			rcv_ev.is_congested = 0;
 
 #ifdef PSM_DEBUG
-		if_pf(_check_headers(&rcv_ev))
+		if_pf(_check_headers(&rcv_ev, psm_hal_hdr_q))
 			goto skip_packet;
 #endif
 		dest_subcontext = _get_proto_subcontext(rcv_ev.p_hdr);
@@ -560,37 +493,41 @@ psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 			goto skip_packet;
 		}
 
-		if_pf(rcv_ev.error_flags) {
+		if_pf(psmi_hal_rhf_get_all_err_flags(rcv_ev.psm_hal_rhf)) {
 
-			_update_error_stats(recvq->proto, rcv_ev.error_flags);
+			_update_error_stats(recvq->proto, psmi_hal_rhf_get_all_err_flags(rcv_ev.psm_hal_rhf));
 
 			recvq->recvq_callbacks.callback_error(&rcv_ev);
 
-			if ((rcv_ev.ptype != RCVHQ_RCV_TYPE_EAGER) ||
-			    (!(rcv_ev.error_flags & HFI_RHF_TIDERR)))
+			if ((psmi_hal_rhf_get_rx_type(rcv_ev.psm_hal_rhf) != PSM_HAL_RHF_RX_TYPE_EAGER) ||
+			    (!(psmi_hal_rhf_get_all_err_flags(rcv_ev.psm_hal_rhf) & PSMI_HAL_RHF_ERR_TID)))
 				goto skip_packet;
 
 			/* no pending eager update, header
 			 * is not currently under tracing. */
 			if (state->hdr_countdown == 0 &&
 			    state->rcv_egr_index_head == NO_EAGER_UPDATE) {
-				uint32_t egr_cnt = recvq->egrq.elemcnt;
-				const uint32_t etail =
-					ips_recvq_tail_get(&recvq->egrq);
-				const uint32_t ehead =
-					ips_recvq_head_get(&recvq->egrq);
+				uint32_t egr_cnt = psmi_hal_get_rx_egr_tid_cnt(recvq->context->psm_hw_ctxt);
+				psmi_hal_cl_idx etail=0, ehead=0;
 
+				ehead = psmi_hal_get_cl_q_head_index(
+					psm_hal_egr_q,
+					rcv_ev.recvq->context->psm_hw_ctxt);
+				etail = psmi_hal_get_cl_q_tail_index(
+					psm_hal_egr_q,
+					rcv_ev.recvq->context->psm_hw_ctxt);
 				if (ehead == ((etail + 1) % egr_cnt)) {
 					/* eager is full,
 					 * trace existing header entries */
 					uint32_t hdr_size =
 						recvq->hdrq_elemlast +
 						hdrq_elemsz;
-					const uint32_t htail =
-						ips_recvq_tail_get
-						(&recvq->hdrq);
-					const uint32_t hhead =
-						state->hdrq_head;
+					psmi_hal_cl_idx htail=0;
+
+					htail = psmi_hal_get_cl_q_tail_index(
+					   psm_hal_hdr_q,
+					   rcv_ev.recvq->context->psm_hw_ctxt);
+					const uint32_t hhead = state->hdrq_head;
 
 					state->hdr_countdown =
 						(htail > hhead) ?
@@ -614,18 +551,35 @@ psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 		if_pf(rcv_ev.has_cksum && !do_pkt_cksum(&rcv_ev))
 			goto skip_packet;
 
-		_HFI_VDBG("opcode %x, payload %p paylen %d; "
-			  "egrhead %lx egrtail %lx; "
-			  "useegrbit %x egrindex %x, egroffset %x, egrindexhead %x\n",
-			  _get_proto_hfi_opcode(rcv_ev.p_hdr),
-			  ips_recvhdrq_event_payload(&rcv_ev),
-			  ips_recvhdrq_event_paylen(&rcv_ev),
-			  ips_recvq_head_get(&recvq->egrq),
-			  ips_recvq_tail_get(&recvq->egrq),
-			  hfi_hdrget_use_egrbfr(rhf),
-			  hfi_hdrget_egrbfr_index(rhf),
-			  hfi_hdrget_egrbfr_offset(rhf),
-			  state->rcv_egr_index_head);
+		if (_HFI_VDBG_ON)
+		{
+			psmi_hal_cl_idx egr_buff_q_head, egr_buff_q_tail;
+
+			egr_buff_q_head = psmi_hal_get_cl_q_head_index(
+					    psm_hal_egr_q,
+					    rcv_ev.recvq->context->psm_hw_ctxt);
+			egr_buff_q_tail = psmi_hal_get_cl_q_tail_index(
+					    psm_hal_egr_q,
+					    rcv_ev.recvq->context->psm_hw_ctxt);
+
+			_HFI_VDBG_ALWAYS(
+				"hdrq_head %d, p_hdr: %p, opcode %x, payload %p paylen %d; "
+				"egrhead %x egrtail %x; "
+				"useegrbit %x egrindex %x, egroffset %x, egrindexhead %x\n",
+				state->hdrq_head,
+				rcv_ev.p_hdr,
+				_get_proto_hfi_opcode(rcv_ev.p_hdr),
+				ips_recvhdrq_event_payload(&rcv_ev),
+				ips_recvhdrq_event_paylen(&rcv_ev),
+				egr_buff_q_head,egr_buff_q_tail,
+				psmi_hal_rhf_get_use_egr_buff(rcv_ev.psm_hal_rhf),
+				psmi_hal_rhf_get_egr_buff_index(rcv_ev.psm_hal_rhf),
+				psmi_hal_rhf_get_egr_buff_offset(rcv_ev.psm_hal_rhf),
+				state->rcv_egr_index_head);
+		}
+
+                PSM2_LOG_PKT_STRM(PSM2_LOG_RX,rcv_ev.p_hdr,&rcv_ev.psm_hal_rhf.raw_rhf,
+				  "PKT_STRM:");
 
 		/* Classify packet from a known or unknown endpoint */
 		epstaddr = ips_epstate_lookup(recvq->epstate,
@@ -653,11 +607,11 @@ skip_packet:
 		/*
 		 * if eager buffer is used, record the index.
 		 */
-		if (hfi_hdrget_use_egrbfr(rhf)) {
+		if (psmi_hal_rhf_get_use_egr_buff(rcv_ev.psm_hal_rhf)) {
 			/* set only when a new entry is used */
-			if (hfi_hdrget_egrbfr_offset(rhf) == 0){
+			if (psmi_hal_rhf_get_egr_buff_offset(rcv_ev.psm_hal_rhf) == 0) {
 				state->rcv_egr_index_head =
-				    hfi_hdrget_egrbfr_index(rhf);
+					psmi_hal_rhf_get_egr_buff_index(rcv_ev.psm_hal_rhf);
 				state->num_egrq_done++;
 			}
 			/* a header entry is using an eager entry, stop tracing. */
@@ -668,25 +622,15 @@ skip_packet_no_egr_update:
 		/* Note that state->hdrq_head is sampled speculatively by the code
 		 * in ips_ptl_shared_poll() when context sharing, so it is not safe
 		 * for this shared variable to temporarily exceed the last element. */
-		tmp_hdrq_head = state->hdrq_head + hdrq_elemsz;
 		_HFI_VDBG
-		    ("dma_rtail %d head %d, elemsz %d elemlast %d tmp %d\n",
-		     has_rtail, state->hdrq_head, hdrq_elemsz,
-		     recvq->hdrq_elemlast, tmp_hdrq_head);
-
-		if_pt(tmp_hdrq_head <= recvq->hdrq_elemlast)
-		    state->hdrq_head = tmp_hdrq_head;
-		else
-		state->hdrq_head = 0;
-
-		if_pf(has_rtail == 0
-		      && ++recvq->state->hdrq_rhf_seq > LAST_RHF_SEQNO)
-		    recvq->state->hdrq_rhf_seq = 1;
-
+		    ("head %d, elemsz %d elemlast %d\n",
+		     state->hdrq_head, hdrq_elemsz,
+		     recvq->hdrq_elemlast);
+		psmi_hal_retire_hdr_q_entry(&state->hdrq_head, psm_hal_hdr_q,
+					    recvq->context->psm_hw_ctxt,
+					    hdrq_elemsz, recvq->hdrq_elemlast, &empty);
 		state->num_hdrq_done++;
 		num_hdrq_done++;
-		rcv_hdr =
-		    (const uint32_t *)recvq->hdrq.base_addr + state->hdrq_head;
 		done = (!next_hdrq_is_ready() || (ret == IPS_RECVHDRQ_BREAK)
 			|| (num_hdrq_done == num_hdrq_todo));
 
@@ -694,16 +638,21 @@ skip_packet_no_egr_update:
 				 (state->num_hdrq_done ==
 				  state->head_update_interval) : done);
 		if (do_hdr_update) {
-			ips_recvq_head_update(&recvq->hdrq, state->hdrq_head);
+
+			psmi_hal_set_cl_q_head_index(
+					state->hdrq_head,
+					psm_hal_hdr_q,
+				 	rcv_ev.recvq->context->psm_hw_ctxt);
 			/* Reset header queue entries processed */
 			state->num_hdrq_done = 0;
 		}
 		if (state->num_egrq_done >= state->egrq_update_interval) {
 			/* Lazy update of egrq */
 			if (state->rcv_egr_index_head != NO_EAGER_UPDATE) {
-				ips_recvq_head_update(&recvq->egrq,
-						      state->
-						      rcv_egr_index_head);
+				psmi_hal_set_cl_q_head_index(
+					state->rcv_egr_index_head,
+				     	psm_hal_egr_q,
+				        recvq->context->psm_hw_ctxt);
 				state->rcv_egr_index_head = NO_EAGER_UPDATE;
 				state->num_egrq_done = 0;
 			}
@@ -713,16 +662,27 @@ skip_packet_no_egr_update:
 			state->hdr_countdown -= hdrq_elemsz;
 			if (state->hdr_countdown == 0) {
 				/* header entry count reaches zero. */
-				const uint32_t tail =
-				    ips_recvq_tail_get(&recvq->egrq);
-				const uint32_t head =
-				    ips_recvq_head_get(&recvq->egrq);
-				uint32_t egr_cnt = recvq->egrq.elemcnt;
+				psmi_hal_cl_idx tail=0;
 
+				tail = psmi_hal_get_cl_q_tail_index(
+					   psm_hal_egr_q,
+					   recvq->context->psm_hw_ctxt);
+
+				psmi_hal_cl_idx head=0;
+
+				head = psmi_hal_get_cl_q_head_index(
+					   psm_hal_egr_q,
+					   recvq->context->psm_hw_ctxt);
+
+				uint32_t egr_cnt = psmi_hal_get_rx_egr_tid_cnt(recvq->context->psm_hw_ctxt);
 				/* Checks eager-full again. This is a real false-egr-full */
 				if (head == ((tail + 1) % egr_cnt)) {
-					ips_recvq_head_update(&recvq->egrq,
-							      tail);
+
+					psmi_hal_set_cl_q_tail_index(
+						tail,
+					        psm_hal_egr_q,
+						recvq->context->psm_hw_ctxt);
+
 					_HFI_DBG
 					    ("eager array full after overflow, flushing "
 					     "(head %llx, tail %llx)\n",
@@ -758,59 +718,43 @@ psm2_error_t ips_recvhdrq_scan_cca (struct ips_recvhdrq *recvq)
 
 /* Looks at hdr and determines if it is the last item in the queue */
 
-#define is_last_hdr(hdr)						\
-	(has_rtail ? 							\
-	(hdr != ips_recvq_tail_get(&recvq->hdrq)) :			\
-	(recvq->state->hdrq_rhf_seq == _get_rhf_seq(recvq, curr_hdr)))
+#define is_last_hdr(idx)				\
+	psmi_hal_cl_q_empty(idx, psm_hal_hdr_q, recvq->context->psm_hw_ctxt)
 
 	struct ips_recvhdrq_state *state = recvq->state;
-	const __le32 *rhf;
 	PSMI_CACHEALIGN struct ips_recvhdrq_event rcv_ev = {.proto = recvq->proto,
 							    .recvq = recvq
 	};
 
-	uint32_t num_hdrq_done = state->hdrq_cachedlastscan / recvq->hdrq.elemsz;
-	const int num_hdrq_todo = recvq->hdrq.elemcnt;
-	const uint32_t hdrq_elemsz = recvq->hdrq.elemsz;
+	uint32_t num_hdrq_done = state->hdrq_cachedlastscan /
+		psmi_hal_get_rx_hdr_q_ent_size(recvq->context->psm_hw_ctxt) >> BYTE2DWORD_SHIFT;
+	const int num_hdrq_todo = psmi_hal_get_rx_hdr_q_cnt(recvq->context->psm_hw_ctxt);
+	const uint32_t hdrq_elemsz = psmi_hal_get_rx_hdr_q_ent_size(recvq->context->psm_hw_ctxt) >> BYTE2DWORD_SHIFT;
 
 	int done;
-
-	/* Chip features */
-	const int has_rtail = recvq->runtime_flags & HFI1_CAP_DMA_RTAIL;
-
-	uint32_t *rcv_hdr =
-	    (uint32_t *)recvq->hdrq.base_addr + state->hdrq_cachedlastscan;
-	uint32_t *curr_hdr = rcv_hdr;
 	uint32_t scan_head = state->hdrq_head + state->hdrq_cachedlastscan;
+	const psmi_hal_cl_q psm_hal_hdr_q = recvq->psm_hal_cl_hdrq;
 
 	/* Skip the first element, since we're going to process it soon anyway */
 	if ( state->hdrq_cachedlastscan == 0 )
 	{
-		curr_hdr = curr_hdr + hdrq_elemsz;
 		scan_head += hdrq_elemsz;
 		num_hdrq_done++;
 	}
 
 	PSM2_LOG_MSG("entering");
 	done = !is_last_hdr(scan_head);
-
+	rcv_ev.psm_hal_hdr_q = psm_hal_hdr_q;
 	while (!done) {
-		rhf = (const __le32 *)curr_hdr + recvq->hdrq_rhf_off;
-		rcv_ev.error_flags = hfi_hdrget_err_flags(rhf);
-		rcv_ev.ptype = hfi_hdrget_rcv_type(rhf);
-		rcv_ev.rhf = rhf;
-		rcv_ev.rcv_hdr = curr_hdr;
-		rcv_ev.p_hdr =
-		    recvq->hdrq_rhf_off ? _get_proto_hdr_from_rhf(curr_hdr, rhf)
-		    : _get_proto_hdr(curr_hdr);
+		psmi_hal_get_receive_event(scan_head, recvq->context->psm_hw_ctxt,
+					   &rcv_ev);
 		rcv_ev.has_cksum =
 		    ((recvq->proto->flags & IPS_PROTO_FLAG_CKSUM) &&
 		     (rcv_ev.p_hdr->flags & IPS_SEND_FLAG_PKTCKSUM));
 
 		_HFI_VDBG
-		    ("scanning packet for CCA: curr_hdr %p, rhf_off %d, rhf %p (%x,%x), p_hdr %p\n",
-		     curr_hdr, recvq->hdrq_rhf_off, rhf, rhf[0], rhf[1],
-		     rcv_ev.p_hdr);
+			("scanning new packet for CCA: rcv_hdr %p, rhf %" PRIx64 "\n",
+			 rcv_ev.p_hdr, rcv_ev.psm_hal_rhf.raw_rhf);
 
 		if_pt ( _is_cca_fecn_set(rcv_ev.p_hdr) & IPS_RECV_EVENT_FECN ) {
 			struct ips_epstate_entry *epstaddr = ips_epstate_lookup(recvq->epstate,
@@ -829,7 +773,7 @@ psm2_error_t ips_recvhdrq_scan_cca (struct ips_recvhdrq *recvq)
 
 				psmi_assert(flowid < EP_FLOW_LAST);
 				flow = &ipsaddr->flows[flowid];
-				ctrlscb.flags = 0;
+				ctrlscb.scb_flags = 0;
 				ctrlscb.ips_lrh.data[0].u32w0 =
 					flow->cca_ooo_pkts;
 
@@ -870,8 +814,6 @@ psm2_error_t ips_recvhdrq_scan_cca (struct ips_recvhdrq *recvq)
 				}
 			}
 		}
-
-		curr_hdr = curr_hdr + hdrq_elemsz;
 
 		num_hdrq_done++;
 		scan_head += hdrq_elemsz;

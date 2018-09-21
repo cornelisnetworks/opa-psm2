@@ -58,14 +58,6 @@
 
 #include "psm_user.h"
 
-struct ips_recvq_params {
-	volatile __le64 *tail_register;	/* location of tail */
-	volatile __le64 *head_register;	/* location of head */
-	uint32_t *base_addr;	/* base address of q */
-	uint32_t elemsz;	/* size of q elements (in words) */
-	uint32_t elemcnt;	/* num of q elements (in words) */
-};
-
 /*
  * Tables to map eager indexes into their buffer addresses
  *
@@ -77,48 +69,5 @@ void **ips_recvq_egrbuf_table_alloc(psm2_ep_t ep,
 				    uint32_t bufsize);
 void ips_recvq_egrbuf_table_free(void **buftable);
 
-/*
- * Accessor inlines for reading and writing to hdrq/egrq registers
- */
-PSMI_ALWAYS_INLINE(
-void *
-ips_recvq_egr_index_2_ptr(void **egrq_buftable, int index, int offset))
-{
-	return (void *)((char *)egrq_buftable[index] + offset);
-}
-
-PSMI_INLINE(
-void
-ips_recvq_head_update(const struct ips_recvq_params *recvq, uint64_t newhead))
-{
-	*recvq->head_register = __cpu_to_le64(newhead);
-	return;
-}
-
-PSMI_INLINE(
-uint64_t
-ips_recvq_head_get(const struct ips_recvq_params *recvq))
-{
-	uint64_t res = __le64_to_cpu(*recvq->head_register);
-	ips_rmb();
-	return res;
-}
-
-PSMI_INLINE(
-void
-ips_recvq_tail_update(const struct ips_recvq_params *recvq, uint64_t newtail))
-{
-	*recvq->tail_register = __cpu_to_le64(newtail);
-	return;
-}
-
-PSMI_INLINE(
-uint64_t
-ips_recvq_tail_get(const struct ips_recvq_params *recvq))
-{
-	uint64_t res = __le64_to_cpu(*recvq->tail_register);
-	ips_rmb();
-	return res;
-}
 
 #endif /* _IPS_RECVQ_H */

@@ -67,11 +67,6 @@
 #include <fcntl.h>
 #include <malloc.h>
 
-#ifdef PSM_VALGRIND
-#include <valgrind/valgrind.h>
-#include <valgrind/memcheck.h>
-#endif
-
 #include "ipserror.h"
 #include "opa_user.h"
 #include "opa_udebug.h"
@@ -272,11 +267,6 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 		  "statusbase %llx, tailaddr %llx\n", binfo->user_regbase,
 		  binfo->events_bufbase, binfo->status_bufbase,
 		  binfo->rcvhdrtail_base);
-
-	if (getenv("PSM2_IDENTIFY")) {
-                printf("%s %s run-time driver interface v%d.%d\n",
-                          hfi_get_mylabel(), hfi_ident_tag, hfi_get_user_major_version(), hfi_get_user_minor_version());
-        }
 
 	/*
 	 * Check if driver version matches PSM version,

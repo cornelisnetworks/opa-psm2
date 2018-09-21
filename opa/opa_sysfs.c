@@ -56,18 +56,14 @@
 /* This file contains a simple sysfs interface used by the low level
    hfi protocol code.  It also implements the interface to hfifs. */
 
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <ctype.h>
-#include <dirent.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
 #include <stdarg.h>
 #include <stdlib.h>
-#include <stdio.h>
-#include <time.h>
 
 #include "opa_service.h"
 
@@ -76,7 +72,7 @@ static size_t sysfs_path_len;
 static char *hfifs_path;
 static long sysfs_page_size;
 
-static void __attribute__ ((constructor)) sysfs_init(void)
+void sysfs_init(const char *dflt_hfi_class_path)
 {
 	if (sysfs_path == NULL)
 	{
@@ -91,14 +87,14 @@ static void __attribute__ ((constructor)) sysfs_init(void)
 				sysfs_path = syspath;
 		}
 		if (sysfs_path == NULL) {
-			unsigned len = sizeof(HFI_CLASS_PATH) + 4;
+			unsigned len = strlen(dflt_hfi_class_path) + 4;
 			char *syspath = malloc(len);
 
 			if (!syspath)
 				_HFI_DBG("Failed to alloc %u bytes for syspath.\n",len);
 			else
 			{
-				snprintf(syspath, len, "%s_0", HFI_CLASS_PATH);
+				snprintf(syspath, len, "%s_0", dflt_hfi_class_path);
 				sysfs_path = syspath;
 			}
 		}
@@ -412,6 +408,31 @@ bail:
 
 	errno = saved_errno;
 	return ret;
+}
+
+/* read a string value into buff, no more than size bytes.
+   returns the number of bytes read */
+size_t hfi_sysfs_unit_port_read(uint32_t unit, uint32_t port, const char *attr,
+			char *buff, size_t size)
+{
+	int fd = -1;
+	size_t rv = 0;
+
+	fd = hfi_sysfs_port_open(unit, port, attr, O_RDONLY);
+
+	if (fd == -1)
+		return rv;
+
+	rv = read(fd, buff, size);
+
+	close(fd);
+
+	if (rv < size)
+		buff[rv] = 0;
+	else
+		buff[size-1] = 0;
+
+	return rv;
 }
 
 /*

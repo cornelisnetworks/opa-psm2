@@ -76,10 +76,18 @@ typedef struct _atomic {
 #define atomic_inc_return(a)  (++(a)->counter)
 
 #if defined(__GNUC__)
+#ifndef likely
 #define likely(x)    __builtin_expect(!!(x), 1L)
+#endif
+#ifndef unlikely
 #define unlikely(x)  __builtin_expect(!!(x), 0L)
+#endif
+#ifndef if_pt
 #define if_pt(cond) if (likely(cond))
+#endif
+#ifndef if_pf
 #define if_pf(cond) if (unlikely(cond))
+#endif
 #define _Pragma_unlikely
 #define _Pragma_likely
 #else

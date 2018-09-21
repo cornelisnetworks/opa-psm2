@@ -62,16 +62,26 @@
 
 typedef
 struct psmi_context {
-	struct _hfi_ctrl *ctrl;	/* driver opaque hfi_proto */
+
+	/* The following three member variables are used for sharing contexts among
+	   subcontexts and they have the following common properties:
+
+	   a. They are all initialized below HAL layer when the context is opened.
+	   b. If they are NULL that means no context is being shared among subcontexts,
+	   non-NULL means a context is being shared among some number of subcontexts.
+	   c. The initialization code is currently found in the gen1 hal instance.
+	*/
+
 	void *spio_ctrl;
 	void *tid_ctrl;
 	void *tf_ctrl;
 
-	int fd;			/* driver fd */
+	/* end of shared context member variables. */
+
+	psmi_hal_hw_context psm_hw_ctxt;
+
 	psm2_ep_t ep;		/* psm ep handle */
 	psm2_epid_t epid;	/* psm integral ep id */
-	struct hfi1_user_info_dep user_info;
-	uint32_t runtime_flags;
 	uint32_t rcvthread_flags;
 	psm2_error_t status_lasterr;
 	time_t networkLostTime;
@@ -90,13 +100,21 @@ psm2_error_t psmi_context_check_status(const psmi_context_t *context);
 psm2_error_t psmi_context_interrupt_set(psmi_context_t *context, int enable);
 int psmi_context_interrupt_isenabled(psmi_context_t *context);
 
-/* Runtime flags describe what features are enabled in hw/sw and which
- * corresponding PSM features are being used.
- *
- * Hi 16 bits are PSM options
- * Lo 16 bits are HFI_RUNTIME options copied from (hfi_common.h)
+/*
+ * round robin contexts across HFIs, then
+ * ports; this is the default.
+ * This option spreads the HFI selection within the local socket.
+ * If it is preferred to spread job over over entire set of
+ * HFIs within the system, see ALG_ACROSS_ALL below.
  */
-#define PSMI_RUNTIME_RCVTHREAD	    0x80000000
-#define PSMI_RUNTIME_INTR_ENABLED   0x40000000
+#define PSMI_UNIT_SEL_ALG_ACROSS     HFI1_ALG_ACROSS
+
+#define PSMI_UNIT_SEL_ALG_ACROSS_ALL HFI1_ALG_ACROSS_ALL
+
+/*
+ * use all contexts on an HFI (round robin
+ * active ports within), then next HFI
+ */
+#define PSMI_UNIT_SEL_ALG_WITHIN     HFI1_ALG_WITHIN
 
 #endif /* PSM_CONTEXT_H */

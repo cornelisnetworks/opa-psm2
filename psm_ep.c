@@ -59,6 +59,7 @@
 #include <ctype.h>		/* isalpha */
 
 #include "psm_user.h"
+#include "psm2_hal.h"
 #include "psm_mq_internal.h"
 #include "psm_am_internal.h"
 
@@ -83,15 +84,8 @@ static psm2_error_t psmi_ep_open_device(const psm2_ep_t ep,
  * PSM uses "devices" as components to manage communication to self, to peers
  * reachable via shared memory and finally to peers reachable only through
  * hfi.
- *
- * By default, PSMI_DEVICES_DEFAULT establishes the bind order a component is
- * tested for reachability to each peer.  First self, then shm and finally
- * hfi.  The order should really only affect endpoints that happen to be on
- * the same node.  PSM will correctly detect that two endpoints are on the same
- * node even though they may be using different host interfaces.
  */
 
-#define PSMI_DEVICES_DEFAULT "self,shm,hfi"
 static psm2_error_t psmi_parse_devices(int devices[PTL_MAX_INIT],
 				      const char *devstr);
 static int psmi_device_is_enabled(const int devices[PTL_MAX_INIT], int devid);
@@ -106,7 +100,7 @@ psm2_error_t __psm2_ep_num_devunits(uint32_t *num_units_o)
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
 
 	if (num_units == -1) {
-		num_units = hfi_get_num_units();
+		num_units = psmi_hal_get_num_units();
 		if (num_units == -1)
 			num_units = 0;
 	}
@@ -188,7 +182,7 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
  * Check if any of the port is not usable.
  */
 		for (i = 0; i < count; i++) {
-			ret = hfi_get_port_active(unit[i], port[i]);
+			ret = psmi_hal_get_port_active(unit[i], port[i]);
 			if (ret <= 0) {
 				err =
 				    psmi_handle_error(NULL,
@@ -197,7 +191,7 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
 						      unit[i], port[i]);
 				return err;
 			}
-			ret = hfi_get_port_lid(unit[i], port[i]);
+			ret = psmi_hal_get_port_lid(unit[i], port[i]);
 			if (ret <= 0) {
 				err =
 				    psmi_handle_error(NULL,
@@ -207,7 +201,7 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
 				return err;
 			}
 			ret =
-			    hfi_get_port_gid(unit[i], port[i], &gid_hi,
+			    psmi_hal_get_port_gid(unit[i], port[i], &gid_hi,
 					     &gid_lo);
 			if (ret == -1) {
 				err =
@@ -243,12 +237,15 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
 	if (multirail_within_socket_used) {
 		node_id = psmi_get_current_proc_location();
 		for (i = 0; i < num_units; i++) {
-			if (hfi_get_unit_active(i) <= 0)
+			if (psmi_hal_get_unit_active(i) <= 0)
 				continue;
+			int node_id_i;
 
-			if (hfi_sysfs_unit_read_node_s64(i) == node_id) {
-				found = 1;
-				break;
+			if (!psmi_hal_get_node_id(i, &node_id_i)) {
+				if (node_id_i == node_id) {
+					found = 1;
+					break;
+				}
 			}
 		}
 	}
@@ -256,15 +253,20 @@ psmi_ep_multirail(int *num_rails, uint32_t *unit, uint16_t *port)
  * Get all the ports with a valid lid and gid, one per unit.
  */
 	for (i = 0; i < num_units; i++) {
-		if (multirail_within_socket_used &&
-			found && (hfi_sysfs_unit_read_node_s64(i) != node_id))
-			continue;
+		int node_id_i;
+
+		if (!psmi_hal_get_node_id(i, &node_id_i))
+		{
+			if (multirail_within_socket_used &&
+			    found && (node_id_i != node_id))
+				continue;
+		}
 
 		for (j = HFI_MIN_PORT; j <= HFI_MAX_PORT; j++) {
-			ret = hfi_get_port_lid(i, j);
+			ret = psmi_hal_get_port_lid(i, j);
 			if (ret <= 0)
 				continue;
-			ret = hfi_get_port_gid(i, j, &gid_hi, &gid_lo);
+			ret = psmi_hal_get_port_gid(i, j, &gid_hi, &gid_lo);
 			if (ret == -1)
 				continue;
 
@@ -308,7 +310,7 @@ psmi_ep_devlids(uint16_t **lids, uint32_t *num_lids_o,
 			goto fail;
 		hfi_lids = (uint16_t *)
 		    psmi_calloc(PSMI_EP_NONE, UNDEFINED,
-				num_units * HFI_NUM_PORTS, sizeof(uint16_t));
+				num_units * psmi_hal_get_num_ports(), sizeof(uint16_t));
 		if (hfi_lids == NULL) {
 			err = psmi_handle_error(NULL, PSM2_NO_MEMORY,
 						"Couldn't allocate memory for dev_lids structure");
@@ -318,13 +320,13 @@ psmi_ep_devlids(uint16_t **lids, uint32_t *num_lids_o,
 		for (i = 0; i < num_units; i++) {
 			int j;
 			for (j = HFI_MIN_PORT; j <= HFI_MAX_PORT; j++) {
-				int lid = hfi_get_port_lid(i, j);
+				int lid = psmi_hal_get_port_lid(i, j);
 				int ret;
 				uint64_t gid_hi = 0, gid_lo = 0;
 
 				if (lid <= 0)
 					continue;
-				ret = hfi_get_port_gid(i, j, &gid_hi, &gid_lo);
+				ret = psmi_hal_get_port_gid(i, j, &gid_hi, &gid_lo);
 				if (ret == -1)
 					continue;
 				else if (my_gid_hi != gid_hi) {
@@ -370,7 +372,7 @@ psmi_ep_verify_pkey(psm2_ep_t ep, uint16_t pkey, uint16_t *opkey)
 	psm2_error_t err;
 
 	for (i = 0; i < 16; i++) {
-		ret = hfi_get_port_index2pkey(ep->unit_id, ep->portnum, i);
+		ret = psmi_hal_get_port_index2pkey(ep->unit_id, ep->portnum, i);
 		if (ret < 0) {
 			err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
 						"Can't get a valid pkey value from pkey table\n");
@@ -640,7 +642,7 @@ psm2_error_t __psm2_ep_open_opts_get_defaults(struct psm2_ep_open_opts *opts)
 	opts->affinity = PSM2_EP_OPEN_AFFINITY_SET;
 	opts->shm_mbytes = 0;	/* deprecated in psm2.h */
 	opts->sendbufs_num = 1024;
-	opts->network_pkey = HFI_DEFAULT_P_KEY;
+	opts->network_pkey = psmi_hal_get_default_pkey();
 	opts->port = HFI_PORT_NUM_ANY;
 	opts->outsl = PSMI_SL_DEFAULT;
 	opts->service_id = HFI_DEFAULT_SERVICE_ID;
@@ -687,7 +689,7 @@ __psm2_ep_open_internal(psm2_uuid_t const unique_job_key, int *devid_enabled,
 		if (opts_i->sendbufs_num != -1)
 			opts.sendbufs_num = opts_i->sendbufs_num;
 
-		if (opts_i->network_pkey != HFI_DEFAULT_P_KEY)
+		if (opts_i->network_pkey != psmi_hal_get_default_pkey())
 			opts.network_pkey = opts_i->network_pkey;
 
 		if (opts_i->port != 0)
@@ -772,7 +774,7 @@ __psm2_ep_open_internal(psm2_uuid_t const unique_job_key, int *devid_enabled,
 			 "HFI PKey to use for endpoint",
 			 PSMI_ENVVAR_LEVEL_USER,
 			 PSMI_ENVVAR_TYPE_ULONG,
-			 (union psmi_envvar_val)HFI_DEFAULT_P_KEY,
+			 (union psmi_envvar_val)((unsigned int)(psmi_hal_get_default_pkey())),
 			 &envvar_val)) {
 		opts.network_pkey = (uint64_t) envvar_val.e_ulong;
 	}
@@ -782,7 +784,7 @@ __psm2_ep_open_internal(psm2_uuid_t const unique_job_key, int *devid_enabled,
 	   client was compiled against PSM v1 */
 	if (PSMI_VERNO_GET_MAJOR(psmi_verno_client()) < 2 &&
 			opts.network_pkey == 0x7FFF) {
-		opts.network_pkey = HFI_DEFAULT_P_KEY;
+		opts.network_pkey = psmi_hal_get_default_pkey();;
 	}
 
 	/* Get number of default send buffers from environment */
@@ -998,8 +1000,7 @@ __psm2_ep_open_internal(psm2_uuid_t const unique_job_key, int *devid_enabled,
 
 fail:
 	if (ep != NULL) {
-		if (ep->context.fd != -1)
-			close(ep->context.fd);
+		psmi_hal_close_context(&ep->context.psm_hw_ctxt);
 		psmi_free(ep);
 	}
 	if (epaddr != NULL)
@@ -1367,7 +1368,7 @@ psmi_ep_open_device(const psm2_ep_t ep,
 			goto fail;
 
 		_HFI_DBG("[%d]use unit %d port %d\n", getpid(),
-			 context->ctrl->__hfi_unit, 1);
+			 psmi_hal_get_unit_id(ep->context.psm_hw_ctxt), 1);
 
 		/* At this point, we have the unit id and port number, so
 		 * check if pkey is not 0x0/0x7fff/0xffff, and match one
@@ -1390,7 +1391,7 @@ psmi_ep_open_device(const psm2_ep_t ep,
 		/* If enabled, use the pollurg capability to implement a receive
 		 * interrupt thread that can handle urg packets */
 		if (rcvthread_flags) {
-			context->runtime_flags |= PSMI_RUNTIME_RCVTHREAD;
+			psmi_hal_add_status(PSM_HAL_PSMI_RUNTIME_RTS_RX_THREAD);
 #ifdef PSMI_PLOCK_IS_NOLOCK
 			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
 					  "#define PSMI_PLOCK_IS_NOLOCK not functional yet "
@@ -1495,8 +1496,7 @@ psmi_parse_devices(int devices[PTL_MAX_INIT], const char *devstring)
 
 	b_new = (char *)devstr;
 	e = b_new + len;
-	strncpy(e, devstring, len - 1);
-	e[len - 1] = '\0';
+	strncpy(e, devstring, len);
 	ee = e + len;
 	i = 0;
 	while (e < ee && *e && i < PTL_MAX_INIT) {

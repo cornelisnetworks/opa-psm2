@@ -160,9 +160,12 @@
 
  */
 
-#define PSM2_LOG_EPM_TX ((int)1)
-#define PSM2_LOG_EPM_RX ((int)0)
-
+typedef enum
+{
+	PSM2_LOG_TX   = 0,
+	PSM2_LOG_RX   = 1,
+	PSM2_LOG_PEND = 2,
+} psmi_log_tx_rx_t;
 
 #ifdef PSM2_LOG
 
@@ -186,6 +189,8 @@ extern void psmi_log_fini(void);
 
 #define PSM2_LOG_DECLARE_BT_BUFFER() static void * psm_log_bt_buffer[PSM2_LOG_BT_BUFFER_SIZE]
 
+#define PSM2_LOG_DECLARE_BT_BUFFER_SZ(SIZE) static void * psm_log_bt_buffer[SIZE]
+
 #define PSM2_LOG_BT_MAGIC ((const char *)-1)
 
 #define PSM2_LOG_BT(NFRAMES,FORMAT , ...) psmi_log_message(__FILE__,__FUNCTION__,__LINE__,PSM2_LOG_BT_MAGIC,psm_log_bt_buffer,NFRAMES,FORMAT, ## __VA_ARGS__)
@@ -194,18 +199,35 @@ extern void psmi_log_fini(void);
 
 /* EPM is short for Emit Protocol Message to the log file.
 OPCODE is an int, and corresponds to one of the OPCODES declared in ptl_ips/ips_proto_header.h
-TXRX is an int, and should be one of the above two consts (PSM2_LOG_EPM_TX, or PSM2_LOG_EPM_RX).
+TXRX is an int, and should be one of the above two consts (PSM2_LOG_TX, or PSM2_LOG_RX).
 FROMEPID and TOEPID are uint64_t's and the fromepid should be the epid (end point id) of the sender   of the message
                                    and the toepid   should be the epid (end point id) of the receiver of the message
     */
-#define PSM2_LOG_EPM(OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,...) psmi_log_message(__FILE__,__FUNCTION__,__LINE__,PSM2_LOG_EPM_MAGIC,OPCODE,TXRX,FROMEPID,TOEPID,FORMAT, ## __VA_ARGS__)
+#define PSM2_LOG_EPM(OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,...)				\
+	psmi_log_message(__FILE__,__FUNCTION__,__LINE__,				\
+			PSM2_LOG_EPM_MAGIC,OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,		\
+			## __VA_ARGS__)
 
 /* Just adds a condition to the PSM2_LOG_EPM() macro. */
-#define PSM2_LOG_EPM_COND(COND,OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,...) if (COND) PSM2_LOG_EPM(OPCODE,TXRX,FROMEPID,TOEPID,FORMAT, ## __VA_ARGS__)
+#define PSM2_LOG_EPM_COND(COND,OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,...)			\
+	if (COND)									\
+		PSM2_LOG_EPM(OPCODE,TXRX,FROMEPID,TOEPID,FORMAT, ## __VA_ARGS__)
 
 #define PSM2_LOG_DUMP_MAGIC ((const char *)-3)
 
-#define PSM2_LOG_MSG_DUMP(ADDR,SIZE,FORMAT , ...) psmi_log_message(__FILE__,__FUNCTION__,__LINE__,PSM2_LOG_DUMP_MAGIC,ADDR,SIZE,FORMAT, ## __VA_ARGS__)
+#define PSM2_LOG_MSG_DUMP(ADDR,SIZE,FORMAT , ...)					\
+	psmi_log_message(__FILE__,__FUNCTION__,__LINE__,PSM2_LOG_DUMP_MAGIC,ADDR,SIZE,	\
+			 FORMAT, ## __VA_ARGS__)
+
+#define PSM2_LOG_PKT_STRM_MAGIC ((const char *)-4)
+
+#define PSM2_LOG_MIN_MAGIC PSM2_LOG_BT_MAGIC
+
+#define PSM2_LOG_MAX_MAGIC PSM2_LOG_PKT_STRM_MAGIC
+
+#define PSM2_LOG_PKT_STRM(TXRX,IPS_MSG_HDRP,FORMAT, ...)				\
+	psmi_log_message(__FILE__,__FUNCTION__,__LINE__,PSM2_LOG_PKT_STRM_MAGIC,TXRX,	\
+			 IPS_MSG_HDRP,FORMAT, ## __VA_ARGS__)
 
 #else
 
@@ -217,6 +239,8 @@ FROMEPID and TOEPID are uint64_t's and the fromepid should be the epid (end poin
 
 #define PSM2_LOG_DECLARE_BT_BUFFER()                         /* nothing */
 
+#define PSM2_LOG_DECLARE_BT_BUFFER_SZ(SIZE)                  /* nothing */
+
 #define PSM2_LOG_BT(NFRAMES,FORMAT , ...)                    /* nothing */
 
 #define PSM2_LOG_EPM(OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,...) /* nothing */
@@ -224,6 +248,8 @@ FROMEPID and TOEPID are uint64_t's and the fromepid should be the epid (end poin
 #define PSM2_LOG_EPM_COND(COND,OPCODE,TXRX,FROMEPID,TOEPID,FORMAT,...) /* nothing */
 
 #define PSM2_LOG_MSG_DUMP(ADDR,SIZE,FORMAT , ...)                      /* nothing */
+
+#define PSM2_LOG_PKT_STRM(TXRX,IPS_MSG_HDRP,FORMAT, ...)               /* nothing */
 
 #endif /* #ifdef PSM2_LOG */
 

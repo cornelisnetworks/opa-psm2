@@ -76,11 +76,6 @@ typedef psm2_error_t(*psm_mq_unexpected_callback_fn_t)
 	 uint32_t paylen);
 #endif
 
-#define NUM_HASH_BUCKETS 64
-#define HASH_THRESHOLD 65
-#define NUM_HASH_CONFIGS 3
-#define NUM_MQ_SUBLISTS (NUM_HASH_CONFIGS + 1)
-#define REMOVE_ENTRY 1
 #define MICRO_SEC 1000000
 #define MSG_BUFFER_LEN 100
 
@@ -144,24 +139,6 @@ struct psm2_mq {
 
 	psmi_lock_t progress_lock;
 };
-
-#define MQ_HFI_THRESH_TINY	8
-#define MQ_HFI_THRESH_EGR_SDMA_XEON 34000       /* Eager Xeon blocking */
-#define MQ_HFI_THRESH_EGR_SDMA_PHI2 200000      /* Eager Phi2 blocking */
-#define MQ_HFI_THRESH_EGR_SDMA_SQ_XEON 16000    /* Eager Xeon non-blocking */
-#define MQ_HFI_THRESH_EGR_SDMA_SQ_PHI2 65536    /* Eager Phi2 non-blocking */
-
-#define MQ_HFI_THRESH_RNDV_PHI2 200000
-#define MQ_HFI_THRESH_RNDV_XEON  64000
-
-#define MQ_HFI_WINDOW_RNDV_PHI2 4194304
-#define MQ_HFI_WINDOW_RNDV_XEON  131072
-
-#ifdef PSM_CUDA
-#define MQ_HFI_WINDOW_RNDV_CUDA 2097152
-#endif
-
-#define MQ_SHM_THRESH_RNDV 16000
 
 #define MQE_TYPE_IS_SEND(type)	((type) & MQE_TYPE_SEND)
 #define MQE_TYPE_IS_RECV(type)	((type) & MQE_TYPE_RECV)
@@ -284,17 +261,20 @@ struct psm2_mq_req {
 	STAILQ_HEAD(sendreq_spec_, ips_cuda_hostbuf) sendreq_prefetch;
 	uint32_t prefetch_send_msgoff;
 	int cuda_hostbuf_used;
-	cudaIpcMemHandle_t cuda_ipc_handle;
-	cudaEvent_t cuda_ipc_event;
+	CUipcMemHandle cuda_ipc_handle;
+	CUevent cuda_ipc_event;
 	uint8_t cuda_ipc_handle_attached;
-	/* is_buf_gpu_mem - used to indicate if the send or receive is issued
-	 * on a device/host buffer.
+	/*
 	 * is_sendbuf_gpu_mem - Used to always select TID path on the receiver
 	 * when send is on a device buffer
 	 */
-	uint8_t is_buf_gpu_mem;
 	uint8_t is_sendbuf_gpu_mem;
 #endif
+	/*
+	 * is_buf_gpu_mem - used to indicate if the send or receive is issued
+	 * on a device/host buffer.
+	 */
+	uint8_t is_buf_gpu_mem;
 
 	uint64_t user_reserved[4];
 
@@ -345,7 +325,7 @@ mq_copy_tiny(uint32_t *dest, uint32_t *src, uint8_t len))
 				 "Please enable PSM CUDA support when using GPU buffer \n");
 			return;
 		}
-		PSMI_CUDA_CALL(cudaMemcpy, dest, src, len, cudaMemcpyDefault);
+		PSMI_CUDA_CALL(cuMemcpy, (CUdeviceptr)dest, (CUdeviceptr)src, len);
 		return;
 	}
 #endif

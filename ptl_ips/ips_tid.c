@@ -53,18 +53,16 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
+#include "psm_user.h"
+#include "psm2_hal.h"
 #include "ips_tid.h"
-#include "ipserror.h"
 #include "ips_proto.h"
-#include "ips_proto_internal.h"
+#include "ips_expected_proto.h"
 
 psm2_error_t
 ips_tid_init(const psmi_context_t *context, struct ips_protoexp *protoexp,
 	     ips_tid_avail_cb_fn_t cb, void *cb_context)
 {
-	const struct hfi1_user_info_dep *user_info = &context->user_info;
-	const struct hfi1_base_info *base_info     = &context->ctrl->base_info;
-	const struct hfi1_ctxt_info *ctxt_info     = &context->ctrl->ctxt_info;
 	struct ips_tid *tidc = &protoexp->tidc;
 
 	struct psmi_stats_entry entries[] = {
@@ -79,21 +77,19 @@ ips_tid_init(const psmi_context_t *context, struct ips_protoexp *protoexp,
 	tidc->tid_avail_cb = cb;
 	tidc->tid_avail_context = cb_context;
 	tidc->tid_array = NULL;
-	tidc->invalidation_event = (uint64_t *)
-		(ptrdiff_t) base_info->events_bufbase;
 
 	/*
 	 * PSM uses tid registration caching only if driver has enabled it.
 	 */
-	if (!(tidc->context->runtime_flags & HFI1_CAP_TID_UNMAP)) {
+	if (!psmi_hal_has_cap(PSM_HAL_CAP_TID_UNMAP)) {
 		int i;
 		cl_qmap_t *p_map;
 		cl_map_item_t *root,*nil_item;
 
 		tidc->tid_array = (uint32_t *)
 			psmi_calloc(context->ep, UNDEFINED,
-				context->ctrl->__hfi_tidexpcnt,
-				sizeof(uint32_t));
+				    psmi_hal_get_tid_exp_cnt(context->psm_hw_ctxt),
+				    sizeof(uint32_t));
 		if (tidc->tid_array == NULL)
 			return PSM2_NO_MEMORY;
 
@@ -103,21 +99,21 @@ ips_tid_init(const psmi_context_t *context, struct ips_protoexp *protoexp,
 		p_map = &tidc->tid_cachemap;
 		root = (cl_map_item_t *)
 			psmi_calloc(context->ep, UNDEFINED,
-				    context->ctrl->__hfi_tidexpcnt + 2,
+				    psmi_hal_get_tid_exp_cnt(context->psm_hw_ctxt) + 2,
 				    sizeof(cl_map_item_t));
 
 		if (root == NULL)
 			return PSM2_NO_MEMORY;
 
 		nil_item = &root
-			[context->ctrl->__hfi_tidexpcnt + 1];
+			[psmi_hal_get_tid_exp_cnt(context->psm_hw_ctxt) + 1];
 
 		ips_tidcache_map_init(p_map,root,nil_item);
 
 		NTID = 0;
 		NIDLE = 0;
 		IPREV(IHEAD) = INEXT(IHEAD) = IHEAD;
-		for (i = 1; i <= context->ctrl->__hfi_tidexpcnt; i++) {
+		for (i = 1; i <= psmi_hal_get_tid_exp_cnt(context->psm_hw_ctxt); i++) {
 			INVALIDATE(i) = 1;
 		}
 
@@ -127,12 +123,12 @@ ips_tid_init(const psmi_context_t *context, struct ips_protoexp *protoexp,
 		 * its own portion. Driver makes the same tid number
 		 * assignment to subcontext processes.
 		 */
-		tidc->tid_cachesize = context->ctrl->__hfi_tidexpcnt;
-		if (user_info->subctxt_cnt > 0) {
+		tidc->tid_cachesize = psmi_hal_get_tid_exp_cnt(context->psm_hw_ctxt);
+		if (psmi_hal_get_subctxt_cnt(context->psm_hw_ctxt) > 0) {
 			uint16_t remainder = tidc->tid_cachesize %
-					user_info->subctxt_cnt;
-			tidc->tid_cachesize /= user_info->subctxt_cnt;
-			if (ctxt_info->subctxt < remainder)
+					psmi_hal_get_subctxt_cnt(context->psm_hw_ctxt);
+			tidc->tid_cachesize /= psmi_hal_get_subctxt_cnt(context->psm_hw_ctxt);
+			if (psmi_hal_get_subctxt(context->psm_hw_ctxt) < remainder)
 				tidc->tid_cachesize++;
 		}
 	}
@@ -153,12 +149,12 @@ ips_tid_init(const psmi_context_t *context, struct ips_protoexp *protoexp,
 	/*
 	 * Only the master process can initialize.
 	 */
-	if (ctxt_info->subctxt == 0) {
+	if (psmi_hal_get_subctxt(context->psm_hw_ctxt) == 0) {
 		pthread_spin_init(&tidc->tid_ctrl->tid_ctrl_lock,
 					PTHREAD_PROCESS_SHARED);
 
 		tidc->tid_ctrl->tid_num_max =
-			    context->ctrl->__hfi_tidexpcnt;
+			    psmi_hal_get_tid_exp_cnt(context->psm_hw_ctxt);
 		tidc->tid_ctrl->tid_num_avail = tidc->tid_ctrl->tid_num_max;
 	}
 
@@ -214,12 +210,13 @@ ips_tid_acquire(struct ips_tid *tidc,
 
 #ifdef PSM_CUDA
 	if (is_cuda_ptr)
-		flags = HFI1_BUF_GPU_MEM;
+		flags = PSM_HAL_BUF_GPU_MEM;
 #endif
 
-	rc = hfi_update_tid(tidc->context->ctrl,
-		    (uint64_t) (uintptr_t) buf, length,
-		    (uint64_t) (uintptr_t) tid_array, tidcnt, flags);
+	rc = psmi_hal_update_tid(tidc->context->psm_hw_ctxt,
+				 (uint64_t) (uintptr_t) buf, length,
+				 (uint64_t) (uintptr_t) tid_array, tidcnt, flags);
+
 	if (rc < 0) {
 		/* Unable to pin pages? retry later */
 		err = PSM2_EP_DEVICE_FAILURE;
@@ -250,8 +247,8 @@ ips_tid_release(struct ips_tid *tidc,
 	if (tidc->context->tid_ctrl)
 		pthread_spin_lock(&ctrl->tid_ctrl_lock);
 
-	if (hfi_free_tid(tidc->context->ctrl,
-		    (uint64_t) (uintptr_t) tid_array, tidcnt) < 0) {
+	if (psmi_hal_free_tid(tidc->context->psm_hw_ctxt,
+			      (uint64_t) (uintptr_t) tid_array, tidcnt) < 0) {
 		if (tidc->context->tid_ctrl)
 			pthread_spin_unlock(&ctrl->tid_ctrl_lock);
 

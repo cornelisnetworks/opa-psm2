@@ -281,6 +281,16 @@ psm2_error_t psm2_am_register_handlers_2(psm2_ep_t ep,
 				     void **hctx,
 				     int *handlers_idx);
 
+/** @brief Unregister all AM call-back handlers for the specific end-point.
+ *
+ * This function is used to unregister all AM handlers registered to the
+ * specified end-point.
+ *
+ * @param[in] ep End-point value
+ *
+ */
+void psm2_am_unregister_handlers(psm2_ep_t ep);
+
 /** @brief Generate an AM request.
  *
  * This function generates an AM request causing an AM handler function to be

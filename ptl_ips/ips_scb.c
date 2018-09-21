@@ -53,8 +53,8 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
-#include "psm2_mock_testing.h"
 #include "psm_user.h"
+#include "psm2_hal.h"
 #include "ips_proto.h"
 #include "ips_scb.h"
 #include "ips_proto_internal.h"
@@ -87,20 +87,10 @@ ips_scbctrl_init(const psmi_context_t *context,
 	 * are on a page boundary */
 	if (numbufs > 0) {
 		struct ips_scbbuf *sbuf;
-		int redzone = PSM_VALGRIND_REDZONE_SZ;
 
-		/* If the allocation requested is a page and we have redzones we have
-		 * to allocate 2 pages so we end up using a redzone of 2048 bytes.
-		 *
-		 * if the allocation is not 4096, we relax that requirement and keep
-		 * the redzones PSM_VALGRIND_REDZONE_SZ
-		 */
-		if (redzone > 0 && bufsize % PSMI_PAGESIZE == 0)
-			redzone = PSMI_PAGESIZE / 2;
-		bufsize += 2 * redzone;
 		bufsize = PSMI_ALIGNUP(bufsize, 64);
 
-		alloc_sz = numbufs * bufsize + redzone + PSMI_PAGESIZE;
+		alloc_sz = numbufs * bufsize + PSMI_PAGESIZE;
 		scbc->sbuf_buf_alloc =
 		    psmi_calloc(ep, NETWORK_BUFFERS, 1, alloc_sz);
 		if (scbc->sbuf_buf_alloc == NULL) {
@@ -108,12 +98,12 @@ ips_scbctrl_init(const psmi_context_t *context,
 			goto fail;
 		}
 		base = (uintptr_t) scbc->sbuf_buf_alloc;
-		base = PSMI_ALIGNUP(base + redzone, PSMI_PAGESIZE);
+		base = PSMI_ALIGNUP(base, PSMI_PAGESIZE);
 		scbc->sbuf_buf_base = (void *)base;
 		scbc->sbuf_buf_last = (void *)(base + bufsize * (numbufs - 1));
 		_HFI_VDBG
-		    ("sendbufs=%d, (redzone=%d|size=%d|redzone=%d),base=[%p..%p)\n",
-		     numbufs, redzone, bufsize - 2 * redzone, redzone,
+		    ("sendbufs=%d, (size=%d),base=[%p..%p)\n",
+		     numbufs,  bufsize,
 		     (void *)scbc->sbuf_buf_base, (void *)scbc->sbuf_buf_last);
 
 		for (i = 0; i < numbufs; i++) {
@@ -121,11 +111,6 @@ ips_scbctrl_init(const psmi_context_t *context,
 			SLIST_NEXT(sbuf, next) = NULL;
 			SLIST_INSERT_HEAD(&scbc->sbuf_free, sbuf, next);
 		}
-
-		VALGRIND_CREATE_MEMPOOL(scbc->sbuf_buf_alloc, 0,
-					/* Should be undefined but we stuff a next
-					 * pointer in the buffer */
-					PSM_VALGRIND_MEM_DEFINED);
 	}
 
 	imm_base = 0;
@@ -133,29 +118,33 @@ ips_scbctrl_init(const psmi_context_t *context,
 	if (scbc->scb_imm_size) {
 		scbc->scb_imm_size = PSMI_ALIGNUP(imm_size, 64);
 		alloc_sz = numscb * scbc->scb_imm_size + 64;
-		scbc->scb_imm_buf =
-		    psmi_calloc(ep, NETWORK_BUFFERS, 1, alloc_sz);
+		scbc->scb_imm_buf = psmi_memalign(ep, NETWORK_BUFFERS, 64,
+						  alloc_sz);
+
 		if (scbc->scb_imm_buf == NULL) {
 			err = PSM2_NO_MEMORY;
 			goto fail;
 		}
+
+		memset(scbc->scb_imm_buf, 0, alloc_sz);
 		imm_base = PSMI_ALIGNUP(scbc->scb_imm_buf, 64);
 	} else
 		scbc->scb_imm_buf = NULL;
 
 	scbc->scb_num = scbc->scb_num_cur = numscb;
 	SLIST_INIT(&scbc->scb_free);
-	scb_size = sizeof(struct ips_scb) + 2 * PSM_VALGRIND_REDZONE_SZ;
-	scb_size = PSMI_ALIGNUP(scb_size, 64);
-	alloc_sz = numscb * scb_size + PSM_VALGRIND_REDZONE_SZ + 64;
-	scbc->scb_base = (void *)
-	    psmi_calloc(ep, NETWORK_BUFFERS, 1, alloc_sz);
+
+	scb_size = PSMI_ALIGNUP(sizeof(*scb), 64);
+	alloc_sz = numscb * scb_size;
+
+	scbc->scb_base = psmi_memalign(ep, NETWORK_BUFFERS, 64, alloc_sz);
 	if (scbc->scb_base == NULL) {
 		err = PSM2_NO_MEMORY;
 		goto fail;
 	}
+
+	memset(scbc->scb_base, 0, alloc_sz);
 	base = (uintptr_t) scbc->scb_base;
-	base = PSMI_ALIGNUP(base + PSM_VALGRIND_REDZONE_SZ, 64);
 
 	/*
 	 * Allocate ack/send timer for each scb object.
@@ -170,6 +159,7 @@ ips_scbctrl_init(const psmi_context_t *context,
 
 	for (i = 0; i < numscb; i++) {
 		scb = (struct ips_scb *)(base + i * scb_size);
+
 		scb->scbc = scbc;
 		if (scbc->scb_imm_buf)
 			scb->imm_payload =
@@ -198,11 +188,6 @@ ips_scbctrl_init(const psmi_context_t *context,
 	scbc->scb_avail_callback = scb_avail_callback;
 	scbc->scb_avail_context = scb_avail_context;
 
-	/* It would be nice to mark the scb as undefined but we pre-initialize the
-	 * "next" pointer and valgrind would see this as a violation.
-	 */
-	VALGRIND_CREATE_MEMPOOL(scbc, PSM_VALGRIND_REDZONE_SZ,
-				PSM_VALGRIND_MEM_DEFINED);
 
 fail:
 	return err;
@@ -212,10 +197,8 @@ psm2_error_t ips_scbctrl_fini(struct ips_scbctrl *scbc)
 {
 	if (scbc->scb_base != NULL) {
 		psmi_free(scbc->scb_base);
-		VALGRIND_DESTROY_MEMPOOL(scbc);
 	}
 	if (scbc->sbuf_buf_alloc) {
-		VALGRIND_DESTROY_MEMPOOL(scbc->sbuf_buf_alloc);
 		psmi_free(scbc->sbuf_buf_alloc);
 	}
 	return PSM2_OK;
@@ -247,10 +230,8 @@ int ips_scbctrl_bufalloc(ips_scb_t *scb)
 		 * credits.
 		 */
 		if (scbc->sbuf_num_cur < (scbc->sbuf_num >> 1))
-			scb->flags |= IPS_SEND_FLAG_ACKREQ;
+			scb->scb_flags |= IPS_SEND_FLAG_ACKREQ;
 
-		VALGRIND_MEMPOOL_ALLOC(scbc->sbuf_buf_alloc, ips_scb_buffer(scb),
-				       scb->payload_size);
 		SLIST_REMOVE_HEAD(&scbc->sbuf_free, next);
 		return 1;
 	}
@@ -262,7 +243,7 @@ int ips_scbctrl_avail(struct ips_scbctrl *scbc)
 }
 
 ips_scb_t *MOCKABLE(ips_scbctrl_alloc)(struct ips_scbctrl *scbc, int scbnum, int len,
-			     uint32_t flags)
+				uint32_t flags)
 {
 	ips_scb_t *scb, *scb_head = NULL;
 
@@ -273,11 +254,10 @@ ips_scb_t *MOCKABLE(ips_scbctrl_alloc)(struct ips_scbctrl *scbc, int scbnum, int
 		if (SLIST_EMPTY(&scbc->scb_free))
 			break;
 		scb = SLIST_FIRST(&scbc->scb_free);
-		scb->flags = 0;	/* Need to set this here as bufalloc may request
-				 * an ACK under memory pressure
-				 */
-		VALGRIND_MEMPOOL_ALLOC(scbc, scb, sizeof(struct ips_scb));
-
+		/* Need to set this here as bufalloc may request
+		 * an ACK under memory pressure
+		 */
+		scb->scb_flags = 0;
 		if (flags & IPS_SCB_FLAG_ADD_BUFFER) {
 			scb->payload_size = len;
 			if (!ips_scbctrl_bufalloc(scb))
@@ -298,7 +278,7 @@ ips_scb_t *MOCKABLE(ips_scbctrl_alloc)(struct ips_scbctrl *scbc, int scbnum, int
 
 		scbc->scb_num_cur--;
 		if (scbc->scb_num_cur < (scbc->scb_num >> 1))
-			scb->flags |= IPS_SEND_FLAG_ACKREQ;
+			scb->scb_flags |= IPS_SEND_FLAG_ACKREQ;
 
 		SLIST_REMOVE_HEAD(&scbc->scb_free, next);
 		SLIST_NEXT(scb, next) = scb_head;
@@ -315,7 +295,6 @@ void ips_scbctrl_free(ips_scb_t *scb)
 	    (ips_scb_buffer(scb) <= scbc->sbuf_buf_last)) {
 		scbc->sbuf_num_cur++;
 		SLIST_INSERT_HEAD(&scbc->sbuf_free, scb->sbuf, next);
-		VALGRIND_MEMPOOL_FREE(scbc->sbuf_buf_alloc, ips_scb_buffer(scb));
 	}
 
 	ips_scb_buffer(scb) = NULL;
@@ -329,7 +308,6 @@ void ips_scbctrl_free(ips_scb_t *scb)
 	} else
 		SLIST_INSERT_HEAD(&scbc->scb_free, scb, next);
 
-	VALGRIND_MEMPOOL_FREE(scbc, scb);
 	return;
 }
 
@@ -340,13 +318,12 @@ ips_scb_t *MOCKABLE(ips_scbctrl_alloc_tiny)(struct ips_scbctrl *scbc)
 		return NULL;
 	scb = SLIST_FIRST(&scbc->scb_free);
 
-	VALGRIND_MEMPOOL_ALLOC(scbc, scb, sizeof(struct ips_scb));
 	SLIST_REMOVE_HEAD(&scbc->scb_free, next);
 	SLIST_NEXT(scb, next) = NULL;
 
 	ips_scb_buffer(scb) = NULL;
 	scb->payload_size = 0;
-	scb->flags = 0;
+	scb->scb_flags = 0;
 	scb->tidsendc = NULL;
 	scb->callback = NULL;
 	scb->tidctrl = 0;
@@ -358,7 +335,7 @@ ips_scb_t *MOCKABLE(ips_scbctrl_alloc_tiny)(struct ips_scbctrl *scbc)
 
 	scbc->scb_num_cur--;
 	if (scbc->scb_num_cur < (scbc->scb_num >> 1))
-		scb->flags |= IPS_SEND_FLAG_ACKREQ;
+		scb->scb_flags |= IPS_SEND_FLAG_ACKREQ;
 	return scb;
 }
 MOCK_DEF_EPILOGUE(ips_scbctrl_alloc_tiny);

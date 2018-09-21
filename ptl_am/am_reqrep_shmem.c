@@ -71,12 +71,6 @@
 
 int psmi_shm_mq_rv_thresh = PSMI_MQ_RV_THRESH_NO_KASSIST;
 
-/* AMLONG_SZ is the total size in memory of a bulk packet, including an
- * am_pkt_bulk_t header struct.
- * AMLONG_MTU is the number of bytes available in a bulk packet for payload. */
-#define AMLONG_SZ   8192
-#define AMLONG_MTU (AMLONG_SZ-sizeof(am_pkt_bulk_t))
-
 static const amsh_qinfo_t amsh_qcounts = {
 	.qreqFifoShort = 1024,
 	.qreqFifoLong = 256,
@@ -158,7 +152,7 @@ void amsh_atexit()
 	static pthread_mutex_t mutex_once = PTHREAD_MUTEX_INITIALIZER;
 	static int atexit_once;
 	psm2_ep_t ep;
-	ptl_t *ptl;
+	struct ptl_am *ptl;
 
 	pthread_mutex_lock(&mutex_once);
 	if (atexit_once) {
@@ -170,7 +164,7 @@ void amsh_atexit()
 
 	ep = psmi_opened_endpoint;
 	while (ep) {
-		ptl = ep->ptl_amsh.ptl;
+		ptl = (struct ptl_am *)(ep->ptl_amsh.ptl);
 		if (ptl->self_nodeinfo &&
 		    ptl->amsh_keyname != NULL) {
 			_HFI_VDBG("unlinking shm file %s\n",
@@ -237,8 +231,9 @@ void amsh_mmap_fault(int signo, siginfo_t *siginfo, void *context)
  * Create endpoint shared-memory object, containing ep's info
  * and message queues.
  */
-psm2_error_t psmi_shm_create(ptl_t *ptl)
+psm2_error_t psmi_shm_create(ptl_t *ptl_gen)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	psm2_ep_t ep = ptl->ep;
 	char shmbuf[256];
 	void *mapptr;
@@ -349,8 +344,9 @@ fail:
 	return err;
 }
 
-psm2_error_t psmi_epdir_extend(ptl_t *ptl)
+psm2_error_t psmi_epdir_extend(ptl_t *ptl_gen)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	struct am_ctl_nodeinfo *new = NULL;
 
 	new = (struct am_ctl_nodeinfo *)
@@ -393,9 +389,12 @@ psm2_error_t psmi_do_unmap(uintptr_t shmbase)
  * If the remote process has a shared memory object available, add it to our own
  * directory and return the shmidx.  If the shared memory object does not exist,
  * return -1, and the connect poll function will try to map again later.
+ *
+ * If force_remap is true, then clear the entry that matches the epid.
  */
-psm2_error_t psmi_shm_map_remote(ptl_t *ptl, psm2_epid_t epid, uint16_t *shmidx_o)
+psm2_error_t psmi_shm_map_remote(ptl_t *ptl_gen, psm2_epid_t epid, uint16_t *shmidx_o, int force_remap)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	int i;
 	int use_kassist;
 	uint16_t shmidx;
@@ -411,6 +410,11 @@ psm2_error_t psmi_shm_map_remote(ptl_t *ptl, psm2_epid_t epid, uint16_t *shmidx_
 
 	for (i = 0; i <= ptl->max_ep_idx; i++) {
 		if (ptl->am_ep[i].epid == epid) {
+			if (force_remap) {
+				ptl->am_ep[i].epaddr = NULL;
+				ptl->am_ep[i].epid = 0;
+				break;
+			}
 			*shmidx_o = shmidx = i;
 			return err;
 		}
@@ -502,7 +506,7 @@ psm2_error_t psmi_shm_map_remote(ptl_t *ptl, psm2_epid_t epid, uint16_t *shmidx_
 
 	shmidx = -1;
 	if ((ptl->max_ep_idx + 1) == ptl->am_ep_size) {
-		err = psmi_epdir_extend(ptl);
+		err = psmi_epdir_extend(ptl_gen);
 		if (err)
 			goto fail;
 
@@ -569,8 +573,9 @@ psm2_error_t psmi_shm_map_remote(ptl_t *ptl, psm2_epid_t epid, uint16_t *shmidx_
 	PSMI_ALIGNUP(amsh_qelemsz.q ## type * amsh_qcounts.q ## type,   \
 		     PSMI_PAGESIZE)
 
-static psm2_error_t amsh_init_segment(ptl_t *ptl)
+static psm2_error_t amsh_init_segment(ptl_t *ptl_gen)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	psm2_error_t err = PSM2_OK;
 
 	/* Preconditions */
@@ -579,7 +584,7 @@ static psm2_error_t amsh_init_segment(ptl_t *ptl)
 	psmi_assert_always(ptl->epaddr != NULL);
 	psmi_assert_always(ptl->ep->epid != 0);
 
-	if ((err = psmi_shm_create(ptl)))
+	if ((err = psmi_shm_create(ptl_gen)))
 		goto fail;
 
 	ptl->self_nodeinfo->amsh_qsizes.qreqFifoShort = AMSH_QSIZE(reqFifoShort);
@@ -643,8 +648,9 @@ fail:
 	return err;
 }
 
-psm2_error_t psmi_shm_detach(ptl_t *ptl)
+psm2_error_t psmi_shm_detach(ptl_t *ptl_gen)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	psm2_error_t err = PSM2_OK;
 	uintptr_t shmbase;
 
@@ -730,8 +736,9 @@ void am_update_directory(struct am_ctl_nodeinfo *nodeinfo)
 
 /* ep_epid_share_memory wrapper */
 static
-int amsh_epid_reachable(ptl_t *ptl, psm2_epid_t epid)
+int amsh_epid_reachable(ptl_t *ptl_gen, psm2_epid_t epid)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	int result;
 	psm2_error_t err;
 	err = psm2_ep_epid_share_memory(ptl->ep, epid, &result);
@@ -741,8 +748,9 @@ int amsh_epid_reachable(ptl_t *ptl, psm2_epid_t epid)
 
 static
 psm2_error_t
-amsh_epaddr_add(ptl_t *ptl, psm2_epid_t epid, uint16_t shmidx, psm2_epaddr_t *epaddr_o)
+amsh_epaddr_add(ptl_t *ptl_gen, psm2_epid_t epid, uint16_t shmidx, psm2_epaddr_t *epaddr_o)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	psm2_epaddr_t epaddr;
 	am_epaddr_t *amaddr;
 	psm2_error_t err = PSM2_OK;
@@ -771,11 +779,11 @@ amsh_epaddr_add(ptl_t *ptl, psm2_epid_t epid, uint16_t shmidx, psm2_epaddr_t *ep
 	/* convert to am_epaddr_t */
 	amaddr = (am_epaddr_t *) epaddr;
 	/* tell the other endpoint their location in our directory */
-	amaddr->_shmidx = shmidx;
+	amaddr->shmidx = shmidx;
 	/* we haven't connected yet, so we can't give them the same hint */
-	amaddr->_return_shmidx = -1;
-	AMSH_CSTATE_OUTGOING_SET(amaddr, NONE);
-	AMSH_CSTATE_INCOMING_SET(amaddr, NONE);
+	amaddr->return_shmidx = -1;
+	amaddr->cstate_outgoing = AMSH_CSTATE_OUTGOING_NONE;
+	amaddr->cstate_incoming = AMSH_CSTATE_INCOMING_NONE;
 
 	/* other setup */
 	ptl->am_ep[shmidx].epaddr = epaddr;
@@ -795,19 +803,20 @@ fail:
 
 static
 void
-amsh_epaddr_update(ptl_t *ptl, psm2_epaddr_t epaddr)
+amsh_epaddr_update(ptl_t *ptl_gen, psm2_epaddr_t epaddr)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	am_epaddr_t *amaddr;
 	uint16_t shmidx;
 	struct am_ctl_nodeinfo *nodeinfo;
 
 	amaddr = (am_epaddr_t *) epaddr;
-	shmidx = amaddr->_shmidx;
+	shmidx = amaddr->shmidx;
 	nodeinfo = (struct am_ctl_nodeinfo *) ptl->am_ep[shmidx].amsh_shmbase;
 
 	/* restart the connection process */
-	amaddr->_return_shmidx = -1;
-	AMSH_CSTATE_OUTGOING_SET(amaddr, NONE);
+	amaddr->return_shmidx = -1;
+	amaddr->cstate_outgoing = AMSH_CSTATE_OUTGOING_NONE;
 
 	/* wait for the other process to init again */
 	{
@@ -855,13 +864,14 @@ void amsh_free_epaddr(psm2_epaddr_t epaddr)
 
 static
 psm2_error_t
-amsh_ep_connreq_init(ptl_t *ptl, int op, /* connect, disconnect or abort */
+amsh_ep_connreq_init(ptl_t *ptl_gen, int op, /* connect, disconnect or abort */
 		     int numep, const psm2_epid_t *array_of_epid, /* non-NULL on connect */
 		     const int array_of_epid_mask[],
 		     psm2_error_t *array_of_errors,
 		     psm2_epaddr_t *array_of_epaddr,
 		     struct ptl_connection_req **req_o)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	int i, cstate;
 	psm2_epaddr_t epaddr;
 	psm2_epid_t epid;
@@ -899,7 +909,7 @@ amsh_ep_connreq_init(ptl_t *ptl, int op, /* connect, disconnect or abort */
 			/* Connect only to other processes reachable by shared memory.
 			   The self PTL handles loopback communication, so explicitly
 			   refuse to connect to self. */
-			if (!amsh_epid_reachable(ptl, epid)
+			if (!amsh_epid_reachable(ptl_gen, epid)
 			    || epid == ptl->epid) {
 				array_of_errors[i] = PSM2_EPID_UNREACHABLE;
 				array_of_epaddr[i] = NULL;
@@ -910,14 +920,13 @@ amsh_ep_connreq_init(ptl_t *ptl, int op, /* connect, disconnect or abort */
 				  (unsigned long long)epid);
 			epaddr = psmi_epid_lookup(ptl->ep, epid);
 			if (epaddr != NULL) {
-				if (epaddr->ptlctl->ptl != ptl) {
+				if (epaddr->ptlctl->ptl != ptl_gen) {
 					array_of_errors[i] =
 					    PSM2_EPID_UNREACHABLE;
 					array_of_epaddr[i] = NULL;
 					continue;
 				}
-				cstate =
-				    AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) epaddr);
+				cstate = ((am_epaddr_t *) epaddr)->cstate_outgoing;
 				if (cstate == AMSH_CSTATE_OUTGOING_ESTABLISHED) {
 					array_of_epaddr[i] = epaddr;
 					array_of_errors[i] = PSM2_OK;
@@ -934,8 +943,11 @@ amsh_ep_connreq_init(ptl_t *ptl, int op, /* connect, disconnect or abort */
 			}
 		} else {	/* disc or abort */
 			epaddr = array_of_epaddr[i];
+			if (epaddr->ptlctl->ptl != ptl_gen)
+				continue;
+
 			psmi_assert(epaddr != NULL);
-			cstate = AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) epaddr);
+			cstate = ((am_epaddr_t *) epaddr)->cstate_outgoing;
 			if (cstate == AMSH_CSTATE_OUTGOING_ESTABLISHED) {
 				req->epid_mask[i] = AMSH_CMASK_PREREQ;
 				_HFI_VDBG
@@ -963,8 +975,9 @@ amsh_ep_connreq_init(ptl_t *ptl, int op, /* connect, disconnect or abort */
 
 static
 psm2_error_t
-amsh_ep_connreq_poll(ptl_t *ptl, struct ptl_connection_req *req)
+amsh_ep_connreq_poll(ptl_t *ptl_gen, struct ptl_connection_req *req)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	int i, j, cstate;
 	uint16_t shmidx = (uint16_t)-1;
 	psm2_error_t err = PSM2_OK;
@@ -985,50 +998,50 @@ amsh_ep_connreq_poll(ptl_t *ptl, struct ptl_connection_req *req)
 			epaddr = req->epaddr[i];
 			psmi_assert(epaddr != NULL);
 			if (req->epid_mask[i] == AMSH_CMASK_PREREQ) {
-				shmidx = ((am_epaddr_t *) epaddr)->_shmidx;
+				shmidx = ((am_epaddr_t *) epaddr)->shmidx;
 				/* Make sure the target of the disconnect is still there */
 				if (ptl->am_ep[shmidx].
 				    epid != epaddr->epid) {
 					req->numep_left--;
 					req->epid_mask[i] = AMSH_CMASK_DONE;
-					AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *)
-							   epaddr, NONE);
+					((am_epaddr_t *) epaddr)->cstate_outgoing =
+						AMSH_CSTATE_OUTGOING_NONE;
 				}
 			}
 
 			if (req->epid_mask[i] == AMSH_CMASK_PREREQ) {
-				req->args[0].u32w0 = PSMI_AM_DISC_REQ;
+				req->args[0].u16w0 = PSMI_AM_DISC_REQ;
+				req->args[0].u16w1 = shmidx;
 				req->args[0].u32w1 = ptl->connect_phase;
 				req->args[1].u64w0 = (uint64_t) ptl->epid;
 				psmi_assert(shmidx != (uint16_t)-1);
-				req->args[2].u16w0 = shmidx;
+				req->args[2].u32w0 = getpid();
 				req->args[2].u32w1 = PSM2_OK;
 				req->args[3].u64w0 =
 				    (uint64_t) (uintptr_t) &req->errors[i];
-				psmi_amsh_short_request(ptl, epaddr,
+				psmi_amsh_short_request(ptl_gen, epaddr,
 							amsh_conn_handler_hidx,
 							req->args, 4, NULL, 0,
 							0);
-				AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *) epaddr,
-				           DISC_REQUESTED);
+				((am_epaddr_t *) epaddr)->cstate_outgoing =
+					AMSH_CSTATE_OUTGOING_DISC_REQUESTED;
 				/**
 				* Only munmap if we have nothing more to
 				* communicate with the other node, i.e. we
 				* already recieved a disconnect req from the
 				* other node.
 				*/
-				if (AMSH_CSTATE_INCOMING_GET((am_epaddr_t *) epaddr) ==
+				if (((am_epaddr_t *) epaddr)->cstate_incoming ==
 					AMSH_CSTATE_INCOMING_DISC_REQUESTED)
 					err = psmi_do_unmap(ptl->am_ep[shmidx].amsh_shmbase);
 				req->epid_mask[i] = AMSH_CMASK_POSTREQ;
 			} else if (req->epid_mask[i] == AMSH_CMASK_POSTREQ) {
-				cstate =
-				    AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) epaddr);
+				cstate = ((am_epaddr_t *) epaddr)->cstate_outgoing;
 				if (cstate == AMSH_CSTATE_OUTGOING_DISC_REPLIED) {
 					req->numep_left--;
 					req->epid_mask[i] = AMSH_CMASK_DONE;
-					AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *)
-							   epaddr, NONE);
+					((am_epaddr_t *) epaddr)->cstate_outgoing =
+						AMSH_CSTATE_OUTGOING_NONE;
 				}
 			}
 		}
@@ -1047,22 +1060,22 @@ amsh_ep_connreq_poll(ptl_t *ptl, struct ptl_connection_req *req)
 
 			/* detect if a race has occurred on due to re-using an
 			 * old shm file - if so, restart the connection */
-			shmidx = ((am_epaddr_t *) epaddr)->_shmidx;
+			shmidx = ((am_epaddr_t *) epaddr)->shmidx;
 			if (ptl->am_ep[shmidx].pid !=
 			    ((struct am_ctl_nodeinfo *) ptl->am_ep[shmidx].amsh_shmbase)->pid) {
 				req->epid_mask[i] = AMSH_CMASK_PREREQ;
-				AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *) epaddr,
-						   NONE);
+				((am_epaddr_t *) epaddr)->cstate_outgoing =
+					AMSH_CSTATE_OUTGOING_NONE;
 				n_prereq++;
-				amsh_epaddr_update(ptl, epaddr);
+				amsh_epaddr_update(ptl_gen, epaddr);
 				continue;
 			}
 
-			cstate = AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) epaddr);
+			cstate = ((am_epaddr_t *) epaddr)->cstate_outgoing;
 			if (cstate == AMSH_CSTATE_OUTGOING_REPLIED) {
 				req->numep_left--;
-				AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *) epaddr,
-						   ESTABLISHED);
+				((am_epaddr_t *) epaddr)->cstate_outgoing =
+					AMSH_CSTATE_OUTGOING_ESTABLISHED;
 				req->epid_mask[i] = AMSH_CMASK_DONE;
 				continue;
 			}
@@ -1089,7 +1102,7 @@ amsh_ep_connreq_poll(ptl_t *ptl, struct ptl_connection_req *req)
 				if (shmidx == (uint16_t)-1) {
 					/* Couldn't find peer's epid in dirpage.
 					   Check shmdir to see if epid is up now. */
-					if ((err = psmi_shm_map_remote(ptl, epid, &shmidx))) {
+					if ((err = psmi_shm_map_remote(ptl_gen, epid, &shmidx, 0))) {
 						return err;
 					}
 					continue;
@@ -1122,28 +1135,32 @@ amsh_ep_connreq_poll(ptl_t *ptl, struct ptl_connection_req *req)
 				}
 				if (epaddr != NULL) {
 					psmi_assert(((am_epaddr_t *) epaddr)->
-						    _shmidx == shmidx);
+						    shmidx == shmidx);
 				} else
 				    if ((epaddr =
 					 psmi_epid_lookup(ptl->ep,
 							  epid)) == NULL) {
 					if ((err =
-					     amsh_epaddr_add(ptl, epid, shmidx,
+					     amsh_epaddr_add(ptl_gen, epid, shmidx,
 							     &epaddr))) {
 						return err;
 					}
+					/* Remote pid is unknown at the moment */
+					((am_epaddr_t *) epaddr)->pid =
+						AMSH_PID_UNKNOWN;
 				}
 				req->epaddr[i] = epaddr;
-				req->args[0].u32w0 = PSMI_AM_CONN_REQ;
+				req->args[0].u16w0 = PSMI_AM_CONN_REQ;
+				/* tell the other process its shmidx here */
+				req->args[0].u16w1 = shmidx;
 				req->args[0].u32w1 = ptl->connect_phase;
 				req->args[1].u64w0 = (uint64_t) ptl->epid;
-				/* tell the other process its shmidx here */
-				req->args[2].u16w0 = shmidx;
+				req->args[2].u32w0 = getpid();
 				req->args[2].u32w1 = PSM2_OK;
 				req->args[3].u64w0 =
 				    (uint64_t) (uintptr_t) &req->errors[i];
 				req->epid_mask[i] = AMSH_CMASK_POSTREQ;
-				psmi_amsh_short_request(ptl, epaddr,
+				psmi_amsh_short_request(ptl_gen, epaddr,
 							amsh_conn_handler_hidx,
 							req->args, 4, NULL, 0,
 							0);
@@ -1165,8 +1182,9 @@ amsh_ep_connreq_poll(ptl_t *ptl, struct ptl_connection_req *req)
 
 static
 psm2_error_t
-amsh_ep_connreq_fini(ptl_t *ptl, struct ptl_connection_req *req)
+amsh_ep_connreq_fini(ptl_t *ptl_gen, struct ptl_connection_req *req)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	psm2_error_t err = PSM2_OK;
 	int i;
 
@@ -1186,14 +1204,11 @@ amsh_ep_connreq_fini(ptl_t *ptl, struct ptl_connection_req *req)
 		else if (req->epid_mask[i] == AMSH_CMASK_POSTREQ) {
 			int cstate;
 			req->epid_mask[i] = AMSH_CMASK_DONE;
-			cstate =
-			    AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) (req->
-								epaddr[i]));
+			cstate = ((am_epaddr_t *) req->epaddr[i])->cstate_outgoing;
 			if (cstate == AMSH_CSTATE_OUTGOING_REPLIED) {
 				req->numep_left--;
-				AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *) (req->
-								    epaddr[i]),
-						   ESTABLISHED);
+				((am_epaddr_t *) req->epaddr[i])->cstate_outgoing =
+					AMSH_CSTATE_OUTGOING_ESTABLISHED;
 			} else {	/* never actually got reply */
 				req->errors[i] = PSM2_TIMEOUT;
 			}
@@ -1217,7 +1232,7 @@ amsh_ep_connreq_fini(ptl_t *ptl, struct ptl_connection_req *req)
 		err = psmi_error_cmp(err, req->errors[i]);
 		/* XXX TODO: Report errors in connection. */
 		/* Only free epaddr if they have disconnected from us */
-		int cstate = AMSH_CSTATE_INCOMING_GET((am_epaddr_t *) req->epaddr[i]);
+		int cstate = ((am_epaddr_t *) req->epaddr[i])->cstate_incoming;
 		if (cstate == AMSH_CSTATE_INCOMING_DISC_REQUESTED) {
 			if (req->op == PTL_OP_DISCONNECT || req->op == PTL_OP_ABORT) {
 				psmi_assert(req->epaddr[i] != NULL);
@@ -1238,13 +1253,14 @@ amsh_ep_connreq_fini(ptl_t *ptl, struct ptl_connection_req *req)
 #define CONNREQ_ZERO_POLLS_BEFORE_YIELD  20
 static
 psm2_error_t
-amsh_ep_connreq_wrap(ptl_t *ptl, int op,
+amsh_ep_connreq_wrap(ptl_t *ptl_gen, int op,
 		     int numep,
 		     const psm2_epid_t *array_of_epid,
 		     const int array_of_epid_mask[],
 		     psm2_error_t *array_of_errors,
 		     psm2_epaddr_t *array_of_epaddr, uint64_t timeout_ns)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	psm2_error_t err;
 	uint64_t t_start;
 	struct ptl_connection_req *req;
@@ -1262,7 +1278,7 @@ amsh_ep_connreq_wrap(ptl_t *ptl, int op,
 	}
 
 	/* Initialize */
-	err = amsh_ep_connreq_init(ptl, op, numep,
+	err = amsh_ep_connreq_init(ptl_gen, op, numep,
 				   array_of_epid, array_of_epid_mask,
 				   array_of_errors, array_of_epaddr, &req);
 	if (err != PSM2_OK_NO_PROGRESS)	/* Either we're all done with connect or
@@ -1276,7 +1292,7 @@ amsh_ep_connreq_wrap(ptl_t *ptl, int op,
 	t_start = get_cycles();
 	do {
 		psmi_poll_internal(ptl->ep, 1);
-		err = amsh_ep_connreq_poll(ptl, req);
+		err = amsh_ep_connreq_poll(ptl_gen, req);
 		if (err == PSM2_OK)
 			break;	/* Finished before timeout */
 		else if (err != PSM2_OK_NO_PROGRESS) {
@@ -1292,7 +1308,7 @@ amsh_ep_connreq_wrap(ptl_t *ptl, int op,
 	}
 	while (psmi_cycles_left(t_start, timeout_ns));
 
-	err = amsh_ep_connreq_fini(ptl, req);
+	err = amsh_ep_connreq_fini(ptl_gen, req);
 
 fail:
 	return err;
@@ -1376,8 +1392,9 @@ am_ctl_getslot_pkt_inner(volatile am_ctl_qhdr_t *shq, am_pkt_short_t *pkt0))
 
 PSMI_ALWAYS_INLINE(
 am_pkt_short_t *
-am_ctl_getslot_pkt(ptl_t *ptl, uint16_t shmidx, int is_reply))
+am_ctl_getslot_pkt(ptl_t *ptl_gen, uint16_t shmidx, int is_reply))
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	volatile am_ctl_qhdr_t *shq;
 	am_pkt_short_t *pkt0;
 	if (!is_reply) {
@@ -1392,8 +1409,9 @@ am_ctl_getslot_pkt(ptl_t *ptl, uint16_t shmidx, int is_reply))
 
 PSMI_ALWAYS_INLINE(
 am_pkt_bulk_t *
-am_ctl_getslot_long(ptl_t *ptl, uint16_t shmidx, int is_reply))
+am_ctl_getslot_long(ptl_t *ptl_gen, uint16_t shmidx, int is_reply))
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	volatile am_ctl_qhdr_t *shq;
 	am_pkt_bulk_t *pkt0;
 	if (!is_reply) {
@@ -1439,15 +1457,16 @@ PSMI_ALWAYS_INLINE(void advance_head(volatile am_ctl_qshort_cache_t *hdr))
  */
 PSMI_ALWAYS_INLINE(
 psm2_error_t
-amsh_poll_internal_inner(ptl_t *ptl, int replyonly,
+amsh_poll_internal_inner(ptl_t *ptl_gen, int replyonly,
 			 int is_internal))
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	psm2_error_t err = PSM2_OK_NO_PROGRESS;
 	/* poll replies */
 	if (!QISEMPTY(ptl->repH.head->flag)) {
 		do {
 			ips_sync_reads();
-			process_packet(ptl, (am_pkt_short_t *) ptl->repH.head,
+			process_packet(ptl_gen, (am_pkt_short_t *) ptl->repH.head,
 				       0);
 			advance_head(&ptl->repH);
 			err = PSM2_OK;
@@ -1458,13 +1477,13 @@ amsh_poll_internal_inner(ptl_t *ptl, int replyonly,
 		/* Request queue not enable for 2.0, will be re-enabled to support long
 		 * replies */
 		if (!is_internal && ptl->psmi_am_reqq_fifo.first != NULL) {
-			psmi_am_reqq_drain(ptl);
+			psmi_am_reqq_drain(ptl_gen);
 			err = PSM2_OK;
 		}
 		if (!QISEMPTY(ptl->reqH.head->flag)) {
 			do {
 				ips_sync_reads();
-				process_packet(ptl,
+				process_packet(ptl_gen,
 					       (am_pkt_short_t *) ptl->reqH.
 					       head, 1);
 				advance_head(&ptl->reqH);
@@ -1571,22 +1590,25 @@ am_send_pkt_short(ptl_t *ptl, uint32_t destidx, uint32_t returnidx,
 
 PSMI_ALWAYS_INLINE(
 int
-psmi_amsh_generic_inner(uint32_t amtype, ptl_t *ptl, psm2_epaddr_t epaddr,
+psmi_amsh_generic_inner(uint32_t amtype, ptl_t *ptl_gen, psm2_epaddr_t epaddr,
 			psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 			const void *src, size_t len, void *dst, int flags))
 {
+#ifdef PSM_DEBUG
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
+#endif
 	uint16_t type;
 	uint32_t bulkidx;
 	uint16_t hidx = (uint16_t) handler;
-	int destidx = ((am_epaddr_t *) epaddr)->_shmidx;
-	int returnidx = ((am_epaddr_t *) epaddr)->_return_shmidx;
+	int destidx = ((am_epaddr_t *) epaddr)->shmidx;
+	int returnidx = ((am_epaddr_t *) epaddr)->return_shmidx;
 	int is_reply = AM_IS_REPLY(amtype);
 	volatile am_pkt_bulk_t *bulkpkt;
 
 	_HFI_VDBG("%s epaddr=%s, shmidx=%d, type=%d\n",
 		  is_reply ? "reply" : "request",
 		  psmi_epaddr_get_name(epaddr->epid),
-		  ((am_epaddr_t *) epaddr)->_shmidx, amtype);
+		  ((am_epaddr_t *) epaddr)->shmidx, amtype);
 	psmi_assert(epaddr != ptl->epaddr);
 
 	switch (amtype) {
@@ -1603,9 +1625,9 @@ psmi_amsh_generic_inner(uint32_t amtype, ptl_t *ptl, psm2_epaddr_t epaddr,
 			psmi_assert(src != NULL || nargs > NSHORT_ARGS);
 			type = AMFMT_SHORT;
 
-			AMSH_POLL_UNTIL(ptl, is_reply,
+			AMSH_POLL_UNTIL(ptl_gen, is_reply,
 					(bulkpkt =
-					 am_ctl_getslot_long(ptl, destidx,
+					 am_ctl_getslot_long(ptl_gen, destidx,
 							     is_reply)) !=
 					NULL);
 
@@ -1622,7 +1644,7 @@ psmi_amsh_generic_inner(uint32_t amtype, ptl_t *ptl, psm2_epaddr_t epaddr,
 					    (uint32_t) len);
 			QMARKREADY(bulkpkt);
 		}
-		am_send_pkt_short(ptl, destidx, returnidx, bulkidx, type,
+		am_send_pkt_short(ptl_gen, destidx, returnidx, bulkidx, type,
 				  nargs, hidx, args, src, len, is_reply);
 		break;
 
@@ -1641,9 +1663,9 @@ psmi_amsh_generic_inner(uint32_t amtype, ptl_t *ptl, psm2_epaddr_t epaddr,
 				  (uint32_t) len, hidx);
 			while (bytes_left) {
 				bytes_this = min(bytes_left, AMLONG_MTU);
-				AMSH_POLL_UNTIL(ptl, is_reply,
+				AMSH_POLL_UNTIL(ptl_gen, is_reply,
 						(bulkpkt =
-						 am_ctl_getslot_long(ptl,
+						 am_ctl_getslot_long(ptl_gen,
 								     destidx,
 								     is_reply))
 						!= NULL);
@@ -1660,7 +1682,7 @@ psmi_amsh_generic_inner(uint32_t amtype, ptl_t *ptl, psm2_epaddr_t epaddr,
 						(uintptr_t) dst);
 				bulkpkt->len = bytes_this;
 				QMARKREADY(bulkpkt);
-				am_send_pkt_short(ptl, destidx, returnidx,
+				am_send_pkt_short(ptl_gen, destidx, returnidx,
 						  bulkidx, type, nargs, hidx,
 						  args, NULL, 0, is_reply);
 				src_this += bytes_this;
@@ -1722,14 +1744,16 @@ psmi_amsh_long_reply(amsh_am_token_t *tok,
 	return;
 }
 
-void psmi_am_reqq_init(ptl_t *ptl)
+void psmi_am_reqq_init(ptl_t *ptl_gen)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	ptl->psmi_am_reqq_fifo.first = NULL;
 	ptl->psmi_am_reqq_fifo.lastp = &ptl->psmi_am_reqq_fifo.first;
 }
 
-psm2_error_t psmi_am_reqq_drain(ptl_t *ptl)
+psm2_error_t psmi_am_reqq_drain(ptl_t *ptl_gen)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	am_reqq_t *reqn = ptl->psmi_am_reqq_fifo.first;
 	am_reqq_t *req;
 	psm2_error_t err = PSM2_OK_NO_PROGRESS;
@@ -1759,10 +1783,11 @@ psm2_error_t psmi_am_reqq_drain(ptl_t *ptl)
 }
 
 void
-psmi_am_reqq_add(int amtype, ptl_t *ptl, psm2_epaddr_t epaddr,
+psmi_am_reqq_add(int amtype, ptl_t *ptl_gen, psm2_epaddr_t epaddr,
 		 psm2_handler_t handler, psm2_amarg_t *args, int nargs,
 		 void *src, size_t len, void *dest, int amflags)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	int i;
 	int flags = 0;
 	am_reqq_t *nreq =
@@ -1777,7 +1802,7 @@ psmi_am_reqq_add(int amtype, ptl_t *ptl, psm2_epaddr_t epaddr,
 	psmi_assert(nargs <= 8);
 	nreq->next = NULL;
 	nreq->amtype = amtype;
-	nreq->ptl = ptl;
+	nreq->ptl = ptl_gen;
 	nreq->epaddr = epaddr;
 	nreq->handler = handler;
 	for (i = 0; i < nargs; i++)
@@ -1803,8 +1828,9 @@ psmi_am_reqq_add(int amtype, ptl_t *ptl, psm2_epaddr_t epaddr,
 }
 
 static
-void process_packet(ptl_t *ptl, am_pkt_short_t *pkt, int isreq)
+void process_packet(ptl_t *ptl_gen, am_pkt_short_t *pkt, int isreq)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	amsh_am_token_t tok;
 	psmi_handler_fn_t fn;
 	psm2_amarg_t *args = pkt->args;
@@ -1812,7 +1838,7 @@ void process_packet(ptl_t *ptl, am_pkt_short_t *pkt, int isreq)
 	int nargs = pkt->nargs;
 
 	tok.tok.epaddr_incoming = ((shmidx != (uint16_t)-1) ? ptl->am_ep[shmidx].epaddr : 0);
-	tok.ptl = ptl;
+	tok.ptl = ptl_gen;
 	tok.mq = ptl->ep->mq;
 	tok.shmidx = shmidx;
 
@@ -1937,12 +1963,21 @@ amsh_mq_rndv(ptl_t *ptl, psm2_mq_t mq, psm2_mq_req_t req,
 		 * handle and send it as payload in the RTS
 		 */
 		if (req->is_buf_gpu_mem) {
-			PSMI_CUDA_CALL(cudaIpcGetMemHandle,
-				      (cudaIpcMemHandle_t *) &req->cuda_ipc_handle,
-				      (void*) buf);
+			CUdeviceptr buf_base_ptr;
+			PSMI_CUDA_CALL(cuMemGetAddressRange, &buf_base_ptr, NULL, (CUdeviceptr)buf);
+
+			/* Offset in GPU buffer from which we copy data, we have to
+			 * send it separetly because this offset is lost
+			 * when cuIpcGetMemHandle  is called */
+			req->send_msgoff = buf - (void*)buf_base_ptr;
+			args[2].u32w0 = (uint32_t)req->send_msgoff;
+
+			PSMI_CUDA_CALL(cuIpcGetMemHandle,
+				      &req->cuda_ipc_handle,
+				      (CUdeviceptr) buf);
 			psmi_amsh_short_request(ptl, epaddr, mq_handler_hidx,
 						args, 5, (void*)&req->cuda_ipc_handle,
-						sizeof(cudaIpcMemHandle_t), 0);
+						sizeof(CUipcMemHandle), 0);
 			req->cuda_ipc_handle_attached = 1;
 		} else
 			psmi_amsh_short_request(ptl, epaddr, mq_handler_hidx,
@@ -2119,8 +2154,8 @@ amsh_mq_send(psm2_mq_t mq, psm2_epaddr_t epaddr, uint32_t flags,
 /* kassist-related handling */
 int psmi_epaddr_pid(psm2_epaddr_t epaddr)
 {
-	uint16_t shmidx = ((am_epaddr_t *) epaddr)->_shmidx;
-	return epaddr->ptlctl->ptl->am_ep[shmidx].pid;
+	uint16_t shmidx = ((am_epaddr_t *) epaddr)->shmidx;
+	return ((struct ptl_am *)(epaddr->ptlctl->ptl))->am_ep[shmidx].pid;
 }
 #if _HFI_DEBUGGING
 static
@@ -2176,7 +2211,7 @@ int psmi_get_kassist_mode()
  *
  * arg0 => conn_op, result (PSM error type)
  * arg1 => epid (always)
- * arg2 => version.
+ * arg2 => pid, version.
  * arg3 => pointer to error for replies.
  */
 static
@@ -2184,18 +2219,21 @@ void
 amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 		  size_t len)
 {
-	int op = args[0].u32w0;
+	int op = args[0].u16w0;
 	int phase = args[0].u32w1;
 	psm2_epid_t epid = args[1].u64w0;
-	int16_t return_shmidx = args[2].u16w0;
+	int16_t return_shmidx = args[0].u16w1;
 	psm2_error_t err = (psm2_error_t) args[2].u32w1;
 	psm2_error_t *perr = (psm2_error_t *) (uintptr_t) args[3].u64w0;
+	int pid = args[2].u32w0;
+	int force_remap = 0;
 
 	psm2_epaddr_t epaddr;
 	amsh_am_token_t *tok = (amsh_am_token_t *) toki;
 	uint16_t shmidx = tok->shmidx;
 	int is_valid;
-	ptl_t *ptl = tok->ptl;
+	struct ptl_am *ptl = (struct ptl_am *)(tok->ptl);
+	ptl_t *ptl_gen = tok->ptl;
 	int cstate;
 
 	/* We do this because it's an assumption below */
@@ -2203,16 +2241,28 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 
 	_HFI_VDBG("Conn op=%d, phase=%d, epid=%llx, err=%d\n",
 		  op, phase, (unsigned long long)epid, err);
+
 	switch (op) {
 	case PSMI_AM_CONN_REQ:
 		_HFI_VDBG("Connect from %d:%d\n",
 			  (int)psm2_epid_nid(epid), (int)psm2_epid_context(epid));
 		epaddr = psmi_epid_lookup(ptl->ep, epid);
+		if (epaddr && ((am_epaddr_t *) epaddr)->pid != pid) {
+			/* If old pid is unknown consider new pid the correct one */
+			if (((am_epaddr_t *) epaddr)->pid == AMSH_PID_UNKNOWN) {
+				((am_epaddr_t *) epaddr)->pid = pid;
+			} else {
+				psmi_epid_remove(ptl->ep, epid);
+				epaddr = NULL;
+				force_remap = 1;
+			}
+		}
+
 		if (shmidx == (uint16_t)-1) {
 			/* incoming packet will never be from our shmidx slot 0
 			   thus the other process doesn't know our return info.
 			   attach_to will lookup or create the proper shmidx */
-			if ((err = psmi_shm_map_remote(ptl, epid, &shmidx))) {
+			if ((err = psmi_shm_map_remote(ptl_gen, epid, &shmidx, force_remap))) {
 				psmi_handle_error(PSMI_EP_NORETURN, err,
 						  "Fatal error in "
 						  "connecting to shm segment");
@@ -2224,7 +2274,7 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 		if (epaddr == NULL) {
 			uintptr_t args_segoff =
 				(uintptr_t) args - ptl->self_nodeinfo->amsh_shmbase;
-			if ((err = amsh_epaddr_add(ptl, epid, shmidx, &epaddr)))
+			if ((err = amsh_epaddr_add(ptl_gen, epid, shmidx, &epaddr)))
 				/* Unfortunately, no way out of here yet */
 				psmi_handle_error(PSMI_EP_NORETURN, err,
 						  "Fatal error "
@@ -2232,17 +2282,21 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			args =
 			    (psm2_amarg_t *) (ptl->self_nodeinfo->amsh_shmbase +
 					     args_segoff);
+
+			((am_epaddr_t *) epaddr)->pid = pid;
 		}
 
 		/* Rewrite args */
 		ptl->connect_incoming++;
-		args[0].u32w0 = PSMI_AM_CONN_REP;
-		args[1].u64w0 = (psm2_epid_t) ptl->epid;
+		args[0].u16w0 = PSMI_AM_CONN_REP;
 		/* and return our shmidx for the connecting process */
-		args[2].u16w0 = shmidx;
+		args[0].u16w1 = shmidx;
+		args[1].u64w0 = (psm2_epid_t) ptl->epid;
+		args[2].u32w0 = getpid();
 		args[2].u32w1 = PSM2_OK;
-		AMSH_CSTATE_INCOMING_SET((am_epaddr_t *) epaddr, ESTABLISHED);
-		((am_epaddr_t *)epaddr)->_return_shmidx = return_shmidx;
+		((am_epaddr_t *) epaddr)->cstate_incoming =
+			AMSH_CSTATE_INCOMING_ESTABLISHED;
+		((am_epaddr_t *) epaddr)->return_shmidx = return_shmidx;
 		tok->tok.epaddr_incoming = epaddr;	/* adjust token */
 		psmi_amsh_short_reply(tok, amsh_conn_handler_hidx,
 				      args, narg, NULL, 0, 0);
@@ -2264,8 +2318,9 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			break;
 
 		*perr = err;
-		AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *) epaddr, REPLIED);
-		((am_epaddr_t *)epaddr)->_return_shmidx = return_shmidx;
+		((am_epaddr_t *) epaddr)->cstate_outgoing
+			= AMSH_CSTATE_OUTGOING_REPLIED;
+		((am_epaddr_t *) epaddr)->return_shmidx = return_shmidx;
 		ptl->connect_outgoing++;
 		_HFI_VDBG("CCC epaddr=%s connected to ptl=%p\n",
 			  psmi_epaddr_get_name(epaddr->epid), ptl);
@@ -2277,9 +2332,10 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			_HFI_VDBG("Dropping disconnect request from an epid that we are not connected to\n");
 			return;
 		}
-		args[0].u32w0 = PSMI_AM_DISC_REP;
+		args[0].u16w0 = PSMI_AM_DISC_REP;
 		args[2].u32w1 = PSM2_OK;
-		AMSH_CSTATE_INCOMING_SET((am_epaddr_t *) epaddr, DISC_REQUESTED);
+		((am_epaddr_t *) epaddr)->cstate_incoming =
+			AMSH_CSTATE_INCOMING_DISC_REQUESTED;
 		ptl->connect_incoming--;
 		/* Before sending the reply, make sure the process
 		 * is still connected */
@@ -2298,7 +2354,7 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			* already disconnected with the other node
 			* or have sent a disconnect request.
 			*/
-			cstate = AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) epaddr);
+			cstate = ((am_epaddr_t *) epaddr)->cstate_outgoing;
 			if (cstate == AMSH_CSTATE_OUTGOING_DISC_REQUESTED) {
 				err = psmi_do_unmap(ptl->am_ep[shmidx].amsh_shmbase);
 				psmi_epid_remove(epaddr->ptlctl->ep, epaddr->epid);
@@ -2313,7 +2369,8 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 		}
 		*perr = err;
 		epaddr = tok->tok.epaddr_incoming;
-		AMSH_CSTATE_OUTGOING_SET((am_epaddr_t *) epaddr, DISC_REPLIED);
+		((am_epaddr_t *) epaddr)->cstate_outgoing =
+			AMSH_CSTATE_OUTGOING_DISC_REPLIED;
 		ptl->connect_outgoing--;
 		break;
 
@@ -2329,7 +2386,7 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 static
 size_t amsh_sizeof(void)
 {
-	return sizeof(ptl_t);
+	return sizeof(struct ptl_am);
 }
 
 /* Fill in AM capabilities parameters */
@@ -2356,8 +2413,9 @@ psmi_amsh_am_get_parameters(psm2_ep_t ep, struct psm2_am_parameters *parameters)
  */
 static
 psm2_error_t
-amsh_init(psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
+amsh_init(psm2_ep_t ep, ptl_t *ptl_gen, ptl_ctl_t *ctl)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	psm2_error_t err = PSM2_OK;
 
 	/* Preconditions */
@@ -2391,7 +2449,7 @@ amsh_init(psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 	}
 	memset(ptl->am_ep, 0, ptl->am_ep_size * sizeof(struct am_ctl_nodeinfo));
 
-	if ((err = amsh_init_segment(ptl)))
+	if ((err = amsh_init_segment(ptl_gen)))
 		goto fail;
 
 	ptl->self_nodeinfo->psm_verno = PSMI_VERNO;
@@ -2418,12 +2476,12 @@ amsh_init(psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 	ips_mb();
 	ptl->self_nodeinfo->is_init = 1;
 
-	psmi_am_reqq_init(ptl);
+	psmi_am_reqq_init(ptl_gen);
 	memset(ctl, 0, sizeof(*ctl));
 
 	/* Fill in the control structure */
 	ctl->ep = ep;
-	ctl->ptl = ptl;
+	ctl->ptl = ptl_gen;
 	ctl->ep_poll = amsh_poll;
 	ctl->ep_connect = amsh_ep_connect;
 	ctl->ep_disconnect = amsh_ep_disconnect;
@@ -2464,8 +2522,9 @@ fail:
 	return err;
 }
 
-static psm2_error_t amsh_fini(ptl_t *ptl, int force, uint64_t timeout_ns)
+static psm2_error_t amsh_fini(ptl_t *ptl_gen, int force, uint64_t timeout_ns)
 {
+	struct ptl_am *ptl = (struct ptl_am *)ptl_gen;
 	struct psmi_eptab_iterator itor;
 	psm2_epaddr_t epaddr;
 	psm2_error_t err = PSM2_OK;
@@ -2482,9 +2541,9 @@ static psm2_error_t amsh_fini(ptl_t *ptl, int force, uint64_t timeout_ns)
 
 		psmi_epid_itor_init(&itor, ptl->ep);
 		while ((epaddr = psmi_epid_itor_next(&itor))) {
-			if (epaddr->ptlctl->ptl != ptl)
+			if (epaddr->ptlctl->ptl != ptl_gen)
 				continue;
-			if (AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) epaddr) ==
+			if (((am_epaddr_t *) epaddr)->cstate_outgoing ==
 			    AMSH_CSTATE_OUTGOING_ESTABLISHED)
 				num_disc++;
 		}
@@ -2512,9 +2571,9 @@ static psm2_error_t amsh_fini(ptl_t *ptl, int force, uint64_t timeout_ns)
 		}
 		psmi_epid_itor_init(&itor, ptl->ep);
 		while ((epaddr = psmi_epid_itor_next(&itor))) {
-			if (epaddr->ptlctl->ptl == ptl) {
-				if (AMSH_CSTATE_OUTGOING_GET((am_epaddr_t *) epaddr)
-				    == AMSH_CSTATE_OUTGOING_ESTABLISHED) {
+			if (epaddr->ptlctl->ptl == ptl_gen) {
+				if (((am_epaddr_t *) epaddr)->cstate_outgoing ==
+				    AMSH_CSTATE_OUTGOING_ESTABLISHED) {
 					mask[i] = 1;
 					epaddr_array[i] = epaddr;
 					i++;
@@ -2523,7 +2582,7 @@ static psm2_error_t amsh_fini(ptl_t *ptl, int force, uint64_t timeout_ns)
 		}
 		psmi_epid_itor_fini(&itor);
 		psmi_assert(i == num_disc && num_disc > 0);
-		err = amsh_ep_disconnect(ptl, force, num_disc, epaddr_array,
+		err = amsh_ep_disconnect(ptl_gen, force, num_disc, epaddr_array,
 					 mask, errs, timeout_ns);
 		psmi_free(mask);
 		psmi_free(errs);
@@ -2544,7 +2603,7 @@ static psm2_error_t amsh_fini(ptl_t *ptl, int force, uint64_t timeout_ns)
 		_HFI_VDBG("CCC complete disconnect from=%d,to=%d\n",
 			  ptl->connect_incoming, ptl->connect_outgoing);
 
-	if ((err_seg = psmi_shm_detach(ptl))) {
+	if ((err_seg = psmi_shm_detach(ptl_gen))) {
 		err = err_seg;
 		goto fail;
 	}

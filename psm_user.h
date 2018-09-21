@@ -56,6 +56,7 @@
 #ifndef _PSMI_USER_H
 #define _PSMI_USER_H
 
+#include "psm_config.h"
 #include <inttypes.h>
 #include <pthread.h>
 
@@ -72,51 +73,17 @@
 #include "opa_user.h"
 #include "opa_queue.h"
 
-#ifdef PSM_VALGRIND
-#include <valgrind/valgrind.h>
-#include <valgrind/memcheck.h>
-#endif
-
 #include "psm_log.h"
 #include "psm_perf.h"
 
-#ifdef PSM_VALGRIND
-#define PSM_VALGRIND_REDZONE_SZ	     8
-#define PSM_VALGRIND_DEFINE_MQ_RECV(buf, posted_len, recv_len)	do {	\
-	    VALGRIND_MAKE_MEM_DEFINED((void *)(buf), (posted_len));	\
-	    if ((recv_len) < (posted_len))				\
-		VALGRIND_MAKE_MEM_UNDEFINED(				\
-		(void *) ((uintptr_t) (buf) + (recv_len)),		\
-		(posted_len) - (recv_len));				\
-	    } while (0)
-
-#else
-#define PSM_VALGRIND_REDZONE_SZ	     0
-#define PSM_VALGRIND_DEFINE_MQ_RECV(buf, posted_len, recv_len)
-#define VALGRIND_CREATE_MEMPOOL(ARG1,ARG2,ARG3)
-#define VALGRIND_MAKE_MEM_DEFINED(ARG1,ARG2)
-#define VALGRIND_DESTROY_MEMPOOL(ARG1)
-#define VALGRIND_MEMPOOL_ALLOC(ARG1,ARG2,ARG3)
-#define VALGRIND_MEMPOOL_FREE(ARG1,ARG2)
-#define VALGRIND_MAKE_MEM_NOACCESS(ARG1,ARG2)
-#endif
-
-/* Parameters for use in valgrind's "is_zeroed" */
-#define PSM_VALGRIND_MEM_DEFINED     1
-#define PSM_VALGRIND_MEM_UNDEFINED   0
-
 #define PSMI_LOCK_NO_OWNER	((pthread_t)(-1))
 
-#ifdef PSM_DEBUG
-#define PSMI_LOCK_IS_MUTEXLOCK_DEBUG
-#else
-#define PSMI_LOCK_IS_SPINLOCK
-/* #define PSMI_LOCK_IS_MUTEXLOCK */
-/* #define PSMI_LOCK_IS_MUTEXLOCK_DEBUG */
-/* #define PSMI_PLOCK_IS_NOLOCK */
-#endif
-
 #define _PSMI_IN_USER_H
+
+/* Opaque hw context pointer used in HAL,
+   and defined by each HAL instance. */
+typedef void *psmi_hal_hw_context;
+
 #include "psm_help.h"
 #include "psm_error.h"
 #include "psm_context.h"
@@ -127,6 +94,7 @@
 #include "psm_lock.h"
 #include "psm_stats.h"
 #include "psm2_mock_testing.h"
+
 #undef _PSMI_IN_USER_H
 
 #define PSMI_VERNO_MAKE(major, minor) ((((major)&0xff)<<8)|((minor)&0xff))
@@ -157,12 +125,6 @@ extern sem_t *sem_affinity_shm_rw;
 extern int psmi_affinity_semaphore_open;
 extern char *sem_affinity_shm_rw_name;
 
-#define AFFINITY_SHM_BASENAME			"/psm2_hfi_affinity_shm"
-#define AFFINITY_SHMEMSIZE			sysconf(_SC_PAGE_SIZE)
-#define AFFINITY_SHM_REF_COUNT_LOCATION		0
-#define AFFINITY_SHM_HFI_INDEX_LOCATION		1
-#define SEM_AFFINITY_SHM_RW_BASENAME		"/psm2_hfi_affinity_shm_rw_mutex"
-
 PSMI_ALWAYS_INLINE(
 int
 _psmi_get_epid_version()) {
@@ -184,24 +146,10 @@ _psmi_get_epid_version()) {
 							   : (int)PSMI_EPID_GET_LID_V2(epid)
 
 #define PSMI_GET_SUBNET_ID(gid_hi) (gid_hi & 0xffff)
-/*
- * Default setting for Receive thread
- *
- *   0 disables rcvthread by default
- * 0x1 enables ips receive thread by default
- */
-#define PSMI_RCVTHREAD_FLAGS	0x1
 
 /*
- * Define one of these below.
- *
- * Spinlock gives the best performance and makes sense with the progress thread
- * only because the progress thread does a "trylock" and then goes back to
- * sleep in a poll.
- *
- * Mutexlock should be used for experimentation while the more useful
- * mutexlock-debug should be enabled during development to catch potential
- * errors.
+ * Following is the definition of various lock implementations. The choice is
+ * made by defining specific lock type in relevant section of psm_config.h
  */
 #ifdef PSMI_LOCK_IS_SPINLOCK
 #define _PSMI_LOCK_INIT(pl)	psmi_spin_init(&((pl).lock))
@@ -344,60 +292,63 @@ void psmi_profile_reblock(int did_no_progress) __attribute__ ((weak));
 
 #ifdef PSM_CUDA
 #include <cuda.h>
-#include <cuda_runtime.h>
 #include <driver_types.h>
 
-#if CUDART_VERSION < 4010
-#error Please update CUDA runtime, required minimum version is 4.1
+#if CUDA_VERSION < 7000
+#error Please update CUDA driver, required minimum version is 7.0
 #endif
 
 extern int is_cuda_enabled;
 extern int is_gdr_copy_enabled;
 extern int device_support_gpudirect;
-extern int cuda_runtime_version;
+extern int cuda_lib_version;
 
 extern CUcontext ctxt;
-void *psmi_cudart_lib;
 void *psmi_cuda_lib;
+CUresult (*psmi_cuInit)(unsigned int  Flags );
+CUresult (*psmi_cuCtxDetach)(CUcontext c);
+CUresult (*psmi_cuCtxSetCurrent)(CUcontext c);
 CUresult (*psmi_cuCtxGetCurrent)(CUcontext *c);
 CUresult (*psmi_cuCtxSetCurrent)(CUcontext c);
 CUresult (*psmi_cuPointerGetAttribute)(void *data, CUpointer_attribute pa, CUdeviceptr p);
 CUresult (*psmi_cuPointerSetAttribute)(void *data, CUpointer_attribute pa, CUdeviceptr p);
 CUresult (*psmi_cuDeviceGet)(CUdevice* device, int  ordinal);
 CUresult (*psmi_cuDeviceGetAttribute)(int* pi, CUdevice_attribute attrib, CUdevice dev);
-cudaError_t (*psmi_cudaRuntimeGetVersion)(int *runtime_version);
-cudaError_t (*psmi_cudaGetDeviceCount)(int *n);
-cudaError_t (*psmi_cudaGetDevice)(int *n);
-cudaError_t (*psmi_cudaSetDevice)(int n);
-cudaError_t (*psmi_cudaStreamCreate)(cudaStream_t *s);
-cudaError_t (*psmi_cudaStreamCreateWithFlags)(cudaStream_t *s, unsigned f);
-cudaError_t (*psmi_cudaStreamSynchronize)(cudaStream_t s);
-cudaError_t (*psmi_cudaDeviceSynchronize)();
-cudaError_t (*psmi_cudaEventCreate)(cudaEvent_t *event);
-cudaError_t (*psmi_cudaEventDestroy)(cudaEvent_t event);
-cudaError_t (*psmi_cudaEventQuery)(cudaEvent_t event);
-cudaError_t (*psmi_cudaEventRecord)(cudaEvent_t event, cudaStream_t stream);
-cudaError_t (*psmi_cudaEventSynchronize)(cudaEvent_t event);
-cudaError_t (*psmi_cudaMemcpy)(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind);
-cudaError_t (*psmi_cudaMemcpyAsync)(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, cudaStream_t s);
-cudaError_t (*psmi_cudaMalloc)(void **devPtr, size_t size);
-cudaError_t (*psmi_cudaHostAlloc)(void **devPtr, size_t size, unsigned int flags);
-cudaError_t (*psmi_cudaFreeHost)(void *ptr);
+CUresult (*psmi_cuDriverGetVersion)(int* driverVersion);
+CUresult (*psmi_cuDeviceGetCount)(int* count);
+CUresult (*psmi_cuStreamCreate)(CUstream* phStream, unsigned int Flags);
+CUresult (*psmi_cuEventCreate)(CUevent* phEvent, unsigned int Flags);
+CUresult (*psmi_cuEventDestroy)(CUevent hEvent);
+CUresult (*psmi_cuEventQuery)(CUevent hEvent);
+CUresult (*psmi_cuEventRecord)(CUevent hEvent, CUstream hStream);
+CUresult (*psmi_cuEventSynchronize)(CUevent hEvent);
+CUresult (*psmi_cuMemHostAlloc)(void** pp, size_t bytesize, unsigned int Flags);
+CUresult (*psmi_cuMemFreeHost)(void* p);
+CUresult (*psmi_cuMemcpy)(CUdeviceptr dst, CUdeviceptr src, size_t ByteCount);
+CUresult (*psmi_cuMemcpyDtoD)(CUdeviceptr dstDevice, CUdeviceptr srcDevice, size_t ByteCount);
+CUresult (*psmi_cuMemcpyDtoH)(void* dstHost, CUdeviceptr srcDevice, size_t ByteCount);
+CUresult (*psmi_cuMemcpyHtoD)(CUdeviceptr dstDevice, const void* srcHost, size_t ByteCount);
+CUresult (*psmi_cuMemcpyDtoHAsync)(void* dstHost, CUdeviceptr srcDevice, size_t ByteCount, CUstream hStream);
+CUresult (*psmi_cuMemcpyHtoDAsync)(CUdeviceptr dstDevice, const void* srcHost, size_t ByteCount, CUstream hStream);
+CUresult (*psmi_cuIpcGetMemHandle)(CUipcMemHandle* pHandle, CUdeviceptr dptr);
+CUresult (*psmi_cuIpcOpenMemHandle)(CUdeviceptr* pdptr, CUipcMemHandle handle, unsigned int Flags);
+CUresult (*psmi_cuIpcCloseMemHandle)(CUdeviceptr dptr);
+CUresult (*psmi_cuMemGetAddressRange)(CUdeviceptr* pbase, size_t* psize, CUdeviceptr dptr);
+CUresult (*psmi_cuDevicePrimaryCtxGetState)(CUdevice dev, unsigned int* flags, int* active);
+CUresult (*psmi_cuDevicePrimaryCtxRetain)(CUcontext* pctx, CUdevice dev);
+CUresult (*psmi_cuCtxGetDevice)(CUdevice* device);
+CUresult (*psmi_cuDevicePrimaryCtxRelease)(CUdevice device);
 
-cudaError_t (*psmi_cudaIpcGetMemHandle)(cudaIpcMemHandle_t* handle, void* devPtr);
-cudaError_t (*psmi_cudaIpcOpenMemHandle)(void** devPtr, cudaIpcMemHandle_t handle, unsigned int  flags);
-cudaError_t (*psmi_cudaIpcCloseMemHandle)(void* devPtr);
-
-#define PSMI_CUDA_DRIVER_API_CALL(func, args...) do {			\
+#define PSMI_CUDA_CALL(func, args...) do {				\
 		CUresult cudaerr;					\
 		cudaerr = psmi_##func(args);				\
 		if (cudaerr != CUDA_SUCCESS) {				\
 			if (ctxt == NULL)				\
 				_HFI_ERROR(				\
-				"Check if cuda runtime is initialized"	\
-				"before psm2_ep_open call \n");	\
+				"Check if CUDA is initialized"	\
+				"before psm2_ep_open call \n");		\
 			_HFI_ERROR(					\
-				"CUDA failure: %s() (at %s:%d)"	\
+				"CUDA failure: %s() (at %s:%d)"		\
 				"returned %d\n",			\
 				#func, __FILE__, __LINE__, cudaerr);	\
 			psmi_handle_error(				\
@@ -406,31 +357,13 @@ cudaError_t (*psmi_cudaIpcCloseMemHandle)(void* devPtr);
 		}							\
 	} while (0)
 
-#define PSMI_CUDA_CALL(func, args...) do {				\
-		cudaError_t cudaerr;					\
-		cudaerr = psmi_##func(args);				\
-		if (cudaerr != cudaSuccess) {				\
-			if (ctxt == NULL)				\
-				_HFI_ERROR(				\
-				"Check if cuda runtime is initialized"	\
-				"before psm2_ep_open call \n");	\
-			_HFI_ERROR(					\
-				"CUDA failure: %s() (at %s:%d)"	\
-				"returned %d\n",			\
-				#func, __FILE__, __LINE__, cudaerr);    \
-			psmi_handle_error(				\
-				PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,	\
-				"Error returned from CUDA function.\n");\
-		}							\
-	} while (0)
-
 #define PSMI_CUDA_CHECK_EVENT(event, cudaerr) do {			\
-		cudaerr = psmi_cudaEventQuery(event);			\
-		if ((cudaerr != cudaSuccess) &&			        \
-		    (cudaerr != cudaErrorNotReady)) {			\
+		cudaerr = psmi_cuEventQuery(event);			\
+		if ((cudaerr != CUDA_SUCCESS) &&			\
+		    (cudaerr != CUDA_ERROR_NOT_READY)) {		\
 			_HFI_ERROR(					\
 				"CUDA failure: %s() returned %d\n",	\
-				"cudaEventQuery", cudaerr);		\
+				"cuEventQuery", cudaerr);		\
 			psmi_handle_error(				\
 				PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,	\
 				"Error returned from CUDA function.\n");\
@@ -480,8 +413,6 @@ _psmi_is_gdr_copy_enabled())
 #define PSMI_IS_GDR_COPY_ENABLED _psmi_is_gdr_copy_enabled()
 
 #define PSMI_IS_CUDA_MEM(p) _psmi_is_cuda_mem(p)
-/* XXX TODO: Getting the gpu page size from driver at init time */
-#define PSMI_GPU_PAGESIZE 65536
 
 struct ips_cuda_hostbuf {
 	STAILQ_ENTRY(ips_cuda_hostbuf) req_next;
@@ -491,9 +422,10 @@ struct ips_cuda_hostbuf {
 	 * pulled from a mpool or dynamically
 	 * allocated using calloc. */
 	uint8_t is_tempbuf;
-	cudaEvent_t copy_status;
+	CUevent copy_status;
 	psm2_mq_req_t req;
-	void *host_buf, *gpu_buf;
+	void *host_buf;
+	CUdeviceptr gpu_buf;
 };
 
 struct ips_cuda_hostbuf_mpool_cb_context {
@@ -512,10 +444,6 @@ void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *context, void *obj);
 	    .mode[PSMI_MEMMODE_LARGE]   = {  32, 512 }		\
 	}
 
-#define CUDA_SMALLHOSTBUF_SZ	(256*1024)
-#define CUDA_WINDOW_PREFETCH_DEFAULT	2
-#define GPUDIRECT_THRESH_RV 3
-
 extern uint32_t gpudirect_send_threshold;
 extern uint32_t gpudirect_recv_threshold;
 extern uint32_t cuda_thresh_rndv;
@@ -530,17 +458,9 @@ extern uint32_t gdr_copy_threshold_send;
  */
 extern uint32_t gdr_copy_threshold_recv;
 
-#define GDR_COPY_THRESH_SEND 32
-#define GDR_COPY_THRESH_RECV 64000
-
 #define PSMI_USE_GDR_COPY(req, len) req->is_buf_gpu_mem &&       \
 				    PSMI_IS_GDR_COPY_ENABLED  && \
 				    len >=1 && len <= gdr_copy_threshold_recv
-
-/* All GPU transfers beyond this threshold use
- * RNDV protocol. It is mostly a send side knob.
- */
-#define CUDA_THRESH_RNDV 32768
 
 enum psm2_chb_match_type {
 	/* Complete data found in a single chb */
@@ -554,4 +474,7 @@ enum psm2_chb_match_type {
 typedef enum psm2_chb_match_type psm2_chb_match_type_t;
 
 #endif /* PSM_CUDA */
+
+#define COMPILE_TIME_ASSERT(NAME,COND) extern char NAME[1/ COND]
+
 #endif /* _PSMI_USER_H */

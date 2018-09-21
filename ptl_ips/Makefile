@@ -55,14 +55,15 @@ OUTDIR = .
 
 this_srcdir = $(shell readlink -m .)
 top_srcdir := $(this_srcdir)/..
-INCLUDES += -I$(top_srcdir)
+INCLUDES += -I$(top_srcdir) -I$(top_srcdir)/ptl_ips
 
 ${TARGLIB}-objs := ptl.o ptl_rcvthread.o ips_proto.o ipserror.o ips_recvq.o \
-		   ips_recvhdrq.o ips_spio.o ips_proto_recv.o ips_proto_connect.o \
-		   ips_proto_dump.o ips_proto_mq.o ips_subcontext.o \
+		   ips_recvhdrq.o ips_proto_recv.o ips_proto_connect.o \
+		   ips_proto_dump.o ips_proto_mq.o \
 		   ips_writehdrq.o ips_proto_expected.o ips_tid.o \
 		   ips_scb.o ips_proto_am.o ips_opp_path_rec.o ips_tidflow.o \
 		   ips_epstate.o ips_crc32.o ips_path_rec.o ips_tidcache.o
+
 ${TARGLIB}-objs := $(patsubst %.o, $(OUTDIR)/%.o, ${${TARGLIB}-objs})
 
 DEPS := $(${TARGLIB}-objs:.o=.d)

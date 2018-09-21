@@ -66,8 +66,8 @@ struct _cl_map_item;
 typedef struct
 {
 	unsigned long		start;		 /* start virtual address */
-	cudaIpcMemHandle_t      cuda_ipc_handle; /* cuda ipc mem handle */
-	void*			cuda_ipc_dev_ptr;/* Cuda device pointer */
+	CUipcMemHandle		cuda_ipc_handle; /* cuda ipc mem handle */
+	CUdeviceptr		cuda_ipc_dev_ptr;/* Cuda device pointer */
 	uint16_t		length;	 /* length*/
 	psm2_epid_t             epid;
 	struct _cl_map_item*	i_prev;	 /* idle queue previous */
@@ -109,11 +109,11 @@ psm2_error_t am_cuda_memhandle_mpool_init(uint32_t memcache_size);
 
 psm2_error_t am_cuda_memhandle_cache_map_init();
 
-void*
-am_cuda_memhandle_acquire(uintptr_t sbuf, cudaIpcMemHandle_t* handle,
+CUdeviceptr
+am_cuda_memhandle_acquire(uintptr_t sbuf, CUipcMemHandle* handle,
 				uint32_t length, psm2_epid_t epid);
 void
-am_cuda_memhandle_release(void* cuda_ipc_dev_ptr);
+am_cuda_memhandle_release(CUdeviceptr cuda_ipc_dev_ptr);
 
 void psmi_cuda_memhandle_cache_alloc_func(int is_alloc, void* context, void* obj);
 

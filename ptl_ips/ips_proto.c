@@ -60,11 +60,13 @@
 #include <assert.h>
 #include <sys/uio.h>		/* writev */
 #include "psm_user.h"
+#include "psm2_hal.h"
 #include "ipserror.h"
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
 #include "ips_proto_help.h"
 #include "psmi_wrappers.h"
+#include "psm_mq_internal.h"
 
 #ifdef PSM_CUDA
 #include "psm_gdrcpy.h"
@@ -102,15 +104,15 @@ void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *context, void *obj)
 
 	icb = (struct ips_cuda_hostbuf *)obj;
 	if (is_alloc) {
-		PSMI_CUDA_CALL(cudaHostAlloc,
+		PSMI_CUDA_CALL(cuMemHostAlloc,
 			       (void **) &icb->host_buf,
 			       ctxt->bufsz,
-			       cudaHostAllocPortable);
-		PSMI_CUDA_CALL(cudaEventCreate, &icb->copy_status);
+			       CU_MEMHOSTALLOC_PORTABLE);
+		PSMI_CUDA_CALL(cuEventCreate, &icb->copy_status, CU_EVENT_DEFAULT);
 	} else {
 		if (icb->host_buf) {
-			PSMI_CUDA_CALL(cudaFreeHost, icb->host_buf);
-			PSMI_CUDA_CALL(cudaEventDestroy, icb->copy_status);
+			PSMI_CUDA_CALL(cuMemFreeHost, icb->host_buf);
+			PSMI_CUDA_CALL(cuEventDestroy, icb->copy_status);
 		}
 	}
 	return;
@@ -122,10 +124,8 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	       int num_of_send_bufs, int num_of_send_desc, uint32_t imm_size,
 	       const struct psmi_timer_ctrl *timerq,
 	       const struct ips_epstate *epstate,
-	       const struct ips_spio *spioc, struct ips_proto *proto)
+	       void *spioc, struct ips_proto *proto)
 {
-	const struct hfi1_ctxt_info *ctxt_info = &context->ctrl->ctxt_info;
-	const struct hfi1_base_info *base_info = &context->ctrl->base_info;
 	uint32_t protoexp_flags, cksum_sz;
 	union psmi_envvar_val env_tid, env_cksum, env_mtu;
 	psm2_error_t err = PSM2_OK;
@@ -145,7 +145,6 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	proto->ptl = (ptl_t *) ptl;
 	proto->ep = context->ep;	/* cached */
 	proto->mq = context->ep->mq;	/* cached */
-	proto->fd = context->fd;	/* cached */
 	proto->pend_sends.proto = proto;
 	psmi_timer_entry_init(&proto->pend_sends.timer,
 			      ips_proto_timer_pendq_callback,
@@ -153,13 +152,13 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	STAILQ_INIT(&proto->pend_sends.pendq);
 	proto->epstate = (struct ips_epstate *)epstate;
 	proto->timerq = (struct psmi_timer_ctrl *)timerq;
-	proto->spioc = (struct ips_spio *)spioc;
+	proto->spioc = spioc;
 
-	proto->epinfo.ep_baseqp = base_info->bthqp;
-	proto->epinfo.ep_context = ctxt_info->ctxt;	/* "real" context */
-	proto->epinfo.ep_subcontext = ctxt_info->subctxt;
-	proto->epinfo.ep_hfi_type = psmi_get_hfi_type(context);
-	proto->epinfo.ep_jkey = base_info->jkey;
+	proto->epinfo.ep_baseqp = psmi_hal_get_bthqp(context->psm_hw_ctxt);
+	proto->epinfo.ep_context = psmi_hal_get_context(context->psm_hw_ctxt);	/* "real" context */
+	proto->epinfo.ep_subcontext = psmi_hal_get_subctxt(context->psm_hw_ctxt);
+	proto->epinfo.ep_hfi_type = psmi_hal_get_hfi_type(context->psm_hw_ctxt);
+	proto->epinfo.ep_jkey = psmi_hal_get_jkey(context->psm_hw_ctxt);
 
 	/* If checksums enabled we insert checksum at end of packet */
 	cksum_sz = env_cksum.e_uint ? PSM_CRC_SIZE_IN_BYTES : 0;
@@ -194,9 +193,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	 * block of 64 bytes. Also PIO buffer size must not be
 	 * bigger than MTU.
 	 */
-	proto->epinfo.ep_piosize = (ctxt_info->credits / 2) * 64 -
-	    (sizeof(struct ips_message_header) + HFI_PCB_SIZE_IN_BYTES +
-	     cksum_sz);
+	proto->epinfo.ep_piosize = psmi_hal_get_pio_size(context->psm_hw_ctxt) - cksum_sz;
 	proto->epinfo.ep_piosize =
 	    min(proto->epinfo.ep_piosize, proto->epinfo.ep_mtu);
 
@@ -205,13 +202,12 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 		proto->epinfo.ep_piosize &= ~(PSM_CACHE_LINE_BYTES - 1);
 
 	/* Save back to hfi level. */
-	context->ctrl->__hfi_mtusize = proto->epinfo.ep_mtu;
-	context->ctrl->__hfi_piosize = proto->epinfo.ep_piosize;
+	psmi_hal_set_effective_mtu(proto->epinfo.ep_mtu, proto->ep->context.psm_hw_ctxt);
+	psmi_hal_set_pio_size(proto->epinfo.ep_piosize,
+			      proto->ep->context.psm_hw_ctxt);
 
-	/* sdma completion queue */
-	proto->sdma_comp_queue =
-	    (struct hfi1_sdma_comp_entry *) base_info->sdma_comp_bufbase;
-	proto->sdma_queue_size = ctxt_info->sdma_ring_size;
+	/* sdma queue size */
+	proto->sdma_queue_size = psmi_hal_get_sdma_ring_size(context->psm_hw_ctxt);
 	/* don't use the last slot */
 
 	{
@@ -294,6 +290,10 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 			proto->flags |= IPS_PROTO_FLAG_LOOPBACK;
 	}
 
+	/* Update JKey if necessary */
+	if (getenv("PSM2_SELINUX"))
+		proto->epinfo.ep_jkey = psmi_hal_get_jkey(context->psm_hw_ctxt);
+
 	{
 		/* Disable coalesced ACKs? */
 		union psmi_envvar_val env_coalesce_acks;
@@ -321,7 +321,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	/*
 	 * Pre-calculate the PSN mask to support 24 or 31 bits PSN.
 	 */
-	if ((context->runtime_flags & HFI1_CAP_EXTENDED_PSN)) {
+	if (psmi_hal_has_cap(PSM_HAL_CAP_EXTENDED_PSN)) {
 		proto->psn_mask = 0x7FFFFFFF;
 	} else {
 		proto->psn_mask = 0xFFFFFF;
@@ -330,7 +330,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	/*
 	 * Initialize SDMA, otherwise, turn on all PIO.
 	 */
-	if ((context->runtime_flags & HFI1_CAP_SDMA)) {
+	if (psmi_hal_has_cap(PSM_HAL_CAP_SDMA)) {
 		if ((err = proto_sdma_init(proto, context)))
 			goto fail;
 	} else {
@@ -395,6 +395,10 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	 * We put a (**) in the output of those stats that "should never happen"
 	 */
 	{
+		uint64_t *pio_stall_cnt = NULL;
+
+		psmi_hal_get_pio_stall_cnt(context->psm_hw_ctxt,&pio_stall_cnt);
+
 		struct psmi_stats_entry entries[] = {
 			PSMI_STATS_DECLU64("pio busy count",
 					   &proto->stats.pio_busy_cnt),
@@ -422,7 +426,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 			PSMI_STATS_DECLU64("stray packets (*)",
 					   &proto->stats.stray_packets),
 			PSMI_STATS_DECLU64("pio stalls (*)",	/* shouldn't happen too often */
-					   &proto->spioc->spio_num_stall_total),
+					   pio_stall_cnt),
 			PSMI_STATS_DECLU64("ICRC error (*)",
 					   &proto->error_stats.num_icrc_err),
 			PSMI_STATS_DECLU64("ECC error ",
@@ -462,7 +466,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 
 	/* If progress thread is enabled, set the proto flag */
 	{
-		if(context->runtime_flags & PSMI_RUNTIME_RCVTHREAD)
+		if (psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RTS_RX_THREAD))
 			proto->flags |= IPS_PROTO_FLAG_RCVTHREAD;
 	}
 
@@ -504,15 +508,10 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 
 	if (protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED) {
 #ifdef PSM_CUDA
-	if (PSMI_IS_CUDA_ENABLED) {
-		if (cuda_runtime_version >= 7000) {
-			PSMI_CUDA_CALL(cudaStreamCreateWithFlags,
-			       &proto->cudastream_send, cudaStreamNonBlocking);
-		} else {
-			PSMI_CUDA_CALL(cudaStreamCreate,
-			       &proto->cudastream_send);
+		if (PSMI_IS_CUDA_ENABLED) {
+			PSMI_CUDA_CALL(cuStreamCreate,
+				   &proto->cudastream_send, CU_STREAM_NON_BLOCKING);
 		}
-	}
 #endif
 		proto->scbc_rv = NULL;
 		if ((err = ips_protoexp_init(context, proto, protoexp_flags,
@@ -952,7 +951,7 @@ proto_sdma_init(struct ips_proto *proto, const psmi_context_t *context)
 	/*
 	 * Only initialize if RUNTIME_SDMA is enabled.
 	 */
-	psmi_assert_always(context->runtime_flags & HFI1_CAP_SDMA);
+	psmi_assert_always(psmi_hal_has_cap(PSM_HAL_CAP_SDMA));
 
 	psmi_getenv("PSM2_SDMA",
 		    "hfi send dma flags (0 disables send dma, 2 disables send pio, "
@@ -1041,6 +1040,7 @@ static __inline__ void _build_ctrl_message(struct ips_proto *proto,
 {
 	uint32_t tot_paywords = (sizeof(struct ips_message_header) +
 		HFI_CRC_SIZE_IN_BYTES + paylen) >> BYTE2DWORD_SHIFT;
+	uint32_t slid, dlid;
 	ips_epaddr_t *ipsaddr = flow->ipsaddr;
 	struct ips_message_header *p_hdr = &ctrlscb->ips_lrh;
 	ips_path_rec_t *ctrl_path =
@@ -1052,15 +1052,29 @@ static __inline__ void _build_ctrl_message(struct ips_proto *proto,
 	     ipsaddr->pathgrp->pg_num_paths[IPS_PATH_HIGH_PRIORITY]))
 		ipsaddr->hpp_index = 0;
 
+	/*
+	 * If the size of the transfer is NOT within the "exclusion range",
+	 * then use the "dispersive routling" slid/dlid.  Otherwise
+	 * use the base LIDS.
+	 *
+	 * This is a control message, so it should never be a TID transfer.
+	 */
+	slid = ctrl_path->pr_slid;
+	dlid = ctrl_path->pr_dlid;
+	if (ctrlscb->scb_flags & IPS_SEND_FLAG_NO_LMC) {
+		slid = ipsaddr->pathgrp->pg_base_slid;
+		dlid = ipsaddr->pathgrp->pg_base_dlid;
+	}
+
 	/* Control messages go over the control path. */
 	p_hdr->lrh[0] = __cpu_to_be16(HFI_LRH_BTH |
 				      ((ctrl_path->pr_sl & HFI_LRH_SL_MASK) <<
 				       HFI_LRH_SL_SHIFT) |
 				      ((proto->sl2sc[ctrl_path->pr_sl] &
 					HFI_LRH_SC_MASK) << HFI_LRH_SC_SHIFT));
-	p_hdr->lrh[1] = ctrl_path->pr_dlid;
+	p_hdr->lrh[1] = dlid;
 	p_hdr->lrh[2] = __cpu_to_be16(tot_paywords & HFI_LRH_PKTLEN_MASK);
-	p_hdr->lrh[3] = ctrl_path->pr_slid;
+	p_hdr->lrh[3] = slid;
 
 	p_hdr->bth[0] = __cpu_to_be32(ctrl_path->pr_pkey |
 				      (message_type << HFI_BTH_OPCODE_SHIFT));
@@ -1094,7 +1108,7 @@ static __inline__ void _build_ctrl_message(struct ips_proto *proto,
 	p_hdr->flags = 0;
 
 	p_hdr->khdr.kdeth0 = __cpu_to_le32(
-			(ctrlscb->flags & IPS_SEND_FLAG_INTR) |
+			(ctrlscb->scb_flags & IPS_SEND_FLAG_INTR) |
 			(IPS_PROTO_VERSION << HFI_KHDR_KVER_SHIFT));
 	p_hdr->khdr.kdeth1 = __cpu_to_le32(proto->epinfo.ep_jkey);
 
@@ -1107,23 +1121,22 @@ ips_proto_timer_ctrlq_callback(struct psmi_timer *timer, uint64_t t_cyc_expire)
 	struct ips_ctrlq *ctrlq = (struct ips_ctrlq *)timer->context;
 	struct ips_proto *proto = ctrlq->ctrlq_proto;
 	struct ips_ctrlq_elem *cqe;
-	uint32_t have_cksum;
+	uint32_t have_cksum = proto->flags & IPS_PROTO_FLAG_CKSUM;
 	psm2_error_t err;
 
-	have_cksum = proto->flags & IPS_PROTO_FLAG_CKSUM;
 	/* service ctrl send queue first */
 	while (ctrlq->ctrlq_cqe[ctrlq->ctrlq_tail].msg_queue_mask) {
 		cqe = &ctrlq->ctrlq_cqe[ctrlq->ctrlq_tail];
-
 		/* When PSM_PERF is enabled, the following line causes the
 		   PMU to start a stop watch to measure instruction cycles of the
 		   TX speedpath of PSM.  The stop watch is stopped below. */
 		GENERIC_PERF_BEGIN(PSM_TX_SPEEDPATH_CTR);
 		if (cqe->msg_scb.flow->transfer == PSM_TRANSFER_PIO) {
-			err = ips_spio_transfer_frame(proto,
-				cqe->msg_scb.flow, &cqe->msg_scb.pbc,
-				cqe->msg_scb.cksum, 0, PSMI_TRUE,
-				have_cksum, cqe->msg_scb.cksum[0]
+			err = psmi_hal_spio_transfer_frame(proto,
+							   cqe->msg_scb.flow, &cqe->msg_scb.pbc,
+							   cqe->msg_scb.cksum, 0, PSMI_TRUE,
+							   have_cksum, cqe->msg_scb.cksum[0],
+							   proto->ep->context.psm_hw_ctxt
 #ifdef PSM_CUDA
 			       , 0
 #endif
@@ -1140,6 +1153,7 @@ ips_proto_timer_ctrlq_callback(struct psmi_timer *timer, uint64_t t_cyc_expire)
 		GENERIC_PERF_END(PSM_TX_SPEEDPATH_CTR);
 
 		if (err == PSM2_OK) {
+			PSM2_LOG_PKT_STRM(PSM2_LOG_TX,&cqe->msg_scb.ips_lrh,"PKT_STRM: err: %d", err);
 			ips_proto_epaddr_stats_set(proto, cqe->message_type);
 			*cqe->msg_queue_mask &=
 			    ~message_type2index(proto, cqe->message_type);
@@ -1199,6 +1213,7 @@ ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 		ips_proto_timer_ctrlq_callback(&ctrlq->ctrlq_timer, 0ULL);
 
 	/* finish setup control message header */
+	ips_set_LMC_LID_choice(proto, ctrlscb, paylen);
 	_build_ctrl_message(proto, flow, message_type, ctrlscb, paylen);
 
 	/* If enabled checksum control message */
@@ -1227,11 +1242,12 @@ ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 		   PMU to start a stop watch to measure instruction cycles of the
 		   TX speedpath of PSM.  The stop watch is stopped below. */
 		GENERIC_PERF_BEGIN(PSM_TX_SPEEDPATH_CTR);
-		err = ips_spio_transfer_frame(proto, flow,
-			     &ctrlscb->pbc, payload, paylen,
-			     PSMI_TRUE, have_cksum, ctrlscb->cksum[0]
+		err = psmi_hal_spio_transfer_frame(proto, flow,
+						   &ctrlscb->pbc, payload, paylen,
+						   PSMI_TRUE, have_cksum, ctrlscb->cksum[0],
+						   proto->ep->context.psm_hw_ctxt
 #ifdef PSM_CUDA
-			     , 0
+						   , 0
 #endif
 			     );
 		/* When PSM_PERF is enabled, the following line causes the
@@ -1258,7 +1274,10 @@ ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 	}
 
 	if (err == PSM2_OK)
+	{
+		PSM2_LOG_PKT_STRM(PSM2_LOG_TX,&ctrlscb->ips_lrh,"PKT_STRM: err: %d", err);
 		ips_proto_epaddr_stats_set(proto, message_type);
+	}
 
 	_HFI_VDBG("transfer_frame of opcode=0x%x,remote_lid=%d,"
 		  "src=%p,len=%d returns %d\n",
@@ -1341,7 +1360,10 @@ void MOCKABLE(ips_proto_flow_enqueue)(struct ips_flow *flow, ips_scb_t *scb)
 	/* Every flow has a pending head that points into the unacked queue.
 	 * If sends are already pending, process those first */
 	if (SLIST_EMPTY(&flow->scb_pend))
+        {
+                PSM2_LOG_PKT_STRM(PSM2_LOG_PEND,&scb->ips_lrh,"PKT_STRM: pkt in pend list");
 		SLIST_FIRST(&flow->scb_pend) = scb;
+	}
 
 	/* Insert scb into flow's unacked queue */
 	STAILQ_INSERT_TAIL(&flow->scb_unacked, scb, nextq);
@@ -1388,29 +1410,29 @@ ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed)
 	while (!SLIST_EMPTY(scb_pend) && flow->credits > 0) {
 		scb = SLIST_FIRST(scb_pend);
 		psmi_assert(scb->nfrag == 1);
-
 		/* When PSM_PERF is enabled, the following line causes the
 		   PMU to start a stop watch to measure instruction cycles of the
 		   TX speedpath of PSM.  The stop watch is stopped below. */
 		GENERIC_PERF_BEGIN(PSM_TX_SPEEDPATH_CTR);
-		if ((err = ips_spio_transfer_frame(proto, flow, &scb->pbc,
-						   ips_scb_buffer(scb),
-						   scb->payload_size,
-						   PSMI_FALSE,
-						   scb->ips_lrh.
-						   flags &
-						   IPS_SEND_FLAG_PKTCKSUM,
-						   scb->cksum[0]
+		if ((err = psmi_hal_spio_transfer_frame(proto, flow, &scb->pbc,
+							ips_scb_buffer(scb),
+							scb->payload_size,
+							PSMI_FALSE,
+							scb->ips_lrh.flags &
+							IPS_SEND_FLAG_PKTCKSUM,
+							scb->cksum[0],
+							proto->ep->context.psm_hw_ctxt
 #ifdef PSM_CUDA
 						   , IS_TRANSFER_BUF_GPU_MEM(scb)
 #endif
-						)) == PSM2_OK) {
+			     ))
+		    == PSM2_OK) {
 			/* When PSM_PERF is enabled, the following line causes the
 			   PMU to stop a stop watch to measure instruction cycles of the
 			   TX speedpath of PSM.  The stop watch was started above. */
 			GENERIC_PERF_END(PSM_TX_SPEEDPATH_CTR);
 			t_cyc = get_cycles();
-			scb->flags &= ~IPS_SEND_FLAG_PENDING;
+			scb->scb_flags &= ~IPS_SEND_FLAG_PENDING;
 			scb->ack_timeout = proto->epinfo.ep_timeout_ack;
 			scb->abs_timeout = proto->epinfo.ep_timeout_ack + t_cyc;
 			psmi_timer_request(proto->timerq, flow->timer_ack,
@@ -1421,6 +1443,7 @@ ips_proto_flow_flush_pio(struct ips_flow *flow, int *nflushed)
 #ifdef PSM_DEBUG
 			flow->scb_num_pending--;
 #endif
+			PSM2_LOG_PKT_STRM(PSM2_LOG_TX,&scb->ips_lrh,"PKT_STRM: err: %d", err);
 
 		} else
 		{
@@ -1505,7 +1528,10 @@ ips_proto_flow_flush_dma(struct ips_flow *flow, int *nflushed)
 		SLIST_FOREACH(scb, scb_pend, next) {
 			if (++i > nsent)
 				break;
-			scb->flags &= ~IPS_SEND_FLAG_PENDING;
+
+			PSM2_LOG_PKT_STRM(PSM2_LOG_TX,&scb->ips_lrh,"PKT_STRM: (dma)");
+
+			scb->scb_flags &= ~IPS_SEND_FLAG_PENDING;
 			scb->ack_timeout =
 			    scb->nfrag * proto->epinfo.ep_timeout_ack;
 			scb->abs_timeout =
@@ -1642,31 +1668,37 @@ PSMI_ALWAYS_INLINE(int dma_do_fault())
 psm2_error_t ips_proto_dma_completion_update(struct ips_proto *proto)
 {
 	ips_scb_t *scb;
-	struct hfi1_sdma_comp_entry *comp;
-	uint32_t status;
 
 	while (proto->sdma_done_index != proto->sdma_fill_index) {
-		comp = &proto->sdma_comp_queue[proto->sdma_done_index];
-		status = comp->status;
+		psmi_hal_sdma_ring_slot_status status;
+		uint32_t errorCode;
+		int rc = psmi_hal_get_sdma_ring_slot_status(proto->sdma_done_index, &status, &errorCode,
+							    proto->ep->context.psm_hw_ctxt);
 		psmi_rmb();
 
-		if (status == QUEUED)
+		if (rc < 0)
+			return PSM2_INTERNAL_ERR;
+
+		if (status == PSM_HAL_SDMA_RING_QUEUED)
 			return PSM2_OK;
 
 		/* Mark sdma request is complete */
 		scb = proto->sdma_scb_queue[proto->sdma_done_index];
-		if (scb) {
+		if (scb)
+		{
+			psmi_assert(status == PSM_HAL_SDMA_RING_COMPLETE);
 			scb->dma_complete = 1;
 			proto->sdma_scb_queue[proto->sdma_done_index] = NULL;
 		}
 
-		if (status == ERROR && ((int)comp->errcode) != -2) {
+		if (status == PSM_HAL_SDMA_RING_ERROR && (int)errorCode != -2) {
 			psm2_error_t err =
-			   psmi_handle_error(proto->ep, PSM2_EP_DEVICE_FAILURE,
-				"SDMA completion error: %d (fd=%d, index=%d)",
-				0 - comp->errcode,
-				proto->fd,
-				proto->sdma_done_index);
+				psmi_handle_error(proto->ep, PSM2_EP_DEVICE_FAILURE,
+						  "SDMA completion error: %d (fd=%d, index=%d)",
+						  0 - ((int32_t)errorCode),
+						  psmi_hal_get_fd(proto->ep->context.
+								  psm_hw_ctxt),
+						  proto->sdma_done_index);
 			return err;
 		}
 
@@ -1739,7 +1771,7 @@ handle_ENOMEM_on_DMA_completion(struct ips_proto *proto)
 				PSM2_EP_DEVICE_FAILURE,
 				"SDMA completion error: out of "
 				"memory (fd=%d, index=%d)",
-				proto->fd,
+				psmi_hal_get_fd(proto->ep->context.psm_hw_ctxt),
 				proto->sdma_done_index);
 			return err;
 		}
@@ -1795,8 +1827,8 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 	/*
 	 * Setup PBC.
 	 */
-	ips_proto_pbc_update(proto, flow, PSMI_TRUE,
-			     &scb->pbc, HFI_MESSAGE_HDR_SIZE, paylen);
+	psmi_hal_set_pbc(proto, flow, PSMI_TRUE,
+			 &scb->pbc, HFI_MESSAGE_HDR_SIZE, paylen);
 
 	/*
 	 * Setup SDMA header and io vector.
@@ -1805,15 +1837,14 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 		   psmi_get_sdma_req_info(scb, proto->ips_extra_sdmahdr_size);
 	sdmahdr->npkts = 1;
 	sdmahdr->fragsize = flow->frag_size;
-
 	sdmahdr->comp_idx = proto->sdma_fill_index;
-	psmi_assert(proto->sdma_comp_queue
-		[proto->sdma_fill_index].status != QUEUED);
+	psmi_assert(psmi_hal_dma_slot_available(proto->sdma_fill_index, proto->ep->context.psm_hw_ctxt));
 
 	iovcnt = 1;
 	iovec[0].iov_base = sdmahdr;
-	iovec[0].iov_len = HFI_SDMA_HDR_SIZE +
-				 proto->ips_extra_sdmahdr_size;
+	iovec[0].iov_len = psmi_hal_get_sdma_req_size(proto->ep->context.psm_hw_ctxt) +
+		proto->ips_extra_sdmahdr_size;
+
 	if (paylen > 0) {
 		iovcnt++;
 		iovec[1].iov_base = payload;
@@ -1823,22 +1854,21 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 #ifdef PSM_CUDA
 	if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED) {
 		sdmahdr->ctrl = 2 |
-		    (EAGER << HFI1_SDMA_REQ_OPCODE_SHIFT) |
-		    (iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
+			(PSM_HAL_EGR << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
+			(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
 	} else {
 #endif
-	sdmahdr->ctrl = 1 |
-	    (EAGER << HFI1_SDMA_REQ_OPCODE_SHIFT) |
-	    (iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
+		sdmahdr->ctrl = 1 |
+			(PSM_HAL_EGR << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
+			(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
 #ifdef PSM_CUDA
 	}
 #endif
-
 	/*
 	 * Write into driver to do SDMA work.
 	 */
 retry:
-	ret = hfi_cmd_writev(proto->fd, iovec, iovcnt);
+	ret = psmi_hal_writev(iovec, iovcnt, proto->ep->context.psm_hw_ctxt);
 
 	if (ret > 0) {
 		proto->writevFailTime = 0;
@@ -1899,7 +1929,7 @@ retry:
 						"Unhandled error in writev(): "
 						"%s (fd=%d,iovec=%p,len=%d)",
 						strerror(errno),
-						proto->fd,
+						psmi_hal_get_fd(proto->ep->context.psm_hw_ctxt),
 						&iovec,
 						1);
 	}
@@ -1975,14 +2005,6 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 	max_elem = 4 * num;
 	iovec = alloca(sizeof(struct iovec) * max_elem);
 
-	if_pf(iovec == NULL) {
-		err = psmi_handle_error(PSMI_EP_NORETURN,
-					PSM2_NO_MEMORY,
-					"alloca for %d bytes failed in writev",
-					(int)(sizeof(struct iovec) * max_elem));
-		goto fail;
-	}
-
 	fillidx = proto->sdma_fill_index;
 	SLIST_FOREACH(scb, slist, next) {
 		/* Can't exceed posix max writev count */
@@ -1990,7 +2012,8 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 			break;
 
 		psmi_assert(vec_idx < max_elem);
-		psmi_assert_always(((scb->payload_size & 0x3) == 0) || (IPS_NON_DW_MUL_ALLOWED == non_dw_mul_sdma));
+		psmi_assert_always(((scb->payload_size & 0x3) == 0) ||
+				   psmi_hal_has_cap(PSM_HAL_CAP_NON_DW_MULTIPLE_MSG_SIZE));
 
 		/* Checksum all eager packets */
 		have_cksum = scb->ips_lrh.flags & IPS_SEND_FLAG_PKTCKSUM;
@@ -1998,7 +2021,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 		/*
 		 * Setup PBC.
 		 */
-		ips_proto_pbc_update(
+		psmi_hal_set_pbc(
 		    proto,
 		    flow,
 		    PSMI_FALSE,
@@ -2007,16 +2030,18 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 		    scb->payload_size +
 			(have_cksum ? PSM_CRC_SIZE_IN_BYTES : 0));
 
+		psmi_assert(psmi_hal_dma_slot_available(fillidx, proto->ep->context.
+								    psm_hw_ctxt));
+
 		sdmahdr = (struct sdma_req_info *)
 			   psmi_get_sdma_req_info(scb, proto->ips_extra_sdmahdr_size);
 
 		sdmahdr->npkts =
-		    scb->nfrag > 1 ? scb->nfrag_remaining : scb->nfrag;
+			scb->nfrag > 1 ? scb->nfrag_remaining : scb->nfrag;
 		sdmahdr->fragsize =
-		    scb->frag_size ? scb->frag_size : flow->frag_size;
+			scb->frag_size ? scb->frag_size : flow->frag_size;
 
 		sdmahdr->comp_idx = fillidx;
-		psmi_assert(proto->sdma_comp_queue[fillidx].status != QUEUED);
 		fillidx++;
 		if (fillidx == proto->sdma_queue_size)
 			fillidx = 0;
@@ -2025,8 +2050,10 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 		 * Setup io vector.
 		 */
 		iovec[vec_idx].iov_base = sdmahdr;
-		iovec[vec_idx].iov_len = HFI_SDMA_HDR_SIZE +
-					 proto->ips_extra_sdmahdr_size;
+		iovec[vec_idx].iov_len = psmi_hal_get_sdma_req_size(proto->ep->context.
+								    psm_hw_ctxt) +
+			proto->ips_extra_sdmahdr_size;
+
 		vec_idx++;
 		iovcnt = 1;
 		_HFI_VDBG("hdr=%p,%d\n",
@@ -2049,7 +2076,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 			iovcnt++;
 #ifdef PSM_CUDA
 			if (PSMI_IS_CUDA_ENABLED && IS_TRANSFER_BUF_GPU_MEM(scb)) {
-			    	/* without this attr, CUDA memory accesses
+				/* without this attr, CUDA memory accesses
 				 * do not synchronize with gpudirect-rdma accesses.
 				 * We set this field only if the currently loaded driver
 				 * supports this field. If not, we have other problems
@@ -2057,13 +2084,12 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 				 * and PSM2 is trying to use GPU features.
 				 */
 				if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
-					sdmahdr->flags = HFI1_BUF_GPU_MEM;
+					sdmahdr->flags = PSM_HAL_BUF_GPU_MEM;
 				else
 					sdmahdr->flags = 0;
 			} else if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
-					sdmahdr->flags = 0;
+				sdmahdr->flags = 0;
 #endif
-
 			_HFI_VDBG("seqno=%d hdr=%p,%d payload=%p,%d\n",
 				  scb->seq_num.psn_num,
 				  iovec[vec_idx - 2].iov_base,
@@ -2101,13 +2127,13 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 			 */
 			if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED) {
 				sdmahdr->ctrl = 2 |
-					(EXPECTED << HFI1_SDMA_REQ_OPCODE_SHIFT) |
-					(iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
+					(PSM_HAL_EXP << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
+					(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
 			} else {
 #endif
-			sdmahdr->ctrl = 1 |
-				(EXPECTED << HFI1_SDMA_REQ_OPCODE_SHIFT) |
-				(iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
+				sdmahdr->ctrl = 1 |
+					(PSM_HAL_EXP << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
+					(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
 #ifdef PSM_CUDA
 			}
 #endif
@@ -2115,16 +2141,17 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 				  iovec[vec_idx - 1].iov_base,
 				  (int)iovec[vec_idx - 1].iov_len);
 		} else {
+
 #ifdef PSM_CUDA
 			if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED) {
 				sdmahdr->ctrl = 2 |
-					(EAGER << HFI1_SDMA_REQ_OPCODE_SHIFT) |
-					(iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
+					(PSM_HAL_EGR << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
+					(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
 			} else {
 #endif
-			sdmahdr->ctrl = 1 |
-				(EAGER << HFI1_SDMA_REQ_OPCODE_SHIFT) |
-				(iovcnt << HFI1_SDMA_REQ_IOVCNT_SHIFT);
+				sdmahdr->ctrl = 1 |
+					(PSM_HAL_EGR << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
+					(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
 #ifdef PSM_CUDA
 			}
 #endif
@@ -2136,7 +2163,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 	}
 	psmi_assert(vec_idx > 0);
 retry:
-	ret = hfi_cmd_writev(proto->fd, iovec, vec_idx);
+	ret = psmi_hal_writev(iovec, vec_idx, proto->ep->context.psm_hw_ctxt);
 
 	if (ret > 0) {
 		proto->writevFailTime = 0;
@@ -2177,7 +2204,7 @@ retry:
 			    "(fd=%d,iovec=%p,len=%d)",
 			    strerror(errno),
 			    errno,
-			    proto->fd,
+			    psmi_hal_get_fd(proto->ep->context.psm_hw_ctxt),
 			    iovec,
 			    vec_idx);
 			goto fail;
@@ -2268,7 +2295,6 @@ ips_proto_timer_ack_callback(struct psmi_timer *current_timer,
 		    min(scb->ack_timeout * proto->epinfo.ep_timeout_ack_factor,
 			proto->epinfo.ep_timeout_ack_max);
 		scb->abs_timeout = t_cyc_next + scb->ack_timeout;
-
 		if (done_local) {
 			_HFI_VDBG
 			    ("sending err_chk flow=%d with first=%d,last=%d\n",
@@ -2277,9 +2303,9 @@ ips_proto_timer_ack_callback(struct psmi_timer *current_timer,
 			     STAILQ_LAST(&flow->scb_unacked, ips_scb,
 					 nextq)->seq_num.psn_num);
 
-			ctrlscb.flags = 0;
+			ctrlscb.scb_flags = 0;
 			if (proto->flags & IPS_PROTO_FLAG_RCVTHREAD)
-				ctrlscb.flags |= IPS_SEND_FLAG_INTR;
+				ctrlscb.scb_flags |= IPS_SEND_FLAG_INTR;
 
 			err_chk_seq = (SLIST_EMPTY(&flow->scb_pend)) ?
 					flow->xmit_seq_num :

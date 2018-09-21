@@ -56,20 +56,25 @@
 #ifndef PSMI_AM_H
 #define PSMI_AM_H
 
+#include "am_config.h"
 #include "../psm_am_internal.h"
 
 #define AMSH_DIRBLOCK_SIZE 128
 
 typedef
 struct am_epaddr {
-	/* must be the first field to be the same address */
+	/*
+	 * epaddr must be the first field to have the same address as this
+	 * structure
+	 */
 	struct psm2_epaddr epaddr;
-	union {
-		uint16_t _ptladdr_u16[4];
-		uint32_t _ptladdr_u32[2];
-		uint64_t _ptladdr_u64;
-		uint8_t _ptladdr_data[0];
-	};
+
+	uint16_t shmidx;
+	uint16_t return_shmidx;
+
+	uint32_t cstate_outgoing:4;
+	uint32_t cstate_incoming:4;
+	uint32_t pid:22;
 } am_epaddr_t;
 
 /* Up to NSHORT_ARGS are supported via am_pkt_short_t; the remaining
@@ -94,14 +99,6 @@ typedef struct psmi_handlertab {
 	psmi_handler_fn_t fn;
 } psmi_handlertab_t;
 
-/*
- * Can change the rendezvous threshold based on usage of cma (or not)
- */
-#define PSMI_MQ_RV_THRESH_CMA      16000
-
-/* If no kernel assisted copy is available this is the rendezvous threshold */
-#define PSMI_MQ_RV_THRESH_NO_KASSIST 16000
-
 #define PSMI_AM_CONN_REQ    1
 #define PSMI_AM_CONN_REP    2
 #define PSMI_AM_DISC_REQ    3
@@ -115,9 +112,6 @@ typedef struct psmi_handlertab {
 #define PSMI_KASSIST_GET       0x1
 #define PSMI_KASSIST_PUT       0x2
 #define PSMI_KASSIST_MASK      0x3
-
-#define PSMI_KASSIST_MODE_DEFAULT PSMI_KASSIST_CMA_GET
-#define PSMI_KASSIST_MODE_DEFAULT_STRING  "cma-get"
 
 int psmi_epaddr_pid(psm2_epaddr_t epaddr);
 
@@ -277,34 +271,22 @@ void psmi_am_reqq_add(int amtype, ptl_t *ptl, psm2_epaddr_t epaddr,
 #define AMFMT_LONG         4
 #define AMFMT_LONG_END     5
 
-#define _shmidx		_ptladdr_u16[0]
-#define _return_shmidx	_ptladdr_u16[1]
-#define _cstate		_ptladdr_u16[2]
-
 #define AMSH_CMASK_NONE    0
 #define AMSH_CMASK_PREREQ  1
 #define AMSH_CMASK_POSTREQ 2
 #define AMSH_CMASK_DONE    3
 
-#define AMSH_CSTATE_OUTGOING_MASK                0x0f
-#define AMSH_CSTATE_OUTGOING_NONE                0x01
-#define AMSH_CSTATE_OUTGOING_REPLIED             0x02
-#define AMSH_CSTATE_OUTGOING_ESTABLISHED         0x03
-#define AMSH_CSTATE_OUTGOING_DISC_REPLIED        0x04
-#define AMSH_CSTATE_OUTGOING_DISC_REQUESTED      0x05
-#define AMSH_CSTATE_OUTGOING_GET(amaddr)  ((amaddr)->_cstate & AMSH_CSTATE_OUTGOING_MASK)
-#define AMSH_CSTATE_OUTGOING_SET(amaddr, state)                                      \
-	(amaddr)->_cstate = (((amaddr)->_cstate & ~AMSH_CSTATE_OUTGOING_MASK) | \
-			    ((AMSH_CSTATE_OUTGOING_ ## state) & AMSH_CSTATE_OUTGOING_MASK))
+#define AMSH_CSTATE_OUTGOING_NONE 		1
+#define AMSH_CSTATE_OUTGOING_REPLIED 		2
+#define AMSH_CSTATE_OUTGOING_ESTABLISHED 	3
+#define AMSH_CSTATE_OUTGOING_DISC_REPLIED 	4
+#define AMSH_CSTATE_OUTGOING_DISC_REQUESTED 	5
 
-#define AMSH_CSTATE_INCOMING_MASK              0xf0
-#define AMSH_CSTATE_INCOMING_NONE              0x10
-#define AMSH_CSTATE_INCOMING_DISC_REQUESTED    0x40
-#define AMSH_CSTATE_INCOMING_ESTABLISHED       0x50
-#define AMSH_CSTATE_INCOMING_GET(amaddr)  ((amaddr)->_cstate & AMSH_CSTATE_INCOMING_MASK)
-#define AMSH_CSTATE_INCOMING_SET(amaddr, state)                             \
-	(amaddr)->_cstate = (((amaddr)->_cstate & ~AMSH_CSTATE_INCOMING_MASK) | \
-			    ((AMSH_CSTATE_INCOMING_ ## state) & AMSH_CSTATE_INCOMING_MASK))
+#define AMSH_CSTATE_INCOMING_NONE 		1
+#define AMSH_CSTATE_INCOMING_DISC_REQUESTED 	4
+#define AMSH_CSTATE_INCOMING_ESTABLISHED 	5
+
+#define AMSH_PID_UNKNOWN			0
 
 /**********************************
  * Shared memory packet formats
@@ -358,9 +340,6 @@ typedef struct am_ctl_qhdr {
 } am_ctl_qhdr_t;
 PSMI_STRICT_SIZE_DECL(am_ctl_qhdr_t, 128);
 
-/* Each block reserves some space at the beginning to store auxiliary data */
-#define AMSH_BLOCK_HEADER_SIZE  4096
-
 /* Each process has a reply qhdr and a request qhdr */
 typedef struct am_ctl_blockhdr {
 	volatile am_ctl_qhdr_t shortq;
@@ -395,9 +374,6 @@ struct amsh_qdirectory {
 	am_pkt_short_t *qrepFifoShort;
 	am_pkt_bulk_t *qrepFifoLong;
 } __attribute__ ((aligned(64)));
-
-#define AMSH_HAVE_CMA   0x1
-#define AMSH_HAVE_KASSIST 0x1
 
 /******************************************
  * Shared fifo element counts and sizes
@@ -436,7 +412,7 @@ struct am_ctl_nodeinfo {
 	struct amsh_qdirectory qdir;
 } __attribute__((aligned(64)));
 
-struct ptl {
+struct ptl_am {
 	psm2_ep_t ep;
 	psm2_epid_t epid;
 	psm2_epaddr_t epaddr;

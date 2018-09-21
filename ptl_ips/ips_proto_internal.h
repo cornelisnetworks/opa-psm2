@@ -56,7 +56,6 @@
 #ifndef _IPS_PROTO_INTERNAL_H
 #define _IPS_PROTO_INTERNAL_H
 
-#include "ips_proto_header.h"
 #include "ips_expected_proto.h"
 #include "ips_proto_help.h"
 

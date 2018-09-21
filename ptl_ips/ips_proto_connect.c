@@ -54,8 +54,10 @@
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
+#include "psm2_hal.h"
 #include "ipserror.h"
 #include "ips_proto.h"
+#include "psm_mq_internal.h"
 #include "ips_proto_internal.h"
 
 /*
@@ -340,7 +342,7 @@ ips_ipsaddr_set_req_params(struct ips_proto *proto,
 			if (data[2 * i] == ep->gid_hi) {
 
 				epaddr =
-					ips_alloc_epaddr(&ep->ptl_ips.ptl->proto, 0,
+					ips_alloc_epaddr(&((struct ptl_ips *)(ep->ptl_ips.ptl))->proto, 0,
 							 data[2 * i + 1], NULL,
 							  PSMI_HFI_TYPE_OPA1,
 									  5000);
@@ -384,12 +386,13 @@ ips_proto_send_ctrl_message_request(struct ips_proto *proto,
 {
 	psm2_error_t err = PSM2_OK;
 	ips_scb_t ctrlscb;
+
 	/* msg header plus gid+epid for all rails plus checksum */
 	char payload[sizeof(struct ips_connect_reqrep) +
 		16*HFI_MAX_RAILS + PSM_CRC_SIZE_IN_BYTES];
 	uint32_t paylen;
 
-	ctrlscb.flags = 0;
+	ctrlscb.scb_flags = 0;
 	paylen = ips_proto_build_connect_message(proto,
 			flow->ipsaddr, message_type, payload);
 	psmi_assert_always(paylen <= sizeof(payload));
@@ -427,7 +430,7 @@ ips_proto_send_ctrl_message_reply(struct ips_proto *proto,
 		16*HFI_MAX_RAILS + PSM_CRC_SIZE_IN_BYTES];
 	uint32_t paylen;
 
-	ctrlscb.flags = 0;
+	ctrlscb.scb_flags = 0;
 	paylen = ips_proto_build_connect_message(proto,
 			flow->ipsaddr, message_type, payload);
 	psmi_assert_always(paylen <= sizeof(payload));
@@ -632,7 +635,7 @@ ips_alloc_epaddr(struct ips_proto *proto, int master, psm2_epid_t epid,
 		ipsaddr = (ips_epaddr_t *) epaddr;
 	}
 
-	epaddr->ptlctl = proto->ptl->ctl;
+	epaddr->ptlctl = ((struct ptl_ips *)(proto->ptl))->ctl;
 	epaddr->proto = proto;
 	epaddr->epid = epid;
 
@@ -801,13 +804,13 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 
 				ipsaddr_f.pathgrp = pathgrp;
 				((psm2_epaddr_t) &ipsaddr_f)->ptlctl =
-				    proto->ptl->ctl;
+					((struct ptl_ips *)(proto->ptl))->ctl;
 				((psm2_epaddr_t) &ipsaddr_f)->proto = proto;
 				/* If the send fails because of pio_busy, don't let ips queue
 				 * the request on an invalid ipsaddr, just drop the reply */
 				ipsaddr_f.ctrl_msg_queued = ~0;
 
-				psmi_assert(proto->msgflowid < EP_FLOW_LAST);
+				psmi_assert_always(proto->msgflowid < EP_FLOW_LAST);
 
 				ips_flow_init(&ipsaddr_f.
 					      flows[proto->msgflowid], proto,
@@ -824,6 +827,8 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 					epaddr_do_free = 1;
 				}
 			}
+
+			psmi_assert_always(proto->msgflowid < EP_FLOW_LAST);
 
 			ips_proto_send_ctrl_message_reply(proto, &ipsaddr->
 							  flows[proto->
@@ -961,6 +966,7 @@ ptl_handle_connect_req(struct ips_proto *proto, psm2_epaddr_t epaddr,
 	proto->num_connected_incoming++;
 
 do_reply:
+	psmi_assert_always(proto->msgflowid < EP_FLOW_LAST);
 	ips_proto_send_ctrl_message_reply(proto,
 					  &ipsaddr->flows[proto->msgflowid],
 					  OPCODE_CONNECT_REPLY,
@@ -1194,10 +1200,10 @@ ips_proto_connect(struct ips_proto *proto, int numep,
 						_HFI_VDBG
 						    ("Connect req to %u:%u:%u\n",
 						     __be16_to_cpu(ipsaddr->
-								   pathgrp->
-								   pg_base_lid),
+						         pathgrp->pg_base_dlid),
 						     ipsaddr->context,
 						     ipsaddr->subcontext);
+					    psmi_assert_always(proto->msgflowid < EP_FLOW_LAST);
 					    if (
 					    ips_proto_send_ctrl_message_request
 						    (proto, &ipsaddr->
@@ -1398,6 +1404,7 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 					    nanosecs_to_cycles(ipsaddr->
 							       delay_in_ms *
 							       MSEC_ULL);
+					psmi_assert_always(proto->msgflowid < EP_FLOW_LAST);
 					ips_proto_send_ctrl_message_request
 					    (proto,
 					     &ipsaddr->flows[proto->msgflowid],
@@ -1431,6 +1438,7 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 					ipsaddr->s_timeout =
 					    get_cycles() +
 					    nanosecs_to_cycles(MSEC_ULL);
+					psmi_assert_always(proto->msgflowid < EP_FLOW_LAST);
 					ips_proto_send_ctrl_message_request
 					    (proto,
 					     &ipsaddr->flows[proto->msgflowid],
@@ -1498,6 +1506,7 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 			     (int)(cycles_to_nanosecs(get_cycles() - t_start) /
 				   MSEC_ULL), (unsigned long long)reqs_sent);
 	} else {
+		psmi_assert_always(proto->msgflowid < EP_FLOW_LAST);
 		for (n = 0; n < numep; n++) {
 			i = (n_first + n) % numep;
 			if (!array_of_epaddr_mask[i])

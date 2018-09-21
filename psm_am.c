@@ -214,6 +214,23 @@ __psm2_am_register_handlers_2(psm2_ep_t ep,
 }
 PSMI_API_DECL(psm2_am_register_handlers_2)
 
+void
+__psm2_am_unregister_handlers(psm2_ep_t ep)
+{
+	int i;
+
+	PSM2_LOG_MSG("entering");
+	for (i = 0; i < PSMI_AM_NUM_HANDLERS; i++) {
+		if (ep->am_htable[i].hfn != _ignore_handler) {
+			ep->am_htable[i].hfn = _ignore_handler;
+			ep->am_htable[i].hctx = NULL;
+			ep->am_htable[i].version = PSM2_AM_HANDLER_V2;
+		}
+	}
+	PSM2_LOG_MSG("leaving");
+}
+PSMI_API_DECL(psm2_am_unregister_handlers)
+
 psm2_error_t
 __psm2_am_request_short(psm2_epaddr_t epaddr, psm2_handler_t handler,
 		       psm2_amarg_t *args, int nargs, void *src, size_t len,

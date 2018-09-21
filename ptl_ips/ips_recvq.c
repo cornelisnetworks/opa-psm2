@@ -53,6 +53,7 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
+#include "psm_user.h"
 #include "ips_recvq.h"
 
 /* We return a table of pointer indexes.

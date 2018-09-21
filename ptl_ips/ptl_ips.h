@@ -57,14 +57,8 @@
 #define _IPS_PTL_H
 
 #include "psm_user.h"
-#include "psm_mq_internal.h"
 
-#include "ips_proto_params.h"
 #include "ips_proto.h"
-#include "ips_spio.h"
-#include "ips_recvhdrq.h"
-#include "ips_writehdrq.h"
-#include "ips_epstate.h"
 #include "ips_stats.h"
 #include "ips_subcontext.h"
 
@@ -103,7 +97,7 @@ struct ptl_shared;
  */
 /* Updates to this struct must be reflected in PTL_IPS_SIZE in ptl_fwd.h */
 /* IPS knows it functions as a PTL whenever ptl->ep is non-NULL */
-struct ptl {
+struct ptl_ips {
 	psm2_ep_t ep;		/* back ptr */
 	psm2_epid_t epid;	/* cached from ep */
 	psm2_epaddr_t epaddr;	/* cached from ep */
@@ -111,11 +105,9 @@ struct ptl {
 	ptl_ctl_t *ctl;		/* cached from init */
 	const psmi_context_t *context;	/* cached from init */
 
-	struct ips_spio spioc;	/* PIO send control */
+	void *spioc;	        /* PIO send control (opaque ptr) */
 	struct ips_proto proto;	/* protocol instance: timerq, epstate, spio */
 
-	/* Receive header queue and receive queue processing */
-	uint32_t runtime_flags;
 	struct psmi_timer_ctrl timerq;
 	struct ips_epstate epstate;	/* map incoming packets */
 	struct ips_recvhdrq_state recvq_state;
@@ -126,10 +118,8 @@ struct ptl {
 
 	/* context's status check timeout in cycles -- cached */
 	uint64_t status_cyc_timeout;
-
 	/* Shared contexts context */
 	struct ptl_shared *recvshc;
-
 	/* Rcv thread context */
 	struct ptl_rcvthread *rcvthread;
 }

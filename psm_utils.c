@@ -54,8 +54,9 @@
 #include <netdb.h>		/* gethostbyname */
 #include <malloc.h>             /* malloc_usable_size */
 #include "psm_user.h"
-#include "psm_mq_internal.h"
+#include "psm2_hal.h"
 #include "psm_am_internal.h"
+#include "psm_mq_internal.h"
 
 int psmi_ep_device_is_enabled(const psm2_ep_t ep, int devid);
 
@@ -724,7 +725,6 @@ psmi_syslog(psm2_ep_t ep, int to_console, int level, const char *format, ...)
 	 * sure we log context information */
 	if (PSMI_EP_IS_PTR(ep) && !ep->did_syslog) {
 		char uuid_str[64];
-		int hfi = ep->context.ctrl != NULL;
 		ep->did_syslog = 1;
 
 		memset(&uuid_str, 0, sizeof(uuid_str));
@@ -732,9 +732,9 @@ psmi_syslog(psm2_ep_t ep, int to_console, int level, const char *format, ...)
 		hfi_syslog("PSM", 0, LOG_WARNING,
 			   "uuid_key=%s,unit=%d,context=%d,subcontext=%d",
 			   uuid_str,
-			   hfi ? ep->context.ctrl->ctxt_info.unit : -1,
-			   hfi ? ep->context.ctrl->ctxt_info.ctxt : -1,
-			   hfi ? ep->context.ctrl->ctxt_info.subctxt : -1);
+			   psmi_hal_get_unit_id(ep->context.psm_hw_ctxt),
+			   psmi_hal_get_context(ep->context.psm_hw_ctxt),
+			   psmi_hal_get_subctxt(ep->context.psm_hw_ctxt));
 	}
 
 	va_start(ap, format);
@@ -792,13 +792,6 @@ uint32_t psmi_crc(unsigned char *buf, int len)
 	return update_crc(0xffffffff, buf, len) ^ 0xffffffff;
 }
 
-/* Return the HFI type being used for a context */
-uint32_t psmi_get_hfi_type(const psmi_context_t *context)
-{
-	return PSMI_HFI_TYPE_OPA1;
-}
-
-#define PSMI_FAULTINJ_SPEC_NAMELEN  32
 struct psmi_faultinj_spec {
 	STAILQ_ENTRY(psmi_faultinj_spec) next;
 	char spec_name[PSMI_FAULTINJ_SPEC_NAMELEN];
@@ -945,7 +938,7 @@ struct psmi_faultinj_spec *psmi_faultinj_getspec(char *spec_name, int num,
 		union psmi_envvar_val env_fi;
 		char fvals_str[128];
 		char fname[128];
-		char fdesc[256];
+		char fdesc[300];
 
 		snprintf(fvals_str, sizeof(fvals_str) - 1, "%d:%d:1", num,
 			 denom);
@@ -1176,10 +1169,21 @@ static int n_allocations = 0;
 /* HD_check_one_struct() checks one heap allocation for integrity. */
 static inline void HD_check_one_struct(HD_Header_Type *p, int checkAA,const char *curloc)
 {
+	int s=0;
+
 	/* First check the magic values in the header and trailer: */
-	psmi_assert_always(0 == memcmp(p->magic1,HD_HDR_MGC_1,sizeof(HD_HDR_MGC_1)));
-	psmi_assert_always(0 == memcmp(p->magic2,HD_HDR_MGC_2,sizeof(HD_HDR_MGC_2)));
-	psmi_assert_always(0 == memcmp(HD_GET_HD_TRLR(p),HD_TRLR_MGC,sizeof(HD_TRLR_MGC)));
+	s |= memcmp(p->magic1,HD_HDR_MGC_1,sizeof(HD_HDR_MGC_1))       ? 1 : 0;
+	s |= memcmp(p->magic2,HD_HDR_MGC_2,sizeof(HD_HDR_MGC_2))       ? 2 : 0;
+	s |= memcmp(HD_GET_HD_TRLR(p),HD_TRLR_MGC,sizeof(HD_TRLR_MGC)) ? 4 : 0;
+
+	if (s != 0)
+	{
+		fprintf(stderr,"header/trailer error: checking location: %s, s: %d, p: %p, "
+			"p->allocLoc: %s\n",curloc,s,p,p->allocLoc);
+		fprintf(stderr,"actual allocation starts at: %p, length: %" PRIu64  "\n", (char*)HD_HDR_TO_AA(p),p->sizeOfAlloc);
+		fflush(0);
+		abort();
+	}
 
 	/* Next, check the area between systemAlloc and the start of the header */
 	signed char *pchr = (signed char *)p->systemAlloc;
@@ -1209,9 +1213,9 @@ static inline void HD_check_one_struct(HD_Header_Type *p, int checkAA,const char
 	}
 }
 
-/* _HD_validate_heap_allocations() walks the singly linked list and inspects all
+/* _psmi_heapdebug_val_heapallocs() walks the singly linked list and inspects all
  *  heap allocations to ensure all of them have integrity still. */
-void _HD_validate_heap_allocations(const char *curloc)
+void _psmi_heapdebug_val_heapallocs(const char *curloc)
 {
 	/* first check current allocation list: */
 	HD_Header_Type *p = HD_root_of_list;
@@ -1264,7 +1268,7 @@ static void hd_est_hdr_trlr(HD_Header_Type *hd_alloc,
 	*HD_end_of_list = hd_alloc;
 	HD_end_of_list = &hd_alloc->nextHD_header;
 	n_allocations++;
-	HD_validate_heap_allocations();
+	psmi_heapdebug_val_heapallocs();
 }
 
 /* hd_malloc() is the heap debug version of malloc that will create the header and trailer
@@ -1312,7 +1316,7 @@ static inline void hd_free(void *ptr,const char *curloc)
 	HD_Header_Type *hd_alloc = HD_AA_TO_HD_HDR(ptr);
 	HD_Header_Type *p = HD_root_of_list, *q = NULL;
 
-	HD_validate_heap_allocations();
+	psmi_heapdebug_val_heapallocs();
 	while (p)
 	{
 		if (p == hd_alloc)
@@ -1352,7 +1356,7 @@ static inline void hd_free(void *ptr,const char *curloc)
 			HD_free_list_bottom = &pfreestruct->next_free_struct;
 			pfreestruct->freedStuct = hd_alloc;
 			pfreestruct->next_free_struct = NULL;
-			HD_validate_heap_allocations();
+			psmi_heapdebug_val_heapallocs();
 			return;
 		}
 		q = p;
@@ -2058,9 +2062,10 @@ static const char * const TxRxString(int txrx)
 {
 	switch(txrx)
 	{
-	case PSM2_LOG_EPM_TX: return "Sent";
-	case PSM2_LOG_EPM_RX: return "Received";
-	default:             return "Unknown";
+	case PSM2_LOG_TX:	return "Sent";
+	case PSM2_LOG_RX:	return "Received";
+	case PSM2_LOG_PEND:	return "Pending";
+	default:		return "Unknown";
 	}
 }
 
@@ -2322,6 +2327,9 @@ static int psmi_buff_fputc(int c, int port)
 #endif
 
 
+#define IS_PSMI_LOG_MAGIC(S) ((((uint64_t)(S)) <= ((uint64_t)PSM2_LOG_MIN_MAGIC)) && \
+			      (((uint64_t)(S)) >= ((uint64_t)PSM2_LOG_MAX_MAGIC)))
+
 /* plmf is short for 'psm log message facility. All of the PSM2_LOG macros defined in psm_log.h
    are serviced from this back end. */
 void psmi_log_message(const char *fileName,
@@ -2336,9 +2344,7 @@ void psmi_log_message(const char *fileName,
 	/* Next, determine if this log message is signal or noise. */
 	if (plmf_search_format_string)
 	{
-		if((format != PSM2_LOG_BT_MAGIC)  &&
-		   (format != PSM2_LOG_EPM_MAGIC) &&
-		   (format != PSM2_LOG_DUMP_MAGIC))
+		if (!IS_PSMI_LOG_MAGIC(format))
 		{
 			if (fnmatch(plmf_search_format_string, format, 0))
 			{
@@ -2372,18 +2378,18 @@ void psmi_log_message(const char *fileName,
 	}
 
 	/* At this point, we think that this may be a message that we want to emit to the log.
-	   But, there is one more test, to apply to the two cases where (format == PSM2_LOG_BT_MAGIC
-	   and format == PSM2_LOG_EPM_MAGIC and format == PSM2_LOG_DUMP_MAGIC. */
+	   But, there is one more test, to apply to the cases where the format is one of the
+	   special formats for backtrack, and packet stream for example. */
 	{
-		void      **voidarray      = NULL;   /*va_arg(ap,void **);*/
-		int         nframes        = 0;      /*va_arg(ap,int);*/
-		const char *newFormat      = format; /*va_arg(ap,const char *);*/
-		int         opcode         = 0;
-		int         txrx           = 0;
-		uint64_t    fromepid       = 0;
-		uint64_t    toepid         = 0;
-		void       *dumpAddr       = 0;
-		size_t      dumpSize       = 0;
+		void           **voidarray   = NULL;
+		int              nframes     = 0;
+		const char      *newFormat   = format;
+		int              opcode      = 0;
+		psmi_log_tx_rx_t txrx        = 0;
+		uint64_t         fromepid    = 0;
+		uint64_t         toepid      = 0;
+		void            *dumpAddr[2] = {0};
+		size_t           dumpSize[2] = {0};
 
 #ifdef PSM2_LOG_FAST_IO
 #define IO_PORT         0
@@ -2412,16 +2418,28 @@ void psmi_log_message(const char *fileName,
 		else if (format == PSM2_LOG_EPM_MAGIC)
 		{
 			opcode    = va_arg(ap,int);
-			txrx      = va_arg(ap,int);
+			txrx      = va_arg(ap,psmi_log_tx_rx_t);
 			fromepid  = va_arg(ap,uint64_t);
 			toepid    = va_arg(ap,uint64_t);
 			newFormat = va_arg(ap,const char *);
 		}
 		else if (format == PSM2_LOG_DUMP_MAGIC)
 		{
-			dumpAddr  = va_arg(ap,void*);
-			dumpSize  = va_arg(ap,size_t);
-			newFormat = va_arg(ap,const char *);
+			dumpAddr[0]  = va_arg(ap,void*);
+			dumpSize[0]  = va_arg(ap,size_t);
+			newFormat    = va_arg(ap,const char *);
+		}
+		else if (format == PSM2_LOG_PKT_STRM_MAGIC)
+		{
+			txrx        = va_arg(ap,psmi_log_tx_rx_t);
+			dumpAddr[0] = va_arg(ap,struct ips_message_header *);
+			if (txrx == PSM2_LOG_RX)
+			{
+				dumpAddr[1] = va_arg(ap,uint32_t *);
+				dumpSize[1] = sizeof(uint64_t);
+			}
+			newFormat   = va_arg(ap,const char *);
+			dumpSize[0] = sizeof(struct ips_message_header);
 		}
 
 		/* One last test to make sure that this message is signal: */
@@ -2461,18 +2479,15 @@ void psmi_log_message(const char *fileName,
 
 		M1();
 
-		if ((format != PSM2_LOG_BT_MAGIC)  &&
-		    (format != PSM2_LOG_EPM_MAGIC) &&
-		    (format != PSM2_LOG_DUMP_MAGIC))
+		if (!IS_PSMI_LOG_MAGIC(format))
 		{
 			MY_VFPRINTF(IO_PORT,format,ap);
 			MY_FPUTC('\n',IO_PORT);
 		}
 		else if (format == PSM2_LOG_BT_MAGIC)
 		{
-			void *newframes[PSM2_LOG_BT_BUFFER_SIZE];
-			int  newframecnt      = backtrace(newframes,
-							  PSM2_LOG_BT_BUFFER_SIZE);
+			void *newframes[nframes];
+			int  newframecnt      = backtrace(newframes,nframes);
 			int  pframes          = min(newframecnt,nframes);
 
 			MY_VFPRINTF(IO_PORT,newFormat,ap);
@@ -2535,15 +2550,24 @@ void psmi_log_message(const char *fileName,
 			MY_VFPRINTF(IO_PORT,newFormat,ap);
 			MY_FPUTC('\n',IO_PORT);
 		}
-		else /* if (format == PSM2_LOG_DUMP_MAGIC) */
+		else if (format == PSM2_LOG_PKT_STRM_MAGIC)
+		{
+			MY_FPRINTF(IO_PORT,"PKT_STRM: %s: imh: %p%s ", TxRxString(txrx),
+				   dumpAddr[0], (txrx == PSM2_LOG_RX) ? "," : "");
+			if (txrx == PSM2_LOG_RX)
+				MY_FPRINTF(IO_PORT,"rhf: %p ", dumpAddr[1]);
+			goto dumpit;
+		}
+		else if (format == PSM2_LOG_DUMP_MAGIC)
 		{
 			MY_VFPRINTF(IO_PORT,newFormat,ap);
 			MY_FPUTC('\n',IO_PORT);
+		dumpit:
 			M1();
 
-			uint8_t *pu8 = (uint8_t *)dumpAddr;
+			uint8_t *pu8 = (uint8_t *)dumpAddr[0];
 			size_t   i,cnt=0;
-			for (i=0;i < dumpSize;i++)
+			for (i=0;i < dumpSize[0];i++)
 			{
 				if ((i != 0) && ((i % 8) == 0))
 				{
@@ -2553,11 +2577,18 @@ void psmi_log_message(const char *fileName,
 				}
 				else if (cnt)
 					MY_FPUTC(',',IO_PORT);
-				MY_FPRINTF(IO_PORT,"0x%02x", pu8[i-1]);
+				MY_FPRINTF(IO_PORT,"0x%02x", pu8[i]);
 				cnt++;
 			}
 			if (cnt)
 				MY_FPRINTF(IO_PORT," (%d)\n",(int)(i-8));
+			if (dumpSize[1])
+			{
+				dumpSize[0] = dumpSize[1];
+				dumpAddr[0] = dumpAddr[1];
+				dumpSize[1] = 0;
+				goto dumpit;
+			}
 		}
 		MY_FCLOSE(IO_PORT);
 	}

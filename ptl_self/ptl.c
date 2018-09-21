@@ -61,7 +61,7 @@
 #include "psm_mq_internal.h"
 #include "psm_am_internal.h"
 
-struct ptl {
+struct ptl_self {
 	psm2_ep_t ep;
 	psm2_epid_t epid;
 	psm2_epaddr_t epaddr;
@@ -75,11 +75,6 @@ ptl_handle_rtsmatch(psm2_mq_req_t recv_req, int was_posted)
 	psm2_mq_req_t send_req = (psm2_mq_req_t) recv_req->ptl_req_ptr;
 
 	if (recv_req->recv_msglen > 0) {
-		PSM_VALGRIND_DEFINE_MQ_RECV(recv_req->buf, recv_req->buf_len,
-					    recv_req->recv_msglen);
-		VALGRIND_MAKE_MEM_DEFINED(send_req->buf, send_req->buf_len);
-		VALGRIND_MAKE_MEM_DEFINED(send_req->buf, recv_req->recv_msglen);
-
 		psmi_mq_mtucpy(recv_req->buf, send_req->buf,
 			       recv_req->recv_msglen);
 	}
@@ -224,7 +219,7 @@ self_am_short_request(psm2_epaddr_t epaddr,
 		      void *completion_ctxt)
 {
 	struct psm2_ep_am_handle_entry *hentry;
-	psm2_ep_t ep = epaddr->ptlctl->ptl->ep;
+	psm2_ep_t ep = ((struct ptl_self *)(epaddr->ptlctl->ptl))->ep;
 	struct psmi_am_token tok;
 
 	tok.epaddr_incoming = epaddr;
@@ -261,7 +256,8 @@ self_am_short_reply(psm2_am_token_t token,
 {
 	struct psm2_ep_am_handle_entry *hentry;
 	struct psmi_am_token *tok = token;
-	psm2_ep_t ep = tok->epaddr_incoming->ptlctl->ptl->ep;
+	struct ptl_self *ptl = (struct ptl_self *)tok->epaddr_incoming->ptlctl->ptl;
+	psm2_ep_t ep = ptl->ep;
 
 	hentry = psm_am_get_handler_function(ep, handler);
 
@@ -288,13 +284,14 @@ self_am_short_reply(psm2_am_token_t token,
 
 static
 psm2_error_t
-self_connect(ptl_t *ptl,
+self_connect(ptl_t *ptl_gen,
 	     int numep,
 	     const psm2_epid_t array_of_epid[],
 	     const int array_of_epid_mask[],
 	     psm2_error_t array_of_errors[],
 	     psm2_epaddr_t array_of_epaddr[], uint64_t timeout_ns)
 {
+	struct ptl_self *ptl = (struct ptl_self *)ptl_gen;
 	psmi_assert_always(ptl->epaddr != NULL);
 	psm2_error_t err = PSM2_OK;
 	int i;
@@ -328,11 +325,12 @@ fail:
 
 static
 psm2_error_t
-self_disconnect(ptl_t *ptl, int force, int numep,
+self_disconnect(ptl_t *ptl_gen, int force, int numep,
 		   psm2_epaddr_t array_of_epaddr[],
 		   const int array_of_epaddr_mask[],
 		   psm2_error_t array_of_errors[], uint64_t timeout_in)
 {
+	struct ptl_self *ptl = (struct ptl_self *)ptl_gen;
 	int i;
 	for (i = 0; i < numep; i++) {
 		if (array_of_epaddr_mask[i] == 0)
@@ -349,12 +347,13 @@ self_disconnect(ptl_t *ptl, int force, int numep,
 static
 size_t self_ptl_sizeof(void)
 {
-	return sizeof(ptl_t);
+	return sizeof(struct ptl_self);
 }
 
 ustatic
-psm2_error_t self_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
+psm2_error_t self_ptl_init(const psm2_ep_t ep, ptl_t *ptl_gen, ptl_ctl_t *ctl)
 {
+	struct ptl_self *ptl = (struct ptl_self *)ptl_gen;
 	psmi_assert_always(ep != NULL);
 	psmi_assert_always(ep->epaddr != NULL);
 	psmi_assert_always(ep->epid != 0);
@@ -366,7 +365,7 @@ psm2_error_t self_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 
 	memset(ctl, 0, sizeof(*ctl));
 	/* Fill in the control structure */
-	ctl->ptl = ptl;
+	ctl->ptl = ptl_gen;
 	ctl->ep = ep;
 	ctl->ep_poll = NULL;
 	ctl->ep_connect = self_connect;

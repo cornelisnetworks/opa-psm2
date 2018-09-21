@@ -55,19 +55,15 @@
 
 /* This file implements the PSM PTL for ips */
 #include "psm_user.h"
+#include "psm2_hal.h"
 #include "ptl_ips.h"
-#include "ipserror.h"
+#include "psm_mq_internal.h"
 
 int ips_ptl_recvq_isempty(const struct ptl *ptl);
 
-#define PSMI_CONTEXT_STATUS_CHECK_INTERVAL_MSECS	250
-
-#define HFI1_USER_SWMAJOR_NON_DW_MUL_MSG_SIZE_ALLOWED 6
-#define HFI1_USER_SWMINOR_NON_DW_MUL_MSG_SIZE_ALLOWED 2
-
 static
 int
-ips_subcontext_ignore(const struct ips_recvhdrq_event *rcv_ev,
+ips_subcontext_ignore(struct ips_recvhdrq_event *rcv_ev,
 		      uint32_t subcontext)
 {
 	return IPS_RECVHDRQ_CONTINUE;
@@ -75,95 +71,22 @@ ips_subcontext_ignore(const struct ips_recvhdrq_event *rcv_ev,
 
 static
 int
-ips_subcontext_process(const struct ips_recvhdrq_event *rcv_ev,
+ips_subcontext_process(struct ips_recvhdrq_event *rcv_ev,
 		       uint32_t subcontext)
 {
-	struct ptl_shared *recvshc = rcv_ev->proto->ptl->recvshc;
+	struct ptl_shared *recvshc = ((struct ptl_ips *)(rcv_ev->proto->ptl))->recvshc;
 	if_pt(subcontext != recvshc->subcontext &&
 	      subcontext < recvshc->subcontext_cnt) {
-		return ips_writehdrq_append(&recvshc->writeq[subcontext],
-					    rcv_ev);
+		return psmi_hal_forward_packet_to_subcontext(&recvshc->writeq[subcontext],
+							     rcv_ev, subcontext,
+							     rcv_ev->recvq->context->psm_hw_ctxt);
 	}
 	else {
 		_HFI_VDBG
-		    ("Drop pkt for subcontext %d out of %d (I am %d) : errors 0x%x\n",
-		     (int)subcontext, (int)recvshc->subcontext_cnt,
-		     (int)recvshc->subcontext, (unsigned)rcv_ev->error_flags);
-		return IPS_RECVHDRQ_BREAK;
-	}
-}
-
-static
-void
-recvhdrq_hw_params(const psmi_context_t *context,
-		   struct ips_recvq_params *hdrq,
-		   struct ips_recvq_params *egrq,
-		   int is_shared_context, int subcontext)
-{
-	const struct hfi1_ctxt_info *cinfo = &context->ctrl->ctxt_info;
-	const struct hfi1_base_info *binfo = &context->ctrl->base_info;
-
-	hdrq->elemcnt = cinfo->rcvhdrq_cnt;
-	/* dwords */
-	hdrq->elemsz = cinfo->rcvhdrq_entsize >> BYTE2DWORD_SHIFT;
-
-	egrq->elemcnt = cinfo->egrtids;
-	/* bytes */
-	egrq->elemsz = cinfo->rcvegr_size;
-
-	if (!is_shared_context) {
-		volatile uint64_t *uregbase =	/* HW registers */
-		    (volatile uint64_t *)(uintptr_t) binfo->user_regbase;
-
-		hdrq->base_addr =
-		    (uint32_t *) (uintptr_t) binfo->rcvhdr_bufbase;
-		hdrq->head_register =
-		    (volatile __le64 *)&uregbase[ur_rcvhdrhead];
-		hdrq->tail_register =
-		    (volatile __le64 *)(uintptr_t) binfo->rcvhdrtail_base;
-
-		egrq->base_addr = (void *)(uintptr_t) binfo->rcvegr_bufbase;
-		egrq->head_register =
-		    (volatile __le64 *)&uregbase[ur_rcvegrindexhead];
-		egrq->tail_register =
-		    (volatile __le64 *)&uregbase[ur_rcvegrindextail];
-	} else {
-		/* Subcontexts mimic the HW registers but use different addresses
-		 * to avoid cache contention. */
-		volatile uint64_t *subcontext_uregbase;
-		uint32_t *rcv_hdr, *rcv_egr;
-		unsigned hdrsize, egrsize;
-		unsigned pagesize = getpagesize();
-		unsigned i = pagesize - 1;
-
-		hdrsize =
-		    (cinfo->rcvhdrq_cnt * cinfo->rcvhdrq_entsize + i) & ~i;
-		egrsize =
-		    (cinfo->egrtids * cinfo->rcvegr_size + i) & ~i;
-
-		subcontext_uregbase = (uint64_t *)
-		    (((uintptr_t) binfo->subctxt_uregbase) +
-		     (sizeof(struct ips_subcontext_ureg) * subcontext));
-		rcv_hdr = (uint32_t *)
-		    (((uintptr_t) binfo->subctxt_rcvhdrbuf +
-		      (hdrsize * subcontext)));
-		rcv_egr = (uint32_t *)
-		    (((uintptr_t) binfo->subctxt_rcvegrbuf +
-		      (egrsize * subcontext)));
-
-		hdrq->base_addr = rcv_hdr;
-		hdrq->head_register =
-		    (volatile __le64 *)&subcontext_uregbase[ur_rcvhdrhead * 8];
-		hdrq->tail_register =
-		    (volatile __le64 *)&subcontext_uregbase[ur_rcvhdrtail * 8];
-
-		egrq->base_addr = rcv_egr;
-		egrq->head_register =
-		    (volatile __le64 *)&subcontext_uregbase[ur_rcvegrindexhead *
-							    8];
-		egrq->tail_register =
-		    (volatile __le64 *)&subcontext_uregbase[ur_rcvegrindextail *
-							    8];
+			("Drop pkt for subcontext %d out of %d (I am %d) : errors 0x%x\n",
+			 (int)subcontext, (int)recvshc->subcontext_cnt,
+			 (int)recvshc->subcontext, psmi_hal_rhf_get_all_err_flags(rcv_ev->psm_hal_rhf));
+                return IPS_RECVHDRQ_BREAK;
 	}
 }
 
@@ -172,7 +95,7 @@ static psm2_error_t shrecvq_fini(ptl_t *ptl);
 
 static size_t ips_ptl_sizeof(void)
 {
-	return sizeof(ptl_t);
+	return sizeof(struct ptl_ips);
 }
 
 static
@@ -223,54 +146,32 @@ static
 psm2_error_t
 psmi_context_check_status_callback(struct psmi_timer *t, uint64_t current)
 {
-	struct ptl *ptl = (struct ptl *)t->context;
+	struct ptl_ips *ptl = (struct ptl_ips *)t->context;
 	const uint64_t current_count = get_cycles();
 	psm2_error_t err;
 
 	err = psmi_context_check_status(ptl->context);
 	if (err == PSM2_OK || err == PSM2_OK_NO_PROGRESS)
-		err = ips_spio_process_events(ptl);
-
+	{
+		int rc = psmi_hal_spio_process_events((struct ptl *)ptl);
+		err = rc >= 0 ? PSM2_OK : PSM2_INTERNAL_ERR;
+	}
 	psmi_timer_request_always(&ptl->timerq, &ptl->status_timer,
 				  current_count + ptl->status_cyc_timeout);
 
 	return err;
 }
 
-/*
- * Check if non-double word multiple message size for SDMA is allowed to be
- * pass to the driver. Starting from 6.2 driver version, PSM is able to pass
- * to the driver message which size is not a multiple of double word for SDMA.
- */
-ustatic
-void ips_ptl_non_dw_mul_sdma_init(void)
-{
-	uint16_t major_version = hfi_get_user_major_version();
-	uint16_t minor_version = hfi_get_user_minor_version();
-
-	if ((major_version > HFI1_USER_SWMAJOR_NON_DW_MUL_MSG_SIZE_ALLOWED) ||
-		((major_version == HFI1_USER_SWMAJOR_NON_DW_MUL_MSG_SIZE_ALLOWED) &&
-		 (minor_version >= HFI1_USER_SWMINOR_NON_DW_MUL_MSG_SIZE_ALLOWED)))
-	{
-		ips_proto_mq_set_non_dw_mul_sdma(IPS_NON_DW_MUL_ALLOWED);
-	}
-	else
-	{
-		ips_proto_mq_set_non_dw_mul_sdma(IPS_NON_DW_MUL_NOT_ALLOWED);
-	}
-}
-
 static
-psm2_error_t ips_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
+psm2_error_t ips_ptl_init(const psm2_ep_t ep, ptl_t *ptl_gen, ptl_ctl_t *ctl)
 {
+	struct ptl_ips *ptl = (struct ptl_ips *)ptl_gen;
 	psm2_error_t err = PSM2_OK;
 	uint32_t num_of_send_bufs = ep->hfi_num_sendbufs;
 	uint32_t num_of_send_desc = ep->hfi_num_descriptors;
 	uint32_t imm_size = ep->hfi_imm_size;
 	const psmi_context_t *context = &ep->context;
-	const struct hfi1_user_info_dep *user_info = &context->user_info;
-	const struct hfi1_ctxt_info *ctxt_info = &context->ctrl->ctxt_info;
-	const int enable_shcontexts = (user_info->subctxt_cnt > 0);
+	const int enable_shcontexts = (psmi_hal_get_subctxt_cnt(context->psm_hw_ctxt) > 0);
 	const uint64_t current_count = get_cycles();
 
 	/* Preconditions */
@@ -279,19 +180,18 @@ psm2_error_t ips_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 	psmi_assert_always(ep->epid != 0);
 	psmi_assert_always(ep->hfi_num_sendbufs > 0);
 
-	memset(ptl, 0, sizeof(struct ptl));
+	memset(ptl, 0, sizeof(struct ptl_ips));
 
 	ptl->ep = ep;		/* back pointer */
 	ptl->epid = ep->epid;	/* cache epid */
 	ptl->epaddr = ep->epaddr;	/* cache a copy */
 	ptl->ctl = ctl;
 	ptl->context = context;
-	ptl->runtime_flags = context->runtime_flags;
 
 	memset(ctl, 0, sizeof(*ctl));
 	/* Fill in the control structure */
 	ctl->ep = ep;
-	ctl->ptl = ptl;
+	ctl->ptl = ptl_gen;
 	ctl->ep_poll = enable_shcontexts ? ips_ptl_shared_poll : ips_ptl_poll;
 	ctl->ep_connect = ips_ptl_connect;
 	ctl->ep_disconnect = ips_ptl_disconnect;
@@ -349,7 +249,6 @@ psm2_error_t ips_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 	if ((err = ips_epstate_init(&ptl->epstate, context)))
 		goto fail;
 
-	ips_ptl_non_dw_mul_sdma_init();
 	/*
 	 * Context sharing, setup subcontext ureg page.
 	 */
@@ -364,12 +263,12 @@ psm2_error_t ips_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 		}
 
 		ptl->recvshc = recvshc;
-		recvshc->ptl = ptl;
+		recvshc->ptl = ptl_gen;
 
 		/* Initialize recvshc fields */
-		recvshc->context = ctxt_info->ctxt;
-		recvshc->subcontext = ctxt_info->subctxt;
-		recvshc->subcontext_cnt = user_info->subctxt_cnt;
+		recvshc->context = psmi_hal_get_context(context->psm_hw_ctxt);
+		recvshc->subcontext = psmi_hal_get_subctxt(context->psm_hw_ctxt);
+		recvshc->subcontext_cnt = psmi_hal_get_subctxt_cnt(context->psm_hw_ctxt);
 		psmi_assert_always(recvshc->subcontext_cnt <=
 				   HFI1_MAX_SHARED_CTXTS);
 		psmi_assert_always(recvshc->subcontext <
@@ -379,13 +278,13 @@ psm2_error_t ips_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 		 * Using ep->context to avoid const modifier since this function
 		 * will modify the content in ep->context.
 		 */
-		if ((err = ips_subcontext_ureg_get(ptl, recvshc->subcontext_cnt,
-						   &ep->context,
-						   recvshc->subcontext_ureg)))
+		if ((err = psmi_hal_subcontext_ureg_get(ptl_gen,
+							recvshc->subcontext_ureg, context->psm_hw_ctxt)))
 			goto fail;
 
-		memset(recvshc->subcontext_ureg[recvshc->subcontext], 0,
-		       sizeof(struct ips_subcontext_ureg));
+		/* Note that the GEN1 HAL instance initializes struct ips_subcontext_ureg
+		   during context open. */
+
 		recvshc->context_lock = &recvshc->hwcontext_ctrl->context_lock;
 		if (recvshc->subcontext == 0) {
 			if (pthread_spin_init(recvshc->context_lock,
@@ -398,19 +297,18 @@ psm2_error_t ips_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 			}
 		}
 	}
-
 	/*
 	 * Hardware send pio used by eager and control messages.
 	 */
-	if ((err = ips_spio_init(context, ptl, &ptl->spioc)))
+	if ((err = psmi_hal_spio_init(context, ptl_gen, &ptl->spioc)))
 		goto fail;
 
 	/*
 	 * Actual ips protocol handling.
 	 */
 	if ((err =
-	     ips_proto_init(context, ptl, num_of_send_bufs, num_of_send_desc,
-			    imm_size, &ptl->timerq, &ptl->epstate, &ptl->spioc,
+	     ips_proto_init(context, ptl_gen, num_of_send_bufs, num_of_send_desc,
+			    imm_size, &ptl->timerq, &ptl->epstate, ptl->spioc,
 			    &ptl->proto)))
 		goto fail;
 
@@ -421,41 +319,39 @@ psm2_error_t ips_ptl_init(const psm2_ep_t ep, ptl_t *ptl, ptl_ctl_t *ctl)
 	 */
 	if (!enable_shcontexts) {
 		struct ips_recvhdrq_callbacks recvq_callbacks;
-		struct ips_recvq_params hdrq, egrq;
-		recvhdrq_hw_params(context, &hdrq, &egrq, 0, 0);
 		recvq_callbacks.callback_packet_unknown =
 		    ips_proto_process_unknown;
 		recvq_callbacks.callback_subcontext = ips_subcontext_ignore;
 		recvq_callbacks.callback_error = ips_proto_process_packet_error;
 		if ((err =
 		     ips_recvhdrq_init(context, &ptl->epstate, &ptl->proto,
-				       &hdrq, &egrq, &recvq_callbacks,
-				       ptl->runtime_flags, 0, &ptl->recvq,
-				       &ptl->recvq_state)))
+				       &recvq_callbacks,
+				       0, &ptl->recvq,
+				       &ptl->recvq_state,
+				       PSM_HAL_CL_Q_RX_HDR_Q)))
 			goto fail;
 	}
-
 	/*
 	 * Software receive hdr/egr queue, used in shared contexts.
 	 */
-	else if ((err = shrecvq_init(ptl, context)))
+	else if ((err = shrecvq_init(ptl_gen, context)))
 		goto fail;
 
 	/*
 	 * Receive thread, always initialized but not necessary creates a
 	 * pthread.
 	 */
-	if ((err = ips_ptl_rcvthread_init(ptl, &ptl->recvq)))
+	if ((err = ips_ptl_rcvthread_init(ptl_gen, &ptl->recvq)))
 		goto fail;
 fail:
 	return err;
 }
 
-static psm2_error_t ips_ptl_fini(ptl_t *ptl, int force, uint64_t timeout_in)
+static psm2_error_t ips_ptl_fini(ptl_t *ptl_gen, int force, uint64_t timeout_in)
 {
-	const struct hfi1_user_info_dep *user_info = &ptl->context->user_info;
-	const int enable_shcontexts = (user_info->subctxt_cnt > 0);
+	struct ptl_ips *ptl = (struct ptl_ips *)ptl_gen;
 	psm2_error_t err = PSM2_OK;
+	const int enable_shcontexts = (psmi_hal_get_subctxt_cnt(ptl->context->psm_hw_ctxt) > 0);
 
 	if ((err = ips_proto_fini(&ptl->proto, force, timeout_in)))
 		goto fail;
@@ -463,22 +359,20 @@ static psm2_error_t ips_ptl_fini(ptl_t *ptl, int force, uint64_t timeout_in)
 	/* We have to cancel the thread after terminating the protocol because
 	 * connect/disconnect packets use interrupts and the kernel doesn't
 	 * like to have no pollers waiting */
-	if ((err = ips_ptl_rcvthread_fini(ptl)))
+	if ((err = ips_ptl_rcvthread_fini(ptl_gen)))
 		goto fail;
 
 	if ((err = ips_epstate_fini(&ptl->epstate)))
 		goto fail;
 
-	if ((err = ips_spio_fini(&ptl->spioc)))
+	if ((err = psmi_hal_spio_fini(&ptl->spioc, ptl->context->psm_hw_ctxt)))
 		goto fail;
 
 	if ((err = psmi_timer_fini(&ptl->timerq)))
 		goto fail;
 
-	if (!enable_shcontexts && (err = ips_recvhdrq_fini(&ptl->recvq)))
-		goto fail;
 
-	if (enable_shcontexts && (err = shrecvq_fini(ptl)))
+	if (enable_shcontexts && (err = shrecvq_fini(ptl_gen)))
 		goto fail;
 
 fail:
@@ -573,7 +467,7 @@ ips_ptl_optctl(const void *core_obj, int optname,
 
 			if (get) {
 				*((uint8_t *) optval) =
-				    ep->ptl_ips.ptl->proto.epinfo.ep_sl;
+					((struct ptl_ips *)(ep->ptl_ips.ptl))->proto.epinfo.ep_sl;
 			} else {
 				uint16_t new_sl;
 
@@ -588,7 +482,7 @@ ips_ptl_optctl(const void *core_obj, int optname,
 					goto exit_fn;
 				}
 
-				ep->ptl_ips.ptl->proto.epinfo.ep_sl =
+				((struct ptl_ips *)(ep->ptl_ips.ptl))->proto.epinfo.ep_sl =
 				    (uint8_t) new_sl;
 			}
 		}
@@ -620,19 +514,19 @@ ips_ptl_getopt(const void *component_obj, int optname,
 	return ips_ptl_optctl(component_obj, optname, optval, optlen, 1);
 }
 
-
 static
 uint32_t
 ips_ptl_rcvthread_is_enabled(const ptl_t *ptl)
 {
-	return (ptl->runtime_flags & PSMI_RUNTIME_RCVTHREAD);
+	return psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
 }
 
-psm2_error_t ips_ptl_poll(ptl_t *ptl, int _ignored)
+psm2_error_t ips_ptl_poll(ptl_t *ptl_gen, int _ignored)
 {
+	struct ptl_ips *ptl = (struct ptl_ips *)ptl_gen;
 	const uint64_t current_count = get_cycles();
 	const int do_lock = PSMI_LOCK_DISABLED &&
-	    (ptl->runtime_flags & PSMI_RUNTIME_RCVTHREAD);
+		psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
 	psm2_error_t err = PSM2_OK_NO_PROGRESS;
 	psm2_error_t err2;
 
@@ -642,7 +536,6 @@ psm2_error_t ips_ptl_poll(ptl_t *ptl, int _ignored)
 		if (ptl->recvq.proto->flags & IPS_PROTO_FLAG_CCA_PRESCAN) {
 			ips_recvhdrq_scan_cca(&ptl->recvq);
 		}
-
 		err = ips_recvhdrq_progress(&ptl->recvq);
 		if (do_lock)
 			ips_recvhdrq_unlock(&ptl->recvq);
@@ -690,8 +583,9 @@ PSMI_INLINE(void ips_unlock_shared_context(struct ptl_shared *recvshc))
 	pthread_spin_unlock(recvshc->context_lock);
 }
 
-psm2_error_t ips_ptl_shared_poll(ptl_t *ptl, int _ignored)
+psm2_error_t ips_ptl_shared_poll(ptl_t *ptl_gen, int _ignored)
 {
+	struct ptl_ips *ptl = (struct ptl_ips *)ptl_gen;
 	const uint64_t current_count = get_cycles();
 	psm2_error_t err = PSM2_OK_NO_PROGRESS;
 	psm2_error_t err2;
@@ -712,7 +606,6 @@ psm2_error_t ips_ptl_shared_poll(ptl_t *ptl, int _ignored)
 				if (ptl->recvq.proto->flags & IPS_PROTO_FLAG_CCA_PRESCAN) {
 					ips_recvhdrq_scan_cca(&ptl->recvq);
 				}
-
 				err = ips_recvhdrq_progress(&ptl->recvq);
 			}
 			ips_unlock_shared_context(recvshc);
@@ -726,7 +619,6 @@ psm2_error_t ips_ptl_shared_poll(ptl_t *ptl, int _ignored)
 		if (recvshc->recvq.proto->flags & IPS_PROTO_FLAG_CCA_PRESCAN) {
 			ips_recvhdrq_scan_cca(&recvshc->recvq);
 		}
-
 		err2 = ips_recvhdrq_progress(&recvshc->recvq);
 		if (err2 != PSM2_OK_NO_PROGRESS) {
 			err = err2;
@@ -747,8 +639,9 @@ psm2_error_t ips_ptl_shared_poll(ptl_t *ptl, int _ignored)
 	return err;
 }
 
-int ips_ptl_recvq_isempty(const ptl_t *ptl)
+int ips_ptl_recvq_isempty(const ptl_t *ptl_gen)
 {
+	struct ptl_ips *ptl = (struct ptl_ips *)ptl_gen;
 	struct ptl_shared *recvshc = ptl->recvshc;
 
 	if (recvshc != NULL && !ips_recvhdrq_isempty(&recvshc->recvq))
@@ -765,47 +658,46 @@ int ips_get_stat(psm2_epaddr_t epaddr, ips_sess_stat *stats)
 	return 0;
 }
 
-static psm2_error_t shrecvq_init(ptl_t *ptl, const psmi_context_t *context)
+static psm2_error_t shrecvq_init(ptl_t *ptl_gen, const psmi_context_t *context)
 {
+	struct ptl_ips *ptl = (struct ptl_ips *)ptl_gen;
 	struct ptl_shared *recvshc = ptl->recvshc;
 	struct ips_recvhdrq_callbacks recvq_callbacks;
-	struct ips_recvq_params hdrq, egrq;
 	psm2_error_t err = PSM2_OK;
 	int i;
 
 	/* Initialize (shared) hardware context recvq (ptl->recvq) */
 	/* NOTE: uses recvq in ptl structure for shared h/w context */
-	recvhdrq_hw_params(context, &hdrq, &egrq, 0, 0);
 	recvq_callbacks.callback_packet_unknown = ips_proto_process_unknown;
 	recvq_callbacks.callback_subcontext = ips_subcontext_process;
 	recvq_callbacks.callback_error = ips_proto_process_packet_error;
 	if ((err = ips_recvhdrq_init(context, &ptl->epstate, &ptl->proto,
-				     &hdrq, &egrq, &recvq_callbacks,
-				     ptl->runtime_flags, recvshc->subcontext,
+				     &recvq_callbacks,
+				     recvshc->subcontext,
 				     &ptl->recvq,
-				     &recvshc->hwcontext_ctrl->recvq_state))) {
+				     &recvshc->hwcontext_ctrl->recvq_state,
+				     PSM_HAL_CL_Q_RX_HDR_Q))) {
 		goto fail;
 	}
 
 	/* Initialize software subcontext (recvshc->recvq). Subcontexts do */
 	/* not require the rcvhdr copy feature. */
-	recvhdrq_hw_params(context, &hdrq, &egrq, 1, recvshc->subcontext);
 	recvq_callbacks.callback_subcontext = ips_subcontext_ignore;
 	if ((err = ips_recvhdrq_init(context, &ptl->epstate, &ptl->proto,
-				     &hdrq, &egrq, &recvq_callbacks,
-				     ptl->runtime_flags, recvshc->subcontext,
-				     &recvshc->recvq, &recvshc->recvq_state))) {
+				     &recvq_callbacks,
+				     recvshc->subcontext,
+				     &recvshc->recvq, &recvshc->recvq_state,
+				     PSM_HAL_GET_SC_CL_Q_RX_HDR_Q(recvshc->subcontext)))) {
 		goto fail;
 	}
 
 	/* Initialize each recvshc->writeq for shared contexts */
 	for (i = 0; i < recvshc->subcontext_cnt; i++) {
-		recvhdrq_hw_params(context, &hdrq, &egrq, 1, i);
-		if ((err = ips_writehdrq_init(context, &hdrq, &egrq,
+		if ((err = ips_writehdrq_init(context,
 					      &recvshc->writeq[i],
 					      &recvshc->subcontext_ureg[i]->
 					      writeq_state,
-					      ptl->runtime_flags))) {
+					      i))) {
 			goto fail;
 		}
 	}
@@ -819,38 +711,25 @@ fail:
 	return err;
 }
 
-static psm2_error_t shrecvq_fini(ptl_t *ptl)
+static psm2_error_t shrecvq_fini(ptl_t *ptl_gen)
 {
+	struct ptl_ips *ptl = (struct ptl_ips *)ptl_gen;
 	psm2_error_t err = PSM2_OK;
 	int i;
 
 	/* disable my write header queue before deallocation */
 	i = ptl->recvshc->subcontext;
 	ptl->recvshc->subcontext_ureg[i]->writeq_state.enabled = 0;
-
-	if ((err = ips_recvhdrq_fini(&ptl->recvq)))
-		goto fail;
-
-	if ((err = ips_recvhdrq_fini(&ptl->recvshc->recvq)))
-		goto fail;
-
-	for (i = 0; i < ptl->recvshc->subcontext_cnt; i++) {
-		if ((err = ips_writehdrq_fini(&ptl->recvshc->writeq[i]))) {
-			goto fail;
-		}
-	}
-
 	psmi_free(ptl->recvshc);
-
-fail:
 	return err;
 }
 
 psm2_error_t
-ips_ptl_connect(ptl_t *ptl, int numep, const psm2_epid_t *array_of_epid,
+ips_ptl_connect(ptl_t *ptl_gen, int numep, const psm2_epid_t *array_of_epid,
 		const int *array_of_epid_mask, psm2_error_t *array_of_errors,
 		psm2_epaddr_t *array_of_epaddr, uint64_t timeout_in)
 {
+	struct ptl_ips *ptl = (struct ptl_ips *)ptl_gen;
 	psm2_error_t err;
 	psm2_ep_t ep;
 	psm2_epid_t *epid_array = NULL;
@@ -913,9 +792,9 @@ ips_ptl_connect(ptl_t *ptl, int numep, const psm2_epid_t *array_of_epid,
 
 		/* Make the real protocol connections. */
 		err =
-		    ips_proto_connect(&ep->ptl_ips.ptl->proto, numep,
-				      epid_array, mask_array, error_array,
-				      epaddr_array, timeout_in);
+			ips_proto_connect(&((struct ptl_ips *)(ep->ptl_ips.ptl))->proto,
+					  numep, epid_array, mask_array, error_array,
+					  epaddr_array, timeout_in);
 		if (err)
 			goto fail;
 
@@ -936,17 +815,39 @@ fail:
 }
 
 psm2_error_t
-ips_ptl_disconnect(ptl_t *ptl, int force, int numep,
+ips_ptl_disconnect(ptl_t *ptl_gen, int force, int numep,
 		   psm2_epaddr_t array_of_epaddr[],
 		   const int array_of_epaddr_mask[],
 		   psm2_error_t array_of_errors[], uint64_t timeout_in)
 {
+	struct ptl_ips *ptl = (struct ptl_ips *)ptl_gen;
+	int *array_of_epaddr_mask_internal, i;
 	psm2_error_t err;
 
+	/*
+	 * Copy true values from array_of_epaddr_mask, provided that their
+	 * respective epaddr is an ips one.
+	 * Newly created mask will be used for the protocol disconnect call
+	 * instead.
+	 */
 	PSMI_LOCK_ASSERT(ptl->ep->mq->progress_lock);
+	array_of_epaddr_mask_internal = psmi_calloc(ptl->ep, UNDEFINED,
+						    sizeof(int), numep);
+	if (!array_of_epaddr_mask_internal)
+		return PSM2_NO_MEMORY;
+
+	for (i = 0; i < numep; ++i) {
+		if (array_of_epaddr_mask[i] && array_of_epaddr[i]
+		    && array_of_epaddr[i]->ptlctl->ptl == ptl_gen) {
+			array_of_epaddr_mask_internal[i] = 1;
+		}
+	}
+
 	err = ips_proto_disconnect(&ptl->proto, force, numep, array_of_epaddr,
-				   array_of_epaddr_mask, array_of_errors,
-				   timeout_in);
+				   array_of_epaddr_mask_internal,
+				   array_of_errors, timeout_in);
+
+	psmi_free(array_of_epaddr_mask_internal);
 	return err;
 }
 

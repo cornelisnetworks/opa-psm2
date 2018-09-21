@@ -73,6 +73,11 @@ static inline long flush_l3cache()
 	/* allocating and scribbling twice the size of L3 cache in order to
 	 ensure the L3 cache is invalidated. */
 	char *_cache_flush = malloc(2*l3_cache_size);
+	if (_cache_flush == NULL)
+	{
+		perror("memory allocation failure");
+		exit(1);
+	}
 	for (i = 0; i < 80; i++)
 		for (j = 0; j < l3_cache_size*2; j++)
 			_cache_flush[j] = i * j;

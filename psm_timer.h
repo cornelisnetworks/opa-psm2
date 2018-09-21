@@ -60,10 +60,6 @@
 #ifndef _PSMI_TIMER_H
 #define _PSMI_TIMER_H
 
-#include "psm_user.h"
-
-/* Keep timer stats */
-#define PSMI_TIMER_STATS 0
 
 typedef struct psmi_timer psmi_timer;
 typedef psm2_error_t(*psmi_timer_expire_callback_t) (struct psmi_timer *,

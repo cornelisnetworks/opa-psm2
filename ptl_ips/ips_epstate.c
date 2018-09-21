@@ -53,6 +53,8 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
+#include "psm_user.h"
+#include "psm2_hal.h"
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
 #include "ips_epstate.h"
@@ -63,8 +65,6 @@
  * by the endpoint that allocates the index.  This narrows the window of two
  * jobs communicated with the same set of indexes from getting crosstalk.
  */
-/* Allocate new epaddrs in chunks of 128 */
-#define PTL_EPADDR_ALLOC_CHUNK  128
 
 psm2_error_t
 ips_epstate_init(struct ips_epstate *eps, const psmi_context_t *context)

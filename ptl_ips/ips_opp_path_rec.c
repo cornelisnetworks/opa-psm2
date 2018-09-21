@@ -54,13 +54,9 @@
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
-#include "ipserror.h"
+#include "psm2_hal.h"
 #include "ips_proto.h"
-#include "ips_proto_internal.h"
 #include <dlfcn.h>
-
-#define DF_OPP_LIBRARY "libopasadb.so.1.0.0"
-#define DATA_VFABRIC_OFFSET 8
 
 /* SLID and DLID are in network byte order */
 static psm2_error_t
@@ -157,8 +153,7 @@ ips_opp_get_path_rec(ips_path_type_t type, struct ips_proto *proto,
 			proto->flags &= ~IPS_PROTO_FLAG_CCA;
 			proto->flags &= ~IPS_PROTO_FLAG_CCA_PRESCAN;
 		}
-		if (!(proto->ep->context.runtime_flags &
-					HFI1_CAP_STATIC_RATE_CTRL)) {
+		if (!psmi_hal_has_cap(PSM_HAL_CAP_STATIC_RATE_CTRL)) {
 			_HFI_CCADBG("No Static-Rate-Control, disable CCA\n");
 			proto->flags &= ~IPS_PROTO_FLAG_CCA;
 			proto->flags &= ~IPS_PROTO_FLAG_CCA_PRESCAN;
@@ -335,8 +330,13 @@ ips_opp_path_rec(struct ips_proto *proto,
 		goto fail;
 	}
 
-	/* dlid is the peer base lid */
-	pathgrp->pg_base_lid = __be16_to_cpu(dlid);
+	/*
+	 * dlid is the peer base lid.
+	 * slid is the base lid for the local end point.
+	 * Store here in network byte order.
+	 */
+	pathgrp->pg_base_dlid = dlid;
+	pathgrp->pg_base_slid = slid;
 
 	pathgrp->pg_num_paths[IPS_PATH_HIGH_PRIORITY] =
 	    pathgrp->pg_num_paths[IPS_PATH_NORMAL_PRIORITY] =
@@ -359,6 +359,11 @@ ips_opp_path_rec(struct ips_proto *proto,
 			/* Increment current path index */
 			cpath++;
 		}
+
+		PSM2_LOG_MSG("path %p slid %hu dlid %hu\n",
+			      path,
+			      __be16_to_cpu(path->pr_slid),
+			      __be16_to_cpu(path->pr_dlid));
 	}
 
 	/* Make sure we have atleast 1 high priority path */
@@ -374,8 +379,9 @@ ips_opp_path_rec(struct ips_proto *proto,
 	}
 
 	/* Once we have the high-priority path, set the partition key */
-	if (hfi_set_pkey(proto->ep->context.ctrl,
-			 (uint16_t) pathgrp->pg_path[0][IPS_PATH_HIGH_PRIORITY]->pr_pkey) != 0) {
+	if (psmi_hal_set_pkey(proto->ep->context.psm_hw_ctxt,
+			      (uint16_t) pathgrp->pg_path[0][IPS_PATH_HIGH_PRIORITY]->pr_pkey)
+	    != 0) {
 		err = psmi_handle_error(proto->ep, PSM2_EP_DEVICE_FAILURE,
 					"Couldn't set device pkey 0x%x: %s",
 					(int)pathgrp->pg_path[0][IPS_PATH_HIGH_PRIORITY]->pr_pkey,
@@ -554,8 +560,9 @@ psm2_error_t ips_opp_init(struct ips_proto *proto)
 	}
 
 	/* Obtain handle to hfi (requires verbs on node) */
-	snprintf(hfiName, sizeof(hfiName), "hfi1_%d",
-		 proto->ep->context.ctrl->__hfi_unit);
+	snprintf(hfiName, sizeof(hfiName), "%s_%d",
+		 psmi_hal_get_hfi_name(),
+		 psmi_hal_get_unit_id(proto->ep->context.psm_hw_ctxt));
 	proto->hndl = proto->opp_fn.op_path_find_hca(hfiName, &proto->device);
 	if (!proto->hndl) {
 		_HFI_ERROR

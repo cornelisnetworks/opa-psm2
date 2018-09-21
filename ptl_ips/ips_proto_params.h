@@ -115,14 +115,6 @@
  */
 #define IPS_PROTO_VERSION 0x1
 
-/* Send retransmission */
-#define IPS_PROTO_SPIO_RETRY_US_DEFAULT	2	/* in uS */
-
-#define IPS_PROTO_ERRCHK_MS_MIN_DEFAULT	160	/* in millisecs */
-#define IPS_PROTO_ERRCHK_MS_MAX_DEFAULT	640	/* in millisecs */
-#define IPS_PROTO_ERRCHK_FACTOR_DEFAULT 2
-#define PSM_TID_TIMEOUT_DEFAULT "160:640:2"	/* update from above params */
-
 /* time conversion macros */
 #define us_2_cycles(us) nanosecs_to_cycles(1000ULL*(us))
 #define ms_2_cycles(ms)  nanosecs_to_cycles(1000000ULL*(ms))
@@ -167,14 +159,15 @@
 /* scb flags */
 #define IPS_SEND_FLAG_PENDING		0x0100
 #define IPS_SEND_FLAG_PERSISTENT	0x0200
+#define IPS_SEND_FLAG_NO_LMC		0x0400
 
+#ifdef PSM_CUDA
 /* This flag is used to indicate if the send is on
  * a GPU buffer. This helps PIO/SDMA paths to detect
  * if payload is GPU buffer without having to call
  * cudaGetPointerAttribute.
  */
-#ifdef PSM_CUDA
-#define IPS_SEND_FLAG_PAYLOAD_BUF_GPU   0x0400
+#define IPS_SEND_FLAG_PAYLOAD_BUF_GPU   0x0800
 #endif
 
 /* 0x10000000, interrupt when done */
@@ -239,35 +232,5 @@
 #define IPS_PROTOEXP_FLAG_RTS_CTS_INTERLEAVE 0x08	/* Interleave RTS handling. */
 #define IPS_PROTOEXP_FLAG_CTS_SERIALIZED 0x10	/* CTS serialized */
 #define IPS_PROTOEXP_FLAGS_DEFAULT	     IPS_PROTOEXP_FLAG_ENABLED
-
-
-/* We have to get an MTU of at least 2K, or else this breaks some assumptions
- * in the packets that handle tid descriptors
- */
-#define IPS_PROTOEXP_MIN_MTU		2048
-
-/* Fault injection, becomes parameters to psmi_faultinj_getspec so
- * a comma-delimited list of
- *   "spec_name", num, denom
- * Where num/denom means fault num out of every denom.
- * The defines set 'denum' and assume that num is set to 1
- *
- * These values are all defaults, each is overridable via
- * PSM2_FI_<spec_name> in the environment (and yes, spec_name is in lowercase
- * *in the environment* just to minimize it appearing in the wild).  The format
- * there is <num:denom:initial_seed> so the same thing except that one can set
- * a specific seed to the random number generator.
- */
-#if 1
-#define IPS_FAULTINJ_DMALOST	20	/* 1 every 20 dma writev get lost */
-#define IPS_FAULTINJ_PIOLOST	100	/* 1 every 100 pio writes get lost */
-#define IPS_FAULTINJ_PIOBUSY	10	/* 1 every 10 pio sends get busy */
-#define IPS_FAULTINJ_RECVLOST	200	/* 1 every 200 pkts dropped at recv */
-#else
-#define IPS_FAULTINJ_DMALOST	500	/* 1 every 500 dma writev get lost */
-#define IPS_FAULTINJ_PIOLOST	3000	/* 1 every 3000 pio writes get lost */
-#define IPS_FAULTINJ_PIOBUSY	100	/* 1 every 100 pio sends get busy */
-#define IPS_FAULTINJ_RECVLOST	500	/* 1 every 500 pkts dropped at recv */
-#endif
 
 #endif /* _IPS_PROTO_PARAMS_H */

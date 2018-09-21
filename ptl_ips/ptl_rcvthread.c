@@ -55,17 +55,11 @@
 
 #include <sys/poll.h>
 
+#include "psm_user.h"
+#include "psm2_hal.h"
+#include "psm_mq_internal.h"
 #include "ptl_ips.h"
 #include "ips_proto.h"
-#include "ips_proto_internal.h"
-#include "ips_recvhdrq.h"
-#include "psm_mq_internal.h"
-#include "psm_user.h"
-
-/* All in milliseconds */
-#define RCVTHREAD_TO_MIN_FREQ	    10	/* min of 10 polls per sec */
-#define RCVTHREAD_TO_MAX_FREQ	    100	/* max of 100 polls per sec */
-#define RCVTHREAD_TO_SHIFT	    1
 
 struct ptl_rcvthread;
 
@@ -109,8 +103,9 @@ struct ptl_rcvthread {
  * The receive thread knows about the ptl interface, so it can muck with it
  * directly.
  */
-psm2_error_t ips_ptl_rcvthread_init(ptl_t *ptl, struct ips_recvhdrq *recvq)
+psm2_error_t ips_ptl_rcvthread_init(ptl_t *ptl_gen, struct ips_recvhdrq *recvq)
 {
+	struct ptl_ips *ptl = (struct ptl_ips *)ptl_gen;
 	psm2_error_t err = PSM2_OK;
 	struct ptl_rcvthread *rcvc;
 
@@ -123,16 +118,17 @@ psm2_error_t ips_ptl_rcvthread_init(ptl_t *ptl, struct ips_recvhdrq *recvq)
 	rcvc = ptl->rcvthread;
 
 	rcvc->recvq = recvq;
-	rcvc->ptl = ptl;
+	rcvc->ptl = ptl_gen;
 	rcvc->context = ptl->context;
 	rcvc->t_start_cyc = get_cycles();
 
 #ifdef PSM_CUDA
 	if (PSMI_IS_CUDA_ENABLED)
-		PSMI_CUDA_DRIVER_API_CALL(cuCtxGetCurrent, &ctxt);
+		PSMI_CUDA_CALL(cuCtxGetCurrent, &ctxt);
 #endif
 
-	if (ptl->runtime_flags & PSMI_RUNTIME_RCVTHREAD) {
+	if (psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RTS_RX_THREAD) &&
+	    (!psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED))){
 
 		if ((err = rcvthread_initsched(rcvc)))
 			goto fail;
@@ -145,6 +141,7 @@ psm2_error_t ips_ptl_rcvthread_init(ptl_t *ptl, struct ips_recvhdrq *recvq)
 			goto fail;
 		}
 
+		psmi_hal_add_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
 		if (pthread_create(&rcvc->hdrq_threadid, NULL,
 				   ips_ptl_pollintr, ptl->rcvthread)) {
 			close(rcvc->pipefd[0]);
@@ -157,15 +154,16 @@ psm2_error_t ips_ptl_rcvthread_init(ptl_t *ptl, struct ips_recvhdrq *recvq)
 
 	}
 
-	if ((err = rcvthread_initstats(ptl)))
+	if ((err = rcvthread_initstats(ptl_gen)))
 		goto fail;
 
 fail:
 	return err;
 }
 
-psm2_error_t ips_ptl_rcvthread_fini(ptl_t *ptl)
+psm2_error_t ips_ptl_rcvthread_fini(ptl_t *ptl_gen)
 {
+	struct ptl_ips *ptl = (struct ptl_ips *)ptl_gen;
 	struct ptl_rcvthread *rcvc = (struct ptl_rcvthread *)ptl->rcvthread;
 	uint64_t t_now;
 	psm2_error_t err = PSM2_OK;
@@ -175,7 +173,7 @@ psm2_error_t ips_ptl_rcvthread_fini(ptl_t *ptl)
 	if (ptl->rcvthread == NULL)
 		return err;
 
-	if (ptl->runtime_flags & PSMI_RUNTIME_RCVTHREAD) {
+	if (rcvc->hdrq_threadid && psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED)) {
 		t_now = get_cycles();
 
 		/* Disable interrupts then kill the receive thread */
@@ -197,7 +195,8 @@ psm2_error_t ips_ptl_rcvthread_fini(ptl_t *ptl)
 			    ("unable to close pipe to receive thread cleanly\n");
 		}
 		pthread_join(rcvc->hdrq_threadid, NULL);
-
+		psmi_hal_sub_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
+		rcvc->hdrq_threadid = 0;
 		if (_HFI_PRDBG_ON) {
 			_HFI_PRDBG_ALWAYS
 				("rcvthread poll success %lld/%lld times, "
@@ -208,18 +207,18 @@ psm2_error_t ips_ptl_rcvthread_fini(ptl_t *ptl)
 	}
 
 	psmi_free(ptl->rcvthread);
-
+	ptl->rcvthread = NULL;
 fail:
 	return err;
 }
 
-void ips_ptl_rcvthread_transfer_ownership(ptl_t *from_ptl, ptl_t *to_ptl)
+void ips_ptl_rcvthread_transfer_ownership(ptl_t *from_ptl_gen, ptl_t *to_ptl_gen)
 {
 	struct ptl_rcvthread *rcvc;
 
-	from_ptl->runtime_flags &= ~(PSMI_RUNTIME_RCVTHREAD);
-	to_ptl->runtime_flags |= PSMI_RUNTIME_RCVTHREAD;
-
+	psmi_hal_sub_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
+	struct ptl_ips *from_ptl = (struct ptl_ips *)from_ptl_gen;
+	struct ptl_ips *to_ptl   = (struct ptl_ips *)to_ptl_gen;
 	to_ptl->rcvthread = from_ptl->rcvthread;
 	from_ptl->rcvthread = NULL;
 
@@ -227,7 +226,7 @@ void ips_ptl_rcvthread_transfer_ownership(ptl_t *from_ptl, ptl_t *to_ptl)
 
 	rcvc->recvq = &to_ptl->recvq;
 	rcvc->context = to_ptl->context;
-	rcvc->ptl = to_ptl;
+	rcvc->ptl = to_ptl_gen;
 }
 
 psm2_error_t rcvthread_initsched(struct ptl_rcvthread *rcvc)
@@ -349,13 +348,13 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 
 #ifdef PSM_CUDA
 	if (PSMI_IS_CUDA_ENABLED && ctxt != NULL)
-		PSMI_CUDA_DRIVER_API_CALL(cuCtxSetCurrent, ctxt);
+		PSMI_CUDA_CALL(cuCtxSetCurrent, ctxt);
 #endif
 
 	PSM2_LOG_MSG("entering");
 	/* No reason to have many of these, keep this as a backup in case the
 	 * recvhdrq init function is misused */
-	psmi_assert_always((recvq->runtime_flags & PSMI_RUNTIME_RCVTHREAD));
+	psmi_assert_always(psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED));
 
 	/* Switch driver to a mode where it can interrupt on urgent packets */
 	if (psmi_context_interrupt_set((psmi_context_t *)
@@ -369,7 +368,7 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 	_HFI_PRDBG("Enabled communication thread on URG packets\n");
 
 	while (1) {
-		pfd[0].fd = rcvc->context->fd;
+		pfd[0].fd = psmi_hal_get_fd(rcvc->context->psm_hw_ctxt);
 		pfd[0].events = POLLIN;
 		pfd[0].revents = 0;
 		pfd[1].fd = fd_pipe;
@@ -394,12 +393,11 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 		} else {
 			rcvc->pollcnt++;
 			if (!PSMI_LOCK_TRY(psmi_creation_lock)) {
-
 				if (ret == 0 || pfd[0].revents & (POLLIN | POLLERR)) {
 					if (PSMI_LOCK_DISABLED) {
 						/* We do this check without acquiring the lock, no sense to
-						* adding the overhead and it doesn't matter if we're
-						* wrong. */
+						 * adding the overhead and it doesn't matter if we're
+						 * wrong. */
 						if (ips_recvhdrq_isempty(recvq))
 							continue;
 						if(recvq->proto->flags & IPS_PROTO_FLAG_CCA_PRESCAN) {
@@ -423,7 +421,6 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 							}
 							PSMI_UNLOCK(ep->mq->progress_lock);
 						}
-
 						/* Go through all master endpoints. */
 						do{
 							if (!PSMI_LOCK_TRY(ep->mq->progress_lock)) {
@@ -448,15 +445,12 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 						} while(NULL != ep);
 					}
 				}
-
 				PSMI_UNLOCK(psmi_creation_lock);
 			}
-
 			if (ret == 0) { /* change timeout only on timed out poll */
 				rcvc->pollcnt_to++;
 				next_timeout = rcvthread_next_timeout(rcvc);
 			}
-
 		}
 	}
 
@@ -482,8 +476,9 @@ static uint64_t rcvthread_stats_pollcyc(void *context)
 	return (uint64_t) ((double)cycles_to_nanosecs(rcvc->pollcyc) / 1.0e6);
 }
 
-static psm2_error_t rcvthread_initstats(ptl_t *ptl)
+static psm2_error_t rcvthread_initstats(ptl_t *ptl_gen)
 {
+	struct ptl_ips *ptl = (struct ptl_ips *)ptl_gen;
 	struct ptl_rcvthread *rcvc = (struct ptl_rcvthread *)ptl->rcvthread;
 	struct psmi_stats_entry entries[] = {
 		PSMI_STATS_DECL("intrthread schedule count",
@@ -505,7 +500,7 @@ static psm2_error_t rcvthread_initstats(ptl_t *ptl)
 
 	/* If we don't want a thread, make sure we still initialize the counters
 	 * but set them to NaN instead */
-	if (!(ptl->runtime_flags & PSMI_RUNTIME_RCVTHREAD)) {
+	if (!psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED)) {
 		int i;
 		static uint64_t ctr_nan = MPSPAWN_NAN;
 		for (i = 0; i < (int)PSMI_STATS_HOWMANY(entries); i++) {

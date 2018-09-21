@@ -284,10 +284,8 @@ stats_register_mpspawn_single(mpspawn_stats_add_fn add_fn,
 	mp_add.context = context;
 
 	mp_add.desc = (char **)alloca(sizeof(char *) * num_entries);
-	psmi_assert_always(mp_add.desc != NULL);
 
 	mp_add.flags = (uint16_t *) alloca(sizeof(uint16_t *) * num_entries);
-	psmi_assert_always(mp_add.flags != NULL);
 
 	for (i = 0; i < num_entries; i++) {
 		mp_add.desc[i] = (char *)entries[i].desc;

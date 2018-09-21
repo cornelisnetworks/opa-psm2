@@ -141,12 +141,6 @@ psmi_mpool_create_inner(size_t obj_size, uint32_t num_obj_per_chunk,
 	int s;
 	size_t hdr_size;
 
-#ifdef PSM_VALGRIND
-	/* For Valgrind we wish to define a "redzone" before and after the
-	 * allocation block, so we also allocate a blank mpool_element
-	 * at the end of the user's block */
-#endif
-
 	if (!PSMI_POWEROFTWO(num_obj_per_chunk) ||
 	    !PSMI_POWEROFTWO(num_obj_max_total) ||
 	    num_obj_max_total < num_obj_per_chunk) {
@@ -226,9 +220,6 @@ MOCKABLE(psmi_mpool_create)(size_t obj_size, uint32_t num_obj_per_chunk,
 		return NULL;
 	}
 
-	VALGRIND_CREATE_MEMPOOL(mp, 0 /* no redzone */ ,
-				PSM_VALGRIND_MEM_UNDEFINED);
-
 	return mp;
 }
 MOCK_DEF_EPILOGUE(psmi_mpool_create);
@@ -257,9 +248,6 @@ psmi_mpool_create_for_cuda(size_t obj_size, uint32_t num_obj_per_chunk,
 		psmi_mpool_destroy(mp);
 		return NULL;
 	}
-
-	VALGRIND_CREATE_MEMPOOL(mp, 0 /* no redzone */ ,
-				PSM_VALGRIND_MEM_UNDEFINED);
 
 	return mp;
 }
@@ -297,7 +285,7 @@ void *psmi_mpool_get(mpool_t mp)
 	psmi_assert(mp->mp_num_obj_inuse <= mp->mp_num_obj);
 
 	obj = (void *)((uintptr_t) me + sizeof(struct mpool_element));
-	VALGRIND_MEMPOOL_ALLOC(mp, obj, mp->mp_obj_size);
+
 	return obj;
 }
 
@@ -330,8 +318,6 @@ void psmi_mpool_put(void *obj)
 	SLIST_INSERT_HEAD(&mp->mp_head, me, me_next);
 
 	mp->mp_num_obj_inuse--;
-
-	VALGRIND_MEMPOOL_FREE(mp, obj);
 
 	/* tell the user that memory is available */
 	if (mp->mp_non_empty_cb && was_empty)
@@ -463,7 +449,6 @@ void psmi_mpool_destroy(mpool_t mp)
 	}
 	psmi_free(mp->mp_elm_vector);
 	nbytes += mp->mp_elm_vector_size * sizeof(struct mpool_element *);
-	VALGRIND_DESTROY_MEMPOOL(mp);
 	psmi_free(mp);
 	nbytes += sizeof(struct mpool);
 }

@@ -54,7 +54,7 @@
 /* Copyright (c) 2003-2015 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
-#include "ipserror.h"
+#include "psm2_hal.h"
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
 
@@ -84,7 +84,6 @@ ips_proto_am,
 ips_proto_am				/* OPCODE_AM_REPLY */
 };
 
-#define PSM_STRAY_WARN_INTERVAL_DEFAULT_SECS	30
 static void ips_report_strays(struct ips_proto *proto);
 
 #define INC_TIME_SPEND(timer)
@@ -409,8 +408,8 @@ void ips_tidflow_nak_post_process(struct ips_proto *proto,
 		if (scb->nfrag_remaining == 1) {
 			psmi_assert(scb->chunk_size_remaining <=
 				    scb->frag_size);
-			scb->flags |= IPS_SEND_FLAG_ACKREQ;
-			scb->flags &= ~IPS_SEND_FLAG_HDRSUPP;
+			scb->scb_flags |= IPS_SEND_FLAG_ACKREQ;
+			scb->scb_flags &= ~IPS_SEND_FLAG_HDRSUPP;
 
 			/* last packet is what remaining */
 			pktlen = scb->chunk_size_remaining;
@@ -421,7 +420,7 @@ void ips_tidflow_nak_post_process(struct ips_proto *proto,
 			((first_seq & HFI_BTH_SEQ_MASK) << HFI_BTH_SEQ_SHIFT) |
 			((scb->seq_num.psn_gen &
 			HFI_BTH_GEN_MASK) << HFI_BTH_GEN_SHIFT) |
-			(scb->flags & IPS_SEND_FLAG_ACKREQ));
+			(scb->scb_flags & IPS_SEND_FLAG_ACKREQ));
 
 		/* 3. set new packet offset */
 		scb->ips_lrh.exp_offset += nbytes;
@@ -457,8 +456,8 @@ void ips_tidflow_nak_post_process(struct ips_proto *proto,
 			(IPS_TIDINFO_GET_TID(scb->tsess[0])
 					<< HFI_KHDR_TID_SHIFT) |
 			(scb->tidctrl << HFI_KHDR_TIDCTRL_SHIFT) |
-			(scb->flags & IPS_SEND_FLAG_INTR) |
-			(scb->flags & IPS_SEND_FLAG_HDRSUPP) |
+			(scb->scb_flags & IPS_SEND_FLAG_INTR) |
+			(scb->scb_flags & IPS_SEND_FLAG_HDRSUPP) |
 			(IPS_PROTO_VERSION << HFI_KHDR_KVER_SHIFT));
 	}
 
@@ -514,7 +513,7 @@ void ips_dmaflow_nak_post_process(struct ips_proto *proto,
 		/* 1. if last packet in sequence, set IPS_SEND_FLAG_ACKREQ */
 		if (scb->chunk_size_remaining <= scb->frag_size) {
 			psmi_assert(scb->nfrag_remaining == 1);
-			scb->flags |= IPS_SEND_FLAG_ACKREQ;
+			scb->scb_flags |= IPS_SEND_FLAG_ACKREQ;
 
 			/* last packet is what remaining */
 			/* check if padding is required*/
@@ -532,10 +531,10 @@ void ips_dmaflow_nak_post_process(struct ips_proto *proto,
 		/* 2. set new packet sequence number */
 		scb->ips_lrh.bth[2] = __cpu_to_be32(
 			((ack_num + 1) & proto->psn_mask) |
-			(scb->flags & IPS_SEND_FLAG_ACKREQ));
+			(scb->scb_flags & IPS_SEND_FLAG_ACKREQ));
 
 		/* 3. set new packet offset adjusted with padding */
-		ips_scb_hdrdata(scb).u32w0 += nbytes - padding;
+		scb->ips_lrh.hdr_data.u32w0 += nbytes - padding;
 
 		/* 4. if packet length is changed, set new length */
 		if (scb->payload_size != pktlen) {
@@ -621,7 +620,7 @@ ips_proto_process_ack(struct ips_recvhdrq_event *rcv_ev)
 			(*scb->callback) (scb->cb_param, scb->nfrag > 1 ?
 					  scb->chunk_size : scb->payload_size);
 
-		if (!(scb->flags & IPS_SEND_FLAG_PERSISTENT))
+		if (!(scb->scb_flags & IPS_SEND_FLAG_PERSISTENT))
 			ips_scbctrl_free(scb);
 
 		/* set all index pointer to NULL if all frames have been
@@ -771,7 +770,7 @@ int ips_proto_process_nak(struct ips_recvhdrq_event *rcv_ev)
 		  seq_num.psn_num);
 
 	/* For tidflow, psn_gen matches. So for all flows, tid/pio/dma,
-	 * we can used general psn_num to compare the PSN. */
+	 * we can use general psn_num to compare the PSN. */
 	while (between((scb = STAILQ_FIRST(unackedq))->seq_num.psn_num,
 		       last_seq_num.psn_num, ack_seq_num.psn_num)
 	    ) {
@@ -797,7 +796,7 @@ int ips_proto_process_nak(struct ips_recvhdrq_event *rcv_ev)
 			(*scb->callback) (scb->cb_param, scb->nfrag > 1 ?
 					  scb->chunk_size : scb->payload_size);
 
-		if (!(scb->flags & IPS_SEND_FLAG_PERSISTENT))
+		if (!(scb->scb_flags & IPS_SEND_FLAG_PERSISTENT))
 			ips_scbctrl_free(scb);
 
 		/* set all index pointer to NULL if all frames has been acked */
@@ -854,13 +853,13 @@ int ips_proto_process_nak(struct ips_recvhdrq_event *rcv_ev)
 #ifdef PSM_DEBUG
 	flow->scb_num_pending = flow->scb_num_unacked;
 #endif
-	while (scb && !(scb->flags & IPS_SEND_FLAG_PENDING)) {
+	while (scb && !(scb->scb_flags & IPS_SEND_FLAG_PENDING)) {
 		/* Wait for the previous dma completion */
 		if (flow->transfer == PSM_TRANSFER_DMA &&
 				scb->dma_complete == 0)
 			ips_proto_dma_wait_until(proto, scb);
 
-		scb->flags |= IPS_SEND_FLAG_PENDING;
+		scb->scb_flags |= IPS_SEND_FLAG_PENDING;
 		scb = SLIST_NEXT(scb, next);
 	}
 
@@ -954,9 +953,8 @@ ips_proto_process_err_chk(struct ips_recvhdrq_event *rcv_ev)
 	else {
 		ips_scb_t ctrlscb;
 
-		ctrlscb.flags = 0;
+		ctrlscb.scb_flags = 0;
 		ctrlscb.ips_lrh.ack_seq_num = flow->recv_seq_num.psn_num;
-
 		ips_proto_send_ctrl_message(flow, OPCODE_ACK,
 					    &ipsaddr->ctrl_msg_queued,
 					    &ctrlscb, ctrlscb.cksum, 0);
@@ -973,12 +971,12 @@ ips_proto_process_err_chk_gen(struct ips_recvhdrq_event *rcv_ev)
 	struct ips_message_header *p_hdr = rcv_ev->p_hdr;
 	struct ips_protoexp *protoexp = recvq->proto->protoexp;
 	struct ips_tid_recv_desc *tidrecvc;
-	ips_scb_t ctrlscb;
 	psmi_seqnum_t err_seqnum, recvseq;
 	ptl_arg_t desc_id = p_hdr->data[0];
 	ptl_arg_t send_desc_id = p_hdr->data[1];
 	int16_t seq_off;
 	uint8_t ack_type;
+	ips_scb_t ctrlscb;
 
 	INC_TIME_SPEND(TIME_SPEND_USER4);
 	PSM2_LOG_MSG("entering");
@@ -1019,9 +1017,15 @@ ips_proto_process_err_chk_gen(struct ips_recvhdrq_event *rcv_ev)
 	 * has received it successfully.
 	 */
 	if (!tidrecvc->context->tf_ctrl)
-		recvseq.psn_seq = hfi_tidflow_get_seqnum(
-			hfi_tidflow_get(tidrecvc->context->ctrl,
-			tidrecvc->rdescid._desc_idx));
+	{
+		uint64_t tf;
+		uint32_t seqno=0;
+
+		psmi_hal_tidflow_get(tidrecvc->rdescid._desc_idx, &tf,
+				     tidrecvc->context->psm_hw_ctxt);
+		psmi_hal_tidflow_get_seqnum(tf, &seqno);
+		recvseq.psn_seq = seqno;
+	}
 
 	if (err_seqnum.psn_gen != recvseq.psn_gen) {
 		ack_type = OPCODE_NAK;
@@ -1056,7 +1060,7 @@ ips_proto_process_err_chk_gen(struct ips_recvhdrq_event *rcv_ev)
 			ack_type = OPCODE_ACK;
 	}
 
-	ctrlscb.flags = 0;
+	ctrlscb.scb_flags = 0;
 	ctrlscb.ips_lrh.data[0].u64 = send_desc_id.u64;
 	/* Keep peer generation but use my last received sequence */
 	err_seqnum.psn_seq = recvseq.psn_seq;
@@ -1159,7 +1163,6 @@ ips_proto_connect_disconnect(struct ips_recvhdrq_event *rcv_ev)
 int ips_proto_process_unknown(const struct ips_recvhdrq_event *rcv_ev)
 {
 	struct ips_message_header *p_hdr = rcv_ev->p_hdr;
-	uint8_t ptype = rcv_ev->ptype;
 	struct ips_proto *proto = rcv_ev->proto;
 	psm2_ep_t ep_err;
 	char *pkt_type;
@@ -1205,10 +1208,10 @@ int ips_proto_process_unknown(const struct ips_recvhdrq_event *rcv_ev)
 
 	/* Other messages are definitely crosstalk. */
 	/* out-of-context expected messages are always fatal */
-	if (ptype == RCVHQ_RCV_TYPE_EXPECTED) {
+	if (psmi_hal_rhf_get_rx_type(rcv_ev->psm_hal_rhf) == PSM_HAL_RHF_RX_TYPE_EXPECTED) {
 		ep_err = PSMI_EP_NORETURN;
 		pkt_type = "expected";
-	} else if (ptype == RCVHQ_RCV_TYPE_EAGER) {
+	} else if (psmi_hal_rhf_get_rx_type(rcv_ev->psm_hal_rhf) == PSM_HAL_RHF_RX_TYPE_EAGER) {
 		ep_err = PSMI_EP_LOGEVENT;
 		pkt_type = "eager";
 	} else {
@@ -1225,7 +1228,7 @@ int ips_proto_process_unknown(const struct ips_recvhdrq_event *rcv_ev)
 	/* At this point we are out of luck. */
 	psmi_handle_error(ep_err, PSM2_EPID_NETWORK_ERROR,
 			  "Received %s message(s) ptype=0x%x opcode=0x%x"
-			  " from an unknown process", pkt_type, ptype, opcode);
+			  " from an unknown process", pkt_type, psmi_hal_rhf_get_rx_type(rcv_ev->psm_hal_rhf), opcode);
 
 	return 0;		/* Always skip this packet unless the above call was a noreturn
 				 * call */
@@ -1254,12 +1257,12 @@ int ips_proto_process_packet_error(struct ips_recvhdrq_event *rcv_ev)
 {
 	struct ips_proto *proto = rcv_ev->proto;
 	int pkt_verbose_err = hfi_debug & __HFI_PKTDBG;
-	int tiderr = rcv_ev->error_flags & HFI_RHF_TIDERR;
-	int tf_seqerr = rcv_ev->error_flags & HFI_RHF_TFSEQERR;
-	int tf_generr = rcv_ev->error_flags & HFI_RHF_TFGENERR;
-	int data_err = rcv_ev->error_flags &
-	    (HFI_RHF_ICRCERR | HFI_RHF_ECCERR | HFI_RHF_LENERR |
-	     HFI_RHF_DCERR | HFI_RHF_DCUNCERR | HFI_RHF_KHDRLENERR);
+	int tiderr    = psmi_hal_rhf_get_all_err_flags(rcv_ev->psm_hal_rhf) & PSMI_HAL_RHF_ERR_TID;
+	int tf_seqerr = psmi_hal_rhf_get_all_err_flags(rcv_ev->psm_hal_rhf) & PSMI_HAL_RHF_ERR_TFSEQ;
+	int tf_generr = psmi_hal_rhf_get_all_err_flags(rcv_ev->psm_hal_rhf) & PSMI_HAL_RHF_ERR_TFGEN;
+	int data_err  = psmi_hal_rhf_get_all_err_flags(rcv_ev->psm_hal_rhf) &
+	    (PSMI_HAL_RHF_ERR_ICRC | PSMI_HAL_RHF_ERR_ECC | PSMI_HAL_RHF_ERR_LEN |
+	     PSMI_HAL_RHF_ERR_DC | PSMI_HAL_RHF_ERR_DCUN | PSMI_HAL_RHF_ERR_KHDRLEN);
 	char pktmsg[128];
 
 	*pktmsg = 0;
@@ -1267,7 +1270,7 @@ int ips_proto_process_packet_error(struct ips_recvhdrq_event *rcv_ev)
 	 * Tid errors on eager pkts mean we get a headerq overflow, perfectly
 	 * safe.  Tid errors on expected or other packets means trouble.
 	 */
-	if (tiderr && rcv_ev->ptype == RCVHQ_RCV_TYPE_EAGER) {
+	if (tiderr && psmi_hal_rhf_get_rx_type(rcv_ev->psm_hal_rhf) == PSM_HAL_RHF_RX_TYPE_EAGER) {
 		struct ips_message_header *p_hdr = rcv_ev->p_hdr;
 
 		/* Payload dropped - Determine flow for this header and see if
@@ -1349,7 +1352,8 @@ int ips_proto_process_packet_error(struct ips_recvhdrq_event *rcv_ev)
 			 * Treat this condition as a data error (corruption,etc)
 			 * and send a NAK.
 			 */
-			ips_protoexp_handle_data_err(rcv_ev);
+			if (psmi_hal_has_cap(PSM_HAL_CAP_RSM_FECN_SUPP))
+				ips_protoexp_handle_data_err(rcv_ev);
 			break;
 		default:
 			break;
@@ -1378,7 +1382,7 @@ int ips_proto_process_packet_error(struct ips_recvhdrq_event *rcv_ev)
 
 		if (ep_err != NULL) {
 			rhf_errnum_string(pktmsg, sizeof(pktmsg),
-					  rcv_ev->error_flags);
+					  psmi_hal_rhf_get_all_err_flags(rcv_ev->psm_hal_rhf));
 
 			tid = (__le32_to_cpu(rcv_ev->p_hdr->khdr.kdeth0) >>
 			       HFI_KHDR_TID_SHIFT) & HFI_KHDR_TID_MASK;
@@ -1402,21 +1406,22 @@ int ips_proto_process_packet_error(struct ips_recvhdrq_event *rcv_ev)
 
 			if (!pkt_verbose_err) {
 				rhf_errnum_string(pktmsg, sizeof(pktmsg),
-						  rcv_ev->error_flags);
+						  psmi_hal_rhf_get_all_err_flags(rcv_ev->psm_hal_rhf));
 				_HFI_DBG_ALWAYS
 					("Error %s pkt type opcode 0x%x at hd=0x%x %s\n",
-					(rcv_ev->ptype == RCVHQ_RCV_TYPE_EAGER)
-					? "eager" : (rcv_ev-> ptype ==
-							RCVHQ_RCV_TYPE_EXPECTED)
-					? "expected" : (rcv_ev->ptype ==
-							RCVHQ_RCV_TYPE_NON_KD) ? "non-kd" :
-					"<error>", op_code,
-							rcv_ev->recvq->state->hdrq_head, pktmsg);
+					 (psmi_hal_rhf_get_rx_type(rcv_ev->psm_hal_rhf) ==
+					  PSM_HAL_RHF_RX_TYPE_EAGER) ? "eager" : (
+						  psmi_hal_rhf_get_rx_type(rcv_ev->psm_hal_rhf) ==
+						  PSM_HAL_RHF_RX_TYPE_EXPECTED)
+					 ? "expected" : (psmi_hal_rhf_get_rx_type(rcv_ev->psm_hal_rhf) ==
+							 PSM_HAL_RHF_RX_TYPE_NON_KD) ? "non-kd" :
+					 "<error>", op_code,
+					 rcv_ev->recvq->state->hdrq_head, pktmsg);
 			}
 		}
 #endif
 
-		if (rcv_ev->ptype == RCVHQ_RCV_TYPE_EXPECTED)
+		if (psmi_hal_rhf_get_rx_type(rcv_ev->psm_hal_rhf) == PSM_HAL_RHF_RX_TYPE_EXPECTED)
 			ips_protoexp_handle_data_err(rcv_ev);
 	} else {		/* not a tid or data error -- some other error */
 #if _HFI_DEBUGGING
@@ -1426,20 +1431,20 @@ int ips_proto_process_packet_error(struct ips_recvhdrq_event *rcv_ev)
 
 			if (!pkt_verbose_err)
 				rhf_errnum_string(pktmsg, sizeof(pktmsg),
-					rcv_ev->error_flags);
+						  psmi_hal_rhf_get_all_err_flags(rcv_ev->psm_hal_rhf));
 
 			/* else RHFerr decode printed below */
 			_HFI_DBG_ALWAYS
 				("Error pkt type 0x%x opcode 0x%x at hd=0x%x %s\n",
-				rcv_ev->ptype, op_code,
-				rcv_ev->recvq->state->hdrq_head, pktmsg);
+				 psmi_hal_rhf_get_rx_type(rcv_ev->psm_hal_rhf), op_code,
+				 rcv_ev->recvq->state->hdrq_head, pktmsg);
 		}
 #endif
 	}
 	if (pkt_verbose_err) {
 		if (!*pktmsg)
 			rhf_errnum_string(pktmsg, sizeof(pktmsg),
-					  rcv_ev->error_flags);
+					  psmi_hal_rhf_get_all_err_flags(rcv_ev->psm_hal_rhf));
 		ips_proto_show_header(rcv_ev->p_hdr, pktmsg);
 	}
 

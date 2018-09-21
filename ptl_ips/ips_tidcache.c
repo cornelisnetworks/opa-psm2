@@ -52,9 +52,9 @@
 */
 
 #include "psm_user.h"
-#include "ipserror.h"
+#include "psm2_hal.h"
 #include "ips_proto.h"
-#include "ips_proto_internal.h"
+#include "ips_expected_proto.h"
 
 #define RBTREE_GET_LEFTMOST(PAYLOAD_PTR)  ((PAYLOAD_PTR)->start)
 #define RBTREE_GET_RIGHTMOST(PAYLOAD_PTR) ((PAYLOAD_PTR)->start+((PAYLOAD_PTR)->length<<12))
@@ -79,13 +79,14 @@ ips_tidcache_remove(struct ips_tid *tidc, uint32_t tidcnt)
 {
 	cl_qmap_t *p_map = &tidc->tid_cachemap;
 	uint32_t idx;
+	uint64_t events_mask;
 	psm2_error_t err;
 
 	/*
 	 * call driver to free the tids.
 	 */
-	if (hfi_free_tid(tidc->context->ctrl,
-		    (uint64_t) (uintptr_t) tidc->tid_array, tidcnt) < 0) {
+	if (psmi_hal_free_tid(tidc->context->psm_hw_ctxt,
+			      (uint64_t) (uintptr_t) tidc->tid_array, tidcnt) < 0) {
 		/* If failed to unpin pages, it's fatal error */
 		err = psmi_handle_error(tidc->context->ep,
 			PSM2_EP_DEVICE_FAILURE,
@@ -125,7 +126,12 @@ ips_tidcache_remove(struct ips_tid *tidc, uint32_t tidcnt)
 	 * before we can re-use this tid. The reverse order
 	 * will wrongly invalidate this tid again.
 	 */
-	if ((*tidc->invalidation_event) & HFI1_EVENT_TID_MMU_NOTIFY) {
+	err = psmi_hal_get_hfi_event_bits(&events_mask,tidc->context->psm_hw_ctxt);
+
+	if_pf (err)
+		return PSM2_INTERNAL_ERR;
+
+	if (events_mask & PSM_HAL_HFI_EVENT_TID_MMU_NOTIFY) {
 		err = ips_tidcache_invalidation(tidc);
 		if (err)
 			return err;
@@ -187,12 +193,13 @@ retry:
 
 #ifdef PSM_CUDA
 	if (is_cuda_ptr)
-		flags = HFI1_BUF_GPU_MEM;
+		flags = PSM_HAL_BUF_GPU_MEM;
 #endif
 
-	if (hfi_update_tid(tidc->context->ctrl,
-			(uint64_t) start, &length,
-			(uint64_t) tidc->tid_array, &tidcnt, flags) < 0) {
+	if (psmi_hal_update_tid(tidc->context->psm_hw_ctxt,
+				(uint64_t) start, &length,
+				(uint64_t) tidc->tid_array, &tidcnt,
+				flags) < 0) {
 		/* if driver reaches lockable memory limit */
 		if ((errno == ENOMEM
 #ifdef PSM_CUDA
@@ -289,8 +296,9 @@ ips_tidcache_invalidation(struct ips_tid *tidc)
 	 * driver will clear the event bit before return.
 	 */
 	tidcnt = 0;
-	if (hfi_get_invalidation(tidc->context->ctrl,
-		   (uint64_t) (uintptr_t) tidc->tid_array, &tidcnt) < 0) {
+	if (psmi_hal_get_tidcache_invalidation(tidc->context->psm_hw_ctxt,
+					       (uint64_t) (uintptr_t) tidc->tid_array,
+					       &tidcnt) < 0) {
 		/* If failed to get invalidation info, it's fatal error */
 		err = psmi_handle_error(tidc->context->ep,
 			PSM2_EP_DEVICE_FAILURE,
@@ -348,8 +356,8 @@ ips_tidcache_invalidation(struct ips_tid *tidc)
 		/*
 		 * call driver to free the tids.
 		 */
-		if (hfi_free_tid(tidc->context->ctrl,
-			    (uint64_t) (uintptr_t) tidc->tid_array, j) < 0) {
+		if (psmi_hal_free_tid(tidc->context->psm_hw_ctxt,
+				      (uint64_t) (uintptr_t) tidc->tid_array, j) < 0) {
 			/* If failed to unpin pages, it's fatal error */
 			err = psmi_handle_error(tidc->context->ep,
 				PSM2_EP_DEVICE_FAILURE,
@@ -376,6 +384,7 @@ ips_tidcache_acquire(struct ips_tid *tidc,
 	unsigned long start = (unsigned long)buf;
 	unsigned long end = start + (*length);
 	uint32_t idx, nbytes;
+	uint64_t event_mask;
 	psm2_error_t err;
 
 	/*
@@ -384,7 +393,12 @@ ips_tidcache_acquire(struct ips_tid *tidc,
 	 * the cached address may be invalidated and we might have
 	 * wrong matching.
 	 */
-	if ((*tidc->invalidation_event) & HFI1_EVENT_TID_MMU_NOTIFY) {
+	err = psmi_hal_get_hfi_event_bits(&event_mask,tidc->context->psm_hw_ctxt);
+
+	if_pf (err)
+		return PSM2_INTERNAL_ERR;
+
+	if (event_mask & PSM_HAL_HFI_EVENT_TID_MMU_NOTIFY) {
 		err = ips_tidcache_invalidation(tidc);
 		if (err)
 			return err;
@@ -572,8 +586,8 @@ ips_tidcache_release(struct ips_tid *tidc,
 		/*
 		 * call driver to free the tids.
 		 */
-		if (hfi_free_tid(tidc->context->ctrl,
-			    (uint64_t) (uintptr_t) tidc->tid_array, j) < 0) {
+		if (psmi_hal_free_tid(tidc->context->psm_hw_ctxt,
+				      (uint64_t) (uintptr_t) tidc->tid_array, j) < 0) {
 			/* If failed to unpin pages, it's fatal error */
 			err = psmi_handle_error(tidc->context->ep,
 				PSM2_EP_DEVICE_FAILURE,
@@ -608,8 +622,8 @@ ips_tidcache_cleanup(struct ips_tid *tidc)
 		/*
 		 * call driver to free the tids.
 		 */
-		if (hfi_free_tid(tidc->context->ctrl,
-			    (uint64_t) (uintptr_t) tidc->tid_array, j) < 0) {
+		if (psmi_hal_free_tid(tidc->context->psm_hw_ctxt,
+				      (uint64_t) (uintptr_t) tidc->tid_array, j) < 0) {
 			/* If failed to unpin pages, it's fatal error */
 			err = psmi_handle_error(tidc->context->ep,
 				PSM2_EP_DEVICE_FAILURE,

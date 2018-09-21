@@ -62,6 +62,7 @@ int run_bi_bw_mrate(struct benchmark_info *info, int sock);
 int main(int argc, char **argv)
 {
 	int ret = 0;
+	int sock = -1;
 
 	struct benchmark_info *info = init_benchmark(argc, argv);
 	if (info == NULL) {
@@ -69,7 +70,7 @@ int main(int argc, char **argv)
 		goto bail;
 	}
 
-	int sock = open_socket(info->server, info->is_server, SERVER_PORT);
+	sock = open_socket(info->server, info->is_server, SERVER_PORT);
 	if (sock < 0) {
 		ret = -1;
 		goto bail;

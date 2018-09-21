@@ -162,10 +162,14 @@ typedef struct _ibta_path_rec {
 
 /*
  * PSM IPS path record components for endpoint.
+ *
+ * For Torus/non-zero LMC fabrics, pr_slid and pr_dlid may be different from
+ * the "base lid" values for this connection.
  */
 struct ips_proto;
+
 typedef struct ips_path_rec {
-	uint16_t pr_slid;	/* For Torus/non zero LMC fabrics this can be diff */
+	uint16_t pr_slid;
 	uint16_t pr_dlid;
 	uint16_t pr_mtu;	/* < Path's MTU */
 	uint16_t pr_pkey;
@@ -176,7 +180,8 @@ typedef struct ips_path_rec {
 	uint8_t pr_cca_divisor;	/* CCA divisor [14:15] in CCT entry */
 	uint16_t pr_active_ipd;	/* The current active IPD. max(static,cct) */
 	uint16_t pr_ccti;	/* CCA table index */
-	psmi_timer *pr_timer_cca;	/* Congestion timer for epr_ccti increment. */
+	/* Congestion timer for epr_ccti increment. */
+	psmi_timer *pr_timer_cca;
 	struct ips_proto *proto;	/* for global info */
 } ips_path_rec_t;
 

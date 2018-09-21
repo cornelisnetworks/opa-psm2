@@ -42,6 +42,8 @@
  * factor of two increase in speed on a Power PC G4 (PPC7455) using gcc -O3.
  */
 
+#include "psm_user.h"
+#include "psm2_hal.h"
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
 

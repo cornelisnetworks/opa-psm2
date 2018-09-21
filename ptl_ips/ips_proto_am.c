@@ -54,11 +54,13 @@
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
 #include "psm_user.h"
-#include "psm_mq_internal.h"
+#include "psm2_hal.h"
 #include "psm2_am.h"
 #include "psm_am_internal.h"
+#include "psm_mq_internal.h"
 #include "ips_proto.h"
-#include "ips_proto_internal.h"
+#include "ips_expected_proto.h"
+#include "ips_proto_help.h"
 
 struct ips_am_token {
 	struct psmi_am_token tok;
@@ -101,7 +103,7 @@ MOCKABLE(ips_proto_am_init)(struct ips_proto *proto,
 		  struct ips_proto_am *proto_am)
 {
 	psm2_error_t err = PSM2_OK;
-	int send_buf_size = proto->ep->context.ctrl->__hfi_piosize;
+	int send_buf_size = psmi_hal_get_pio_size(proto->ep->context.psm_hw_ctxt);
 	int num_rep_slots = calc_optimal_num_reply_slots(num_send_slots);
 	int num_req_slots = num_send_slots - num_rep_slots;
 
@@ -172,8 +174,8 @@ ips_am_get_parameters(psm2_ep_t ep, struct psm2_am_parameters *parameters)
 {
 	int max_nargs = min(1 << IPS_AM_HDR_NARGS_BITS, PSMI_AM_MAX_ARGS);
 	int max_payload =
-	    ep->context.ctrl->__hfi_piosize -
-	    ((max_nargs - IPS_AM_HDR_NARGS) * sizeof(psm2_amarg_t));
+		psmi_hal_get_pio_size(ep->context.psm_hw_ctxt) -
+		((max_nargs - IPS_AM_HDR_NARGS) * sizeof(psm2_amarg_t));
 
 	if (parameters == NULL) {
 		return PSM2_PARAM_ERR;
@@ -195,6 +197,9 @@ am_short_reqrep(ips_scb_t *scb, struct ips_epaddr *ipsaddr,
 {
 	int i, hdr_qwords = IPS_AM_HDR_NARGS;
 	struct ips_proto *proto = ((psm2_epaddr_t)ipsaddr)->proto;
+
+	psmi_assert(proto->msgflowid < EP_FLOW_LAST);
+
 	struct ips_flow *flow = &ipsaddr->flows[proto->msgflowid];
 
 	/* There are a limited number of bits for nargs in the header, making
@@ -258,7 +263,7 @@ am_short_reqrep(ips_scb_t *scb, struct ips_epaddr *ipsaddr,
 		scb->payload_size = 0;
 		psmi_assert(len <= (1 << IPS_AM_HDR_LEN_BITS));
 		scb->ips_lrh.amhdr_len = len & ((1 << IPS_AM_HDR_LEN_BITS) - 1);
-		scb->flags |= IPS_SEND_FLAG_AMISTINY;
+		scb->scb_flags |= IPS_SEND_FLAG_AMISTINY;
 	} else { /* Whatever's left requires a separate payload */
 		if (ips_scb_buffer(scb) == NULL) /* Just attach the buffer */
 			ips_scb_buffer(scb) = src;
@@ -302,7 +307,7 @@ ips_am_scb_init(ips_scb_t *scb, uint8_t handler, int nargs,
 	scb->ips_lrh.amhdr_nargs = nargs;
 	scb->ips_lrh.flags = 0;
 	if (completion_fn)
-		scb->flags |= IPS_SEND_FLAG_ACKREQ;
+		scb->scb_flags |= IPS_SEND_FLAG_ACKREQ;
 	return;
 }
 
@@ -563,7 +568,7 @@ int ips_proto_am(struct ips_recvhdrq_event *rcv_ev)
 			return IPS_RECVHDRQ_BREAK;
 		}
 		msg_payload = psmi_mq_sysbuf_alloc(
-				msg->proto_am->proto->mq,
+				proto_am->proto->mq,
 				ips_recvhdrq_event_paylen(rcv_ev));
 		if (unlikely(msg_payload == NULL)) {
 			/* Out of memory, drop the packet. */

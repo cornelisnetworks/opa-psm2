@@ -56,10 +56,21 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+
 #include "psm_user.h"
-#include "ipserror.h"
+#include "psm2_hal.h"
 #include "ips_proto.h"
-#include "ips_proto_internal.h"
+
+/*
+ * These are the default values used in parsing the environment
+ * variable PSM2_PATH_NO_LMC_RANGE, which can be used to exclude
+ * a range of message sizes from the LMC LID assignments used to
+ * implement dispersive routing.
+ *
+ * This value is 2^32 - 1.
+ */
+#define DEF_LIMITS_STRING "4294967295:4294967295"
+#define DEF_LIMITS_VALUE 4294967295
 
 static void ips_gen_ipd_table(struct ips_proto *proto)
 {
@@ -310,8 +321,7 @@ ips_none_get_path_rec(struct ips_proto *proto,
 			proto->flags &= ~IPS_PROTO_FLAG_CCA;
 			proto->flags &= ~IPS_PROTO_FLAG_CCA_PRESCAN;
 		}
-		if (!(proto->ep->context.runtime_flags &
-					HFI1_CAP_STATIC_RATE_CTRL)) {
+		if (!psmi_hal_has_cap(PSM_HAL_CAP_STATIC_RATE_CTRL)) {
 			_HFI_CCADBG("No Static-Rate-Control, disable CCA\n");
 			proto->flags &= ~IPS_PROTO_FLAG_CCA;
 			proto->flags &= ~IPS_PROTO_FLAG_CCA_PRESCAN;
@@ -374,17 +384,18 @@ ips_none_path_rec(struct ips_proto *proto,
 {
 	psm2_error_t err = PSM2_OK;
 	uint16_t pidx, num_path = (1 << proto->epinfo.ep_lmc);
-	uint16_t base_slid, base_dlid;
+	uint16_t path_slid, path_dlid;
 	ips_path_rec_t *path;
 	ips_path_grp_t *pathgrp;
 	ENTRY elid, *epath = NULL;
 	char eplid[128];
 
-	/* For the "none" path record resolution all paths are assumed to be of equal
-	 * priority however since we want to isolate all control traffic (acks, naks)
-	 * to a separate path for non zero LMC subnets the "first path" between a
-	 * pair of endpoints is always the "higher" priority paths. The rest of the
-	 * paths are the normal (and low priority) paths.
+	/* For the "none" path record resolution all paths are assumed to be
+	 * of equal priority however since we want to isolate all control
+	 * traffic (acks, naks) to a separate path for non zero LMC subnets
+	 * the "first path" between a pair of endpoints is always the "higher"
+	 * priority paths. The rest of the paths are the normal (and low
+	 * priority) paths.
 	 */
 
 	/* Query the path record cache */
@@ -416,8 +427,13 @@ ips_none_path_rec(struct ips_proto *proto,
 		goto fail;
 	}
 
-	/* dlid is the peer base lid */
-	pathgrp->pg_base_lid = __be16_to_cpu(dlid);
+	/*
+	 * dlid is the peer base lid.
+	 * slid is the base lid for the local end point.
+	 * Store in network byte order.
+	 */
+	pathgrp->pg_base_dlid = dlid;
+	pathgrp->pg_base_slid = slid;
 
 	if (num_path > 1) {
 		/* One control path and (num_path - 1) norm and low priority paths */
@@ -435,11 +451,11 @@ ips_none_path_rec(struct ips_proto *proto,
 	 * balance
 	 */
 	for (pidx = 0; pidx < num_path; pidx++) {
-		base_slid = __cpu_to_be16(__be16_to_cpu(slid) + pidx);
-		base_dlid = __cpu_to_be16(__be16_to_cpu(dlid) + pidx);
+		path_slid = __cpu_to_be16(__be16_to_cpu(slid) + pidx);
+		path_dlid = __cpu_to_be16(__be16_to_cpu(dlid) + pidx);
 
 		err =
-		    ips_none_get_path_rec(proto, base_slid, base_dlid,
+		    ips_none_get_path_rec(proto, path_slid, path_dlid,
 					  desthfi_type, timeout, &path);
 		if (err != PSM2_OK) {
 			psmi_free(elid.key);
@@ -465,6 +481,11 @@ ips_none_path_rec(struct ips_proto *proto,
 			pathgrp->pg_path[0][IPS_PATH_NORMAL_PRIORITY] = path;
 			pathgrp->pg_path[0][IPS_PATH_LOW_PRIORITY] = path;
 		}
+                PSM2_LOG_MSG("path %p slid %hu dlid %hu \n",
+                              path,
+			      __be16_to_cpu(path->pr_slid),
+			      __be16_to_cpu(path->pr_dlid));
+
 	}
 
 	if (proto->flags & IPS_PROTO_FLAG_PPOLICY_ADAPTIVE) {
@@ -533,8 +554,8 @@ static psm2_error_t ips_none_path_rec_init(struct ips_proto *proto)
 	proto->ibta.fini = NULL;
 
 	/* With no path records queries set pkey manually */
-	if (hfi_set_pkey(proto->ep->context.ctrl,
-			 (uint16_t) proto->ep->network_pkey) != 0) {
+	if (psmi_hal_set_pkey(proto->ep->context.psm_hw_ctxt,
+			      (uint16_t) proto->ep->network_pkey) != 0) {
 		err = psmi_handle_error(proto->ep, PSM2_EP_DEVICE_FAILURE,
 					"Couldn't set device pkey 0x%x: %s",
 					(int)proto->ep->network_pkey,
@@ -552,8 +573,8 @@ psm2_error_t ips_ibta_init_sl2sc2vl_table(struct ips_proto *proto)
 	/* Get SL2SC table for unit, port */
 	for (i = 0; i < 32; i++) {
 		if ((ret =
-		     hfi_get_port_sl2sc(proto->ep->context.ctrl->__hfi_unit,
-					proto->ep->context.ctrl->__hfi_port,
+		     psmi_hal_get_port_sl2sc(psmi_hal_get_unit_id(proto->ep->context.psm_hw_ctxt),
+					psmi_hal_get_port_num(proto->ep->context.psm_hw_ctxt),
 					(uint8_t) i)) < 0) {
 			/* Unable to get SL2SC. Set it to default */
 			ret = PSMI_SC_DEFAULT;
@@ -564,8 +585,8 @@ psm2_error_t ips_ibta_init_sl2sc2vl_table(struct ips_proto *proto)
 	/* Get SC2VL table for unit, port */
 	for (i = 0; i < 32; i++) {
 		if ((ret =
-		     hfi_get_port_sc2vl(proto->ep->context.ctrl->__hfi_unit,
-					proto->ep->context.ctrl->__hfi_port,
+		     psmi_hal_get_port_sc2vl(psmi_hal_get_unit_id(proto->ep->context.psm_hw_ctxt),
+					psmi_hal_get_port_num(proto->ep->context.psm_hw_ctxt),
 					(uint8_t) i)) < 0) {
 			/* Unable to get SC2VL. Set it to default */
 			ret = PSMI_VL_DEFAULT;
@@ -587,25 +608,25 @@ psm2_error_t ips_ibta_link_updown_event(struct ips_proto *proto)
 	proto->epinfo.ep_base_lid =
 	    __cpu_to_be16((uint16_t) psm2_epid_nid(proto->ep->context.epid));
 
-	if ((ret = hfi_get_port_lmc(proto->ep->context.ctrl->__hfi_unit,
-				    proto->ep->context.ctrl->__hfi_port)) < 0) {
+	if ((ret = psmi_hal_get_port_lmc(psmi_hal_get_unit_id(proto->ep->context.psm_hw_ctxt),
+					 psmi_hal_get_port_num(proto->ep->context.psm_hw_ctxt))) < 0) {
 		err = psmi_handle_error(proto->ep, PSM2_EP_DEVICE_FAILURE,
-					"Could obtain LMC for unit %u:%u. Error: %s",
-					proto->ep->context.ctrl->__hfi_unit,
-					proto->ep->context.ctrl->__hfi_port,
+					"Could not obtain LMC for unit %u:%u. Error: %s",
+					psmi_hal_get_unit_id(proto->ep->context.psm_hw_ctxt),
+					psmi_hal_get_port_num(proto->ep->context.psm_hw_ctxt),
 					strerror(errno));
 		goto fail;
 	}
 	proto->epinfo.ep_lmc = min(ret, IPS_MAX_PATH_LMC);
 
-	if ((ret = hfi_get_port_rate(proto->ep->context.ctrl->__hfi_unit,
-				     proto->ep->context.ctrl->__hfi_port)) <
+	if ((ret = psmi_hal_get_port_rate(psmi_hal_get_unit_id(proto->ep->context.psm_hw_ctxt),
+					  psmi_hal_get_port_num(proto->ep->context.psm_hw_ctxt))) <
 	    0) {
 		err =
 		    psmi_handle_error(proto->ep, PSM2_EP_DEVICE_FAILURE,
 				      "Could obtain link rate for unit %u:%u. Error: %s",
-				      proto->ep->context.ctrl->__hfi_unit,
-				      proto->ep->context.ctrl->__hfi_port,
+				      psmi_hal_get_unit_id(proto->ep->context.psm_hw_ctxt),
+				      psmi_hal_get_port_num(proto->ep->context.psm_hw_ctxt),
 				      strerror(errno));
 		goto fail;
 	}
@@ -631,6 +652,7 @@ MOCKABLE(ips_ibta_init)(struct ips_proto *proto)
 	union psmi_envvar_val psm_path_policy;
 	union psmi_envvar_val disable_cca;
 	union psmi_envvar_val cca_prescan;
+	union psmi_envvar_val path_disable_lmc_interval;
 
 	/* Get the path selection policy */
 	psmi_getenv("PSM2_PATH_SELECTION",
@@ -690,9 +712,11 @@ MOCKABLE(ips_ibta_init)(struct ips_proto *proto)
  * Check qib driver CCA setting, and try to use it if available.
  * Fall to self CCA setting if errors.
  */
-		i = hfi_get_cc_settings_bin(proto->ep->context.ctrl->__hfi_unit,
-					    proto->ep->context.ctrl->__hfi_port,
-					    ccabuf, sizeof(ccabuf));
+		i = psmi_hal_get_cc_settings_bin(
+			psmi_hal_get_unit_id(proto->ep->context.psm_hw_ctxt),
+			psmi_hal_get_port_num(proto->ep->context.psm_hw_ctxt),
+			ccabuf, sizeof(ccabuf));
+
 		if (i <= 0) {
 			goto disablecca;
 		}
@@ -716,9 +740,11 @@ MOCKABLE(ips_ibta_init)(struct ips_proto *proto)
 			p++;
 		}
 
-		i = hfi_get_cc_table_bin(proto->ep->context.ctrl->__hfi_unit,
-					 proto->ep->context.ctrl->__hfi_port,
-					 &proto->cct);
+		i = psmi_hal_get_cc_table_bin(psmi_hal_get_unit_id(proto->ep->context.
+								   psm_hw_ctxt),
+					      psmi_hal_get_port_num(proto->ep->context.
+								    psm_hw_ctxt),
+					      &proto->cct);
 		if (i < 0) {
 			err = PSM2_NO_MEMORY;
 			goto fail;
@@ -745,6 +771,52 @@ disablecca:
 
 finishcca:
 	/* Initialize path record/group hash table */
+
+	{
+		uint32_t lmc_disable_low, lmc_disable_high;
+		int sscanf_ret;
+
+		/* The default disable_low and disable_low values
+		 * are 2^32 - 1, the maximum allowable message size.
+		 * So by default all messages should be smaller than the
+		 * lower limit, and so will not have LMC dispersive
+		 * routing disabled.
+		 *
+		 * Add to this, these limits are applied only to SDMA
+		 * and PIO message, NOT TID messages.  So this size
+		 * bigger than any PIO size.
+		 */
+		psmi_getenv("PSM2_PATH_NO_LMC_RANGE",
+		            "Disable LMC route dispersion within this range, "
+		             "low_value:high_value\n",
+			    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_STR,
+			    (union psmi_envvar_val)DEF_LIMITS_STRING,
+			    &path_disable_lmc_interval);
+
+		sscanf_ret = sscanf(path_disable_lmc_interval.e_str, "%u:%u",
+		       		   &lmc_disable_low, &lmc_disable_high);
+
+		/*
+		 * It's "invalid" for the low end of the range to be
+		 * larger than the hig end of the range, so revert
+		 * to the "maximum message size" (2^32 - 1).
+		 */
+		if ((sscanf_ret != 2) || (lmc_disable_low > lmc_disable_high)) {
+			lmc_disable_low = lmc_disable_high = DEF_LIMITS_VALUE;
+		}
+
+		PSM2_LOG_MSG("PSM2_PATH_NO_LMC_RANGE: "
+			     "lmc_disable_low %u lmc_disable_high %u\n",
+			     lmc_disable_low, lmc_disable_high);
+
+		/*
+		 * These specify the range of message sizes in bytes, of
+		 * the messages to disable LMC dynamic LID assignment.
+		 */
+		proto->ips_lmc_disable_low = lmc_disable_low;
+		proto->ips_lmc_disable_high = lmc_disable_high;
+	}
+
 	hcreate_r(DF_PATH_REC_HASH_SIZE, &proto->ips_path_rec_hash);
 	hcreate_r(DF_PATH_GRP_HASH_SIZE, &proto->ips_path_grp_hash);
 

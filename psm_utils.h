@@ -82,8 +82,6 @@ struct psmi_epid_tabentry {
 
 extern struct psmi_epid_table psmi_epid_table;
 #define EPADDR_DELETED	((void *)-1)	/* tag used to mark deleted entries */
-#define PSMI_EPID_TABSIZE_CHUNK	 128
-#define PSMI_EPID_TABLOAD_FACTOR ((float)0.7)
 
 psm2_error_t psmi_epid_init();
 psm2_error_t psmi_epid_fini();
@@ -108,8 +106,6 @@ uint64_t psmi_epid_version(psm2_epid_t epid);
 /*
  * Hostname manipulation
  */
-#define	     PSMI_EP_HOSTNAME_LEN   64	/* hostname only */
-#define	     PSMI_EP_NAME_LEN       96	/* hostname:LID:context:subcontext */
 char *psmi_gethostname(void);
 const char *psmi_epaddr_get_hostname(psm2_epid_t epid);
 const char *psmi_epaddr_get_name(psm2_epid_t epid);
@@ -180,15 +176,15 @@ size_t psmi_malloc_usable_size_internal(void *ptr, const char *curLoc);
 
 #ifdef PSM_HEAP_DEBUG
 /* During heap debug code, we can sprinkle function calls:
-   HD_validate_heap_allocations(), that will examine all of the heap allocations
+   psmi_heapdebug_val_heapallocs(), that will examine all of the heap allocations
    to ensure integrity. */
-void _HD_validate_heap_allocations(const char *curloc);
+void _psmi_heapdebug_val_heapallocs(const char *curloc);
 
-#define HD_validate_heap_allocations() _HD_validate_heap_allocations(PSMI_CURLOC)
+#define psmi_heapdebug_val_heapallocs() _psmi_heapdebug_val_heapallocs(PSMI_CURLOC)
 
 #else
 
-#define HD_validate_heap_allocations() /* nothing */
+#define psmi_heapdebug_val_heapallocs() /* nothing */
 
 #endif
 
@@ -204,7 +200,7 @@ void _HD_validate_heap_allocations(const char *curloc);
 #ifndef PSM_IS_TEST
 #define malloc(sz)        _use_psmi_malloc_instead_of_plain_malloc
 #define realloc(ptr,nsz)  _use_psmi_realloc_instead_of_plain_realloc
-#define memalign(sz)      _use_psmi_memalign_instead_of_plain_memalign
+#define memalign(algn,sz) _use_psmi_memalign_instead_of_plain_memalign
 #define calloc(sz, nelm)  _use_psmi_calloc_instead_of_plain_calloc
 #ifdef strdup
 #undef strdup
@@ -293,7 +289,6 @@ void psmi_uuid_unparse(const psm2_uuid_t uuid, char *out);
 int psmi_uuid_compare(const psm2_uuid_t uuA, const psm2_uuid_t uuB);
 void *psmi_memcpyo(void *dst, const void *src, size_t n);
 uint32_t psmi_crc(unsigned char *buf, int len);
-uint32_t psmi_get_hfi_type(const psmi_context_t *context);
 
 /*
  * Internal CPUID detection

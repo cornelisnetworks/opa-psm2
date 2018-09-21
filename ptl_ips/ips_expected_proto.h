@@ -71,6 +71,11 @@
  * could be compressed further but we have the header space, so we don't
  * bother.
  */
+
+#ifndef __IPS_EXPECTED_PROTO_H__
+
+#define __IPS_EXPECTED_PROTO_H__ 1
+
 #define _desc_idx   u32w0
 #define _desc_genc  u32w1
 
@@ -87,9 +92,6 @@ struct ips_tidinfo {
 	uint32_t state;
 	struct ips_tid_recv_desc *tidrecvc;
 };
-
-/* Generate an expected header every 16 packets */
-#define PSM_DEFAULT_EXPECTED_HEADER 16
 
 struct ips_protoexp {
 	const struct ptl *ptl;
@@ -127,7 +129,7 @@ struct ips_protoexp {
 	struct ips_cuda_hostbuf_mpool_cb_context cuda_hostbuf_small_recv_cfg;
 	mpool_t cuda_hostbuf_pool_recv;
 	mpool_t cuda_hostbuf_pool_small_recv;
-	cudaStream_t cudastream_recv;
+	CUstream cudastream_recv;
 #endif
 };
 
@@ -157,7 +159,7 @@ ips_tid_session_member;
 #define IPS_TIDINFO_GET_TID(tidinfo) \
 	(((tidinfo)>>IPS_TIDINFO_TID_SHIFT)&IPS_TIDINFO_TID_MASK)
 
-typedef struct {
+typedef struct ips_tid_session_list_tag {
 	uint8_t  tsess_unaligned_start;	/* unaligned bytes at starting */
 	uint8_t  tsess_unaligned_end;	/* unaligned bytes at ending */
 	uint16_t tsess_tidcount;	/* tid number for the session */
@@ -395,3 +397,4 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 			    ptl_arg_t rdescid, uint32_t tidflow_genseq,
 			    ips_tid_session_list *tid_list,
 			    uint32_t tid_list_size);
+#endif /* #ifndef __IPS_EXPECTED_PROTO_H__ */

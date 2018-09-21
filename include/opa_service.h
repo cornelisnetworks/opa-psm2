@@ -67,20 +67,26 @@
 /* upper and lower bounds for HFI port numbers */
 #define HFI_MIN_PORT 1
 #define HFI_MAX_PORT 1
-#define HFI_NUM_PORTS (HFI_MAX_PORT - HFI_MIN_PORT + 1)
+#ifndef HFI_NUM_PORTS_GEN1
+#define HFI_NUM_PORTS_GEN1 (HFI_MAX_PORT - HFI_MIN_PORT + 1)
+#endif
 /* any unit id to match. */
 #define HFI_UNIT_ID_ANY ((long)-1)
 /* any port num to match. */
 #define HFI_PORT_NUM_ANY ((long)0)
 
 /* base name of path (without unit #) for qib driver */
-#define HFI_DEVICE_PATH "/dev/hfi1"
+#ifndef HFI_DEVICE_PATH_GEN1
+#define HFI_DEVICE_PATH_GEN1 "/dev/hfi1"
+#endif
 
 #ifdef PSM_CUDA
 #define GDR_DEVICE_PATH "/dev/hfi1_gdr"
 #endif
 
-#define HFI_CLASS_PATH "/sys/class/infiniband/hfi1"
+/* The major and minor versions of driver that support non-DW multiple SDMA */
+#define HFI1_USER_SWMAJOR_NON_DW_MUL_MSG_SIZE_ALLOWED 6
+#define HFI1_USER_SWMINOR_NON_DW_MUL_MSG_SIZE_ALLOWED 2
 
 /* Commands used to communicate with driver. */
 enum PSMI_HFI_CMD {
@@ -166,23 +172,30 @@ int hfi_get_port_vl2mtu(int unit, int port, int vl);
 int hfi_get_port_index2pkey(int unit, int port, int index);
 
 /* Get the number of units supported by the driver.  Does not guarantee
-   that a working chip has been found for each possible unit #. */
-/* Returns -1 with errno set, or number of units >=0 (0 means none found). */
-int hfi_get_num_units(void);
+   that a working chip has been found for each possible unit #.
+   When the parameter 'wait' is non-zero, the code will wait briefly as
+   the driver may be coming up.  If 'wait' is zero, the function does not wait.
+   Returns -1 with errno set, or number of units >=0 (0 means none found). */
+int hfi_get_num_units(int wait);
 
 /* Given a unit number, returns 1 if any port on the unit is active.
    returns 0 if no port on the unit is active.
    returns -1 when an error occurred. */
 int hfi_get_unit_active(int unit);
 
-/* get the number of contexts from the unit id. */
-/* Returns 0 if no unit or no match. */
-int hfi_get_num_contexts(int unit);
+/* get the number of contexts from the unit id.
+   When the parameter 'wait' is non-zero, the code will wait briefly as
+   the driver may be coming up.  If 'wait' is zero, the function does not wait.
+   Returns 0 if no unit or no match. */
+int hfi_get_num_contexts(int unit, int wait);
 
 /* Open hfi device file, return -1 on error. */
 int hfi_context_open(int unit, int port, uint64_t open_timeout);
 int hfi_context_open_ex(int unit, int port, uint64_t open_timeout,
 		     char *dev_name,size_t dev_name_len);
+
+uint32_t hfi_check_non_dw_mul_sdma(void);
+
 void hfi_context_close(int fd);
 
 /* hfi_get_user_major_version() returns the major version of the driver
@@ -228,11 +241,19 @@ int hfi_get_ctrs_port_names(int unitno, char **namep);
 /* sysfs helper routines (only those currently used are exported;
  * try to avoid using others) */
 
+/* Initializes the following sysfs helper routines. */
+void sysfs_init(const char *dflt_hfi_class_path);
+
 const char *hfi_sysfs_path(void);
 
 /* read a string value */
 int hfi_sysfs_port_read(uint32_t unit, uint32_t port, const char *attr,
 			char **datap);
+
+/* read a string value into buff, no more than size bytes.
+   returns the number of bytes read */
+size_t hfi_sysfs_unit_port_read(uint32_t unit, uint32_t port, const char *attr,
+			char *buff, size_t size);
 
 /* open attribute in unit's sysfs directory via open(2) */
 int hfi_sysfs_unit_open(uint32_t unit, const char *attr, int flags);

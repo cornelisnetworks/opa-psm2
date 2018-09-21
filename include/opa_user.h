@@ -107,17 +107,17 @@
 #define HFI_RHF_HDRQ_OFFSET_MASK 0x1FF
 #define HFI_RHF_HDRQ_OFFSET_SHIFT 12
 
-#define HFI_RHF_ICRCERR 0x80000000
-#define HFI_RHF_ECCERR 0x20000000
-#define HFI_RHF_LENERR 0x10000000
-#define HFI_RHF_TIDERR 0x08000000
+#define HFI_RHF_ICRCERR    0x80000000
+#define HFI_RHF_ECCERR     0x20000000
+#define HFI_RHF_LENERR     0x10000000
+#define HFI_RHF_TIDERR     0x08000000
 
-#define HFI_RHF_TFGENERR 0x04000000
-#define HFI_RHF_TFSEQERR 0x02000000
+#define HFI_RHF_TFGENERR   0x04000000
+#define HFI_RHF_TFSEQERR   0x02000000
 #define HFI_RHF_RCVTYPEERR 0x07000000
 
-#define HFI_RHF_DCERR 0x00800000
-#define HFI_RHF_DCUNCERR 0x00400000
+#define HFI_RHF_DCERR      0x00800000
+#define HFI_RHF_DCUNCERR   0x00400000
 #define HFI_RHF_KHDRLENERR 0x00200000
 /* Change from 0xFFE00000 to 0xFDE00000, so that we don't commit to the
  * error path on a SeqErr too soon - with RSM, the HFI may report a
@@ -446,7 +446,9 @@ void hfi_touch_mmap(void *, size_t) __attribute__ ((noinline));
    will return EAGAIN, and the caller should then fail and exit
    or use the default key and check the pkey in the received packet
    checking. */
-int32_t hfi_set_pkey(struct _hfi_ctrl *, uint16_t);
+/* set send context pkey to verify, error if driver is not configured with */
+/* this pkey in its pkey table. */
+int hfi_set_pkey(struct _hfi_ctrl *, uint16_t);
 
 /* flush the eager buffers, by setting the
    eager index head register == eager index tail, if queue is full */
@@ -486,10 +488,6 @@ int hfi_sdma_complete(struct _hfi_ctrl *ctrl, uint32_t *counter);
 
 /* set whether we want an interrupt on all packets, or just urgent ones */
 int hfi_poll_type(struct _hfi_ctrl *ctrl, uint16_t poll_type);
-
-/* set send context pkey to verify, error if driver is not configured with */
-/* this pkey in its pkey table. */
-int hfi_set_pkey(struct _hfi_ctrl *ctrl, uint16_t pkey);
 
 /* reset halted send context, error if context is not halted. */
 int hfi_reset_context(struct _hfi_ctrl *ctrl);

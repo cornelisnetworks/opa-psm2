@@ -55,6 +55,7 @@ OUTDIR = .
 
 this_srcdir := $(shell readlink -m .)
 top_srcdir := $(this_srcdir)/..
+
 INCLUDES += -I$(top_srcdir)
 
 ${TARGLIB}-objs := am_reqrep.o am_reqrep_shmem.o ptl.o cmarwu.o

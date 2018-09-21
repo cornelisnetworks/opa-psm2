@@ -73,7 +73,7 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 {
 	psm2_amarg_t args[5];
 	psm2_epaddr_t epaddr = req->rts_peer;
-	ptl_t *ptl = epaddr->ptlctl->ptl;
+	struct ptl_am *ptl = (struct ptl_am *)(epaddr->ptlctl->ptl);
 	int cma_succeed = 0;
 	int pid = 0, cuda_ipc_send_completion = 0;
 
@@ -86,20 +86,21 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 #ifdef PSM_CUDA
 	if (req->cuda_ipc_handle_attached) {
 
-	      void* cuda_ipc_dev_ptr = am_cuda_memhandle_acquire(req->rts_sbuf,
-						  (cudaIpcMemHandle_t*)&req->cuda_ipc_handle,
+		CUdeviceptr cuda_ipc_dev_ptr = am_cuda_memhandle_acquire(req->rts_sbuf,
+						  (CUipcMemHandle*)&req->cuda_ipc_handle,
 								 req->recv_msglen,
 								 req->rts_peer->epid);
-		/* cudaMemcpy into the receive side buffer
+		cuda_ipc_dev_ptr = cuda_ipc_dev_ptr + req->recv_msgoff;
+		/* cuMemcpy into the receive side buffer
 		 * based on its location */
 		if (req->is_buf_gpu_mem) {
-			PSMI_CUDA_CALL(cudaMemcpy, req->buf, cuda_ipc_dev_ptr,
-				       req->recv_msglen, cudaMemcpyDeviceToDevice);
-			PSMI_CUDA_CALL(cudaEventRecord, req->cuda_ipc_event, 0);
-			PSMI_CUDA_CALL(cudaEventSynchronize, req->cuda_ipc_event);
+			PSMI_CUDA_CALL(cuMemcpyDtoD, (CUdeviceptr)req->buf, cuda_ipc_dev_ptr,
+				       req->recv_msglen);
+			PSMI_CUDA_CALL(cuEventRecord, req->cuda_ipc_event, 0);
+			PSMI_CUDA_CALL(cuEventSynchronize, req->cuda_ipc_event);
 		} else
-			PSMI_CUDA_CALL(cudaMemcpy, req->buf, cuda_ipc_dev_ptr,
-				       req->recv_msglen, cudaMemcpyDeviceToHost);
+			PSMI_CUDA_CALL(cuMemcpyDtoH, req->buf, cuda_ipc_dev_ptr,
+				       req->recv_msglen);
 		cuda_ipc_send_completion = 1;
 		am_cuda_memhandle_release(cuda_ipc_dev_ptr);
 		req->cuda_ipc_handle_attached = 0;
@@ -113,7 +114,7 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 #ifdef PSM_CUDA
 		/* If the buffer on the send side is on the host,
 		 * we alloc a bounce buffer, use kassist and then
-		 * do a cudaMemcpy if the buffer on the recv side
+		 * do a cuMemcpy if the buffer on the recv side
 		 * resides on the GPU
 		 */
 		if (req->is_buf_gpu_mem) {
@@ -121,15 +122,15 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 			size_t nbytes = cma_get(pid, (void *)req->rts_sbuf,
 					cuda_ipc_bounce_buf, req->recv_msglen);
 			psmi_assert_always(nbytes == req->recv_msglen);
-			PSMI_CUDA_CALL(cudaMemcpy, req->buf, cuda_ipc_bounce_buf,
-				       req->recv_msglen, cudaMemcpyHostToDevice);
+			PSMI_CUDA_CALL(cuMemcpyHtoD, (CUdeviceptr)req->buf, cuda_ipc_bounce_buf,
+				       req->recv_msglen);
 			/* Cuda library has recent optimizations where they do
 			 * not guarantee synchronus nature for Host to Device
 			 * copies for msg sizes less than 64k. The event record
 			 * and synchronize calls are to guarentee completion.
 			 */
-			PSMI_CUDA_CALL(cudaEventRecord, req->cuda_ipc_event, 0);
-			PSMI_CUDA_CALL(cudaEventSynchronize, req->cuda_ipc_event);
+			PSMI_CUDA_CALL(cuEventRecord, req->cuda_ipc_event, 0);
+			PSMI_CUDA_CALL(cuEventSynchronize, req->cuda_ipc_event);
 			psmi_free(cuda_ipc_bounce_buf);
 		} else {
 			/* cma can be done in handler context or not. */
@@ -168,7 +169,7 @@ send_cts:
 				 tok->tok.epaddr_incoming, mq_handler_rtsmatch_hidx,
 				 args, 5, NULL, 0, NULL, 0);
 	} else
-		psmi_amsh_short_request(ptl, epaddr, mq_handler_rtsmatch_hidx,
+		psmi_amsh_short_request((struct ptl *)ptl, epaddr, mq_handler_rtsmatch_hidx,
 					args, 5, NULL, 0, 0);
 
 	/* 0-byte completion or we used kassist */
@@ -238,8 +239,9 @@ psmi_am_mq_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			 * send from a GPU buffer
 			 */
 			if (buf && len > 0) {
-				req->cuda_ipc_handle = *((cudaIpcMemHandle_t*)buf);
+				req->cuda_ipc_handle = *((CUipcMemHandle*)buf);
 				req->cuda_ipc_handle_attached = 1;
+				req->recv_msgoff = args[2].u32w0;
 			}
 #endif
 
@@ -301,13 +303,13 @@ psmi_am_mq_handler_rtsmatch(void *toki, psm2_amarg_t *args, int narg, void *buf,
 
 	if (msglen > 0) {
 		rarg[0].u64w0 = args[1].u64w0;	/* rreq */
-		int kassist_mode = ptl->psmi_kassist_mode;
+		int kassist_mode = ((struct ptl_am *)ptl)->psmi_kassist_mode;
 		int kassist_mode_peer = args[4].u32w0;
 		// In general, peer process(es) shall have the same kassist mode set,
 		// but due to dynamic CMA failure detection, we must align local and remote state,
 		// and make protocol to adopt to that potential change.
 		if (kassist_mode_peer == PSMI_KASSIST_OFF && (kassist_mode & PSMI_KASSIST_MASK)) {
-			ptl->psmi_kassist_mode = PSMI_KASSIST_OFF;
+			((struct ptl_am *)ptl)->psmi_kassist_mode = PSMI_KASSIST_OFF;
 			goto no_kassist;
 		}
 
@@ -316,7 +318,7 @@ psmi_am_mq_handler_rtsmatch(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			size_t nbytes = cma_put(sreq->buf, pid, dest, msglen);
 			if (nbytes == -1) {
 				_HFI_ERROR("Writing to remote process' memory failed. Disabling CMA support\n");
-				ptl->psmi_kassist_mode = PSMI_KASSIST_OFF;
+				((struct ptl_am *)ptl)->psmi_kassist_mode = PSMI_KASSIST_OFF;
 				goto no_kassist;
 			}
 
