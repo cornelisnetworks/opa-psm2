@@ -53,6 +53,10 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
+#ifdef __CET__
+#include <cet.h>
+#endif
+
  	.globl hfi_dwordcpy
 	.file	"opa_dwordcpy-x86_64-fast.S"
 	.text
@@ -61,6 +65,9 @@
         // does not return any value
 hfi_dwordcpy:
 	.type	hfi_dwordcpy, @function
+#ifdef _CET_ENDBR
+	_CET_ENDBR
+#endif
 	movl %edx,%ecx
 	shrl $1,%ecx
 	andl $1,%edx
