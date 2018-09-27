@@ -2,7 +2,7 @@
 /usr/include/psm2.h
 /usr/include/psm2_mq.h
 /usr/include/psm2_am.h
-/usr/include/hfi1diag/ptl_ips/ipserror.h
+/usr/include/hfi1diag/hfi1_deprecated_gen1.h
 /usr/include/hfi1diag/linux-x86_64/bit_ops.h
 /usr/include/hfi1diag/linux-x86_64/sysdep.h
 /usr/include/hfi1diag/opa_udebug.h
@@ -10,7 +10,12 @@
 /usr/include/hfi1diag/opa_intf.h
 /usr/include/hfi1diag/opa_user.h
 /usr/include/hfi1diag/opa_service.h
-/usr/include/hfi1diag/opa_common.h
 /usr/include/hfi1diag/opa_byteorder.h
-/usr/include/hfi1diag/hfi1_deprecated.h
-
+/usr/include/hfi1diag/opa_common_gen1.h
+/usr/include/hfi1diag/opa_revision.h
+/usr/include/hfi1diag/opa_service.h
+/usr/include/hfi1diag/opa_service_gen1.h
+/usr/include/hfi1diag/opa_user.h
+/usr/include/hfi1diag/opa_user_gen1.h
+/usr/include/hfi1diag/psm2_mock_testing.h
+/usr/include/hfi1diag/psmi_wrappers.h

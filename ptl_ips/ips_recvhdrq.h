@@ -55,6 +55,7 @@
 
 #include "psm_user.h"
 #include "ips_proto_params.h"
+#include "ips_proto_header.h"
 
 #ifndef _IPS_RECVHDRQ_H
 #define _IPS_RECVHDRQ_H

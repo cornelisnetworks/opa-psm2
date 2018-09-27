@@ -180,9 +180,9 @@ struct ptl_ctl {
 				uint32_t flags, psm2_mq_tag_t *stag,
 				const void *buf, uint32_t len);
 	 psm2_error_t(*mq_isend) (psm2_mq_t mq, psm2_epaddr_t dest,
-				 uint32_t flags, psm2_mq_tag_t *stag,
-				 const void *buf, uint32_t len,
-				 void *ctxt, psm2_mq_req_t *req);
+				  uint32_t flags_user, uint32_t flags_internal,
+				  psm2_mq_tag_t *stag, const void *buf,
+				  uint32_t len, void *ctxt, psm2_mq_req_t *req);
 
 	int (*epaddr_stats_num) (void);
 	int (*epaddr_stats_init) (char *desc[], uint16_t *flags);
@@ -216,5 +216,7 @@ struct ptl_ctl {
 				      int nargs, void *src, size_t len,
 				      void *dest, int flags);
 #endif
+	psm2_error_t (*msg_size_thresh_query) (enum psm2_info_query_thresh_et,
+					       uint32_t *out, psm2_mq_t mq, psm2_epaddr_t);
 };
 #endif

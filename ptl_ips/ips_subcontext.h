@@ -63,8 +63,9 @@
 /* This data structure is allocated in ureg page of each subcontext process */
 
 struct ips_subcontext_ureg {
-	/* head/eager head/tail register storage, one per cacheline */
-	uint64_t subcontext_uregbase[ur_maxreg * 8];
+	/* head/eager head/tail register storage, one per cacheline
+	 (member is unused by PSM, but needed here to match driver structures). */
+	uint64_t subcontext_uregbase[40 /* i.e. ur_maxreg * 8 */];
 	struct ips_writehdrq_state writeq_state;	/* used in all ureg pages */
 } __attribute__ ((aligned(64)));
 

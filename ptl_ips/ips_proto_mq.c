@@ -138,7 +138,7 @@ int ips_proto_mq_eager_complete(void *reqp, uint32_t nbytes)
 	 * the reason to use >= is because
 	 * we may have DW pad in nbytes.
 	 */
-	if (req->send_msgoff >= req->send_msglen) {
+	if (req->send_msgoff >= req->req_data.send_msglen) {
 		req->state = MQ_STATE_COMPLETE;
 		ips_barrier();
 		if(!psmi_is_req_internal(req))
@@ -393,10 +393,20 @@ ips_ptl_mq_eager(struct ips_proto *proto, psm2_mq_req_t req,
 		err = flow->flush(flow, NULL);
 	}
 
-	/* before return, try to make some progress. */
+	/* Before return, try to make some progress as long as the operation is
+	 * not a fast path isend. If this is a fast path isend we cannot call
+	 * progress functions since that will cause recursion into recvhdrq_progress
+	 * and cause messages to be lost. Instead, for fast path if the operation
+	 * was successfully enqueued, but flush returned PSM2_OK_NO_PROGRESS we return
+	 * PSM2_OK since the user will progress the queue once the fast path call is
+	 * complete.
+	*/
 	if (err == PSM2_EP_NO_RESOURCES || err == PSM2_OK_NO_PROGRESS) {
-		err =
-		    ips_recv_progress_if_busy(proto->ptl, PSM2_EP_NO_RESOURCES);
+		if (likely(!(req->flags_internal & PSMI_REQ_FLAG_FASTPATH))) {
+			err = ips_recv_progress_if_busy(proto->ptl, PSM2_EP_NO_RESOURCES);
+		} else if (err == PSM2_EP_NO_RESOURCES) {
+			err = PSM2_OK;
+		}
 	}
 
 	return err;
@@ -413,9 +423,9 @@ ips_ptl_mq_rndv(struct ips_proto *proto, psm2_mq_req_t req,
 	ips_scb_t *scb;
 
 	PSM2_LOG_MSG("entering");
-	req->buf = (void *)buf;
-	req->buf_len = len;
-	req->send_msglen = len;
+	req->req_data.buf = (void *)buf;
+	req->req_data.buf_len = len;
+	req->req_data.send_msglen = len;
 	req->recv_msgoff = 0;
 	req->rts_peer = (psm2_epaddr_t) ipsaddr;
 
@@ -426,7 +436,7 @@ ips_ptl_mq_rndv(struct ips_proto *proto, psm2_mq_req_t req,
 	if (req->type & MQE_TYPE_WAITING)
 		ips_scb_flags(scb) |= IPS_SEND_FLAG_BLOCKING;
 	scb->ips_lrh.khdr.kdeth0 = ipsaddr->msgctl->mq_send_seqnum++;
-	ips_scb_copy_tag(scb->ips_lrh.tag, req->tag.tag);
+	ips_scb_copy_tag(scb->ips_lrh.tag, req->req_data.tag.tag);
 	scb->ips_lrh.hdr_data.u32w1 = len;
 	scb->ips_lrh.hdr_data.u32w0 = psmi_mpool_get_obj_index(req);
 
@@ -518,20 +528,31 @@ ips_ptl_mq_rndv(struct ips_proto *proto, psm2_mq_req_t req,
 			  OPCODE_LONG_RTS,PSM2_LOG_TX,proto->ep->epid, req->rts_peer->epid,
 			    "scb->ips_lrh.hdr_data.u32w0: %d",scb->ips_lrh.hdr_data.u32w0);
 
-	if ((err = ips_mq_send_envelope(proto, flow, scb, PSMI_TRUE)))
-		goto fail;
+	/* If this is a fast path isend, then we cannot poll or
+	 * allow progressing of the mq from within the fast path
+	 * call otherwise messages will be lost. Therefore given fast path
+	 * we will avoid calling poll_internal and not set PSMI_TRUE which would
+	 * call ips_recv_progress_if_busy.
+	*/
+	if (unlikely(req->flags_internal & PSMI_REQ_FLAG_FASTPATH)) {
+		if ((err = ips_mq_send_envelope(proto, flow, scb, PSMI_FALSE)))
+			goto fail;
+	} else {
+		if ((err = ips_mq_send_envelope(proto, flow, scb, PSMI_TRUE)))
+			goto fail;
 
-	/* Assume that we already put a few rndv requests in flight.  This helps
-	 * for bibw microbenchmarks and doesn't hurt the 'blocking' case since
-	 * we're going to poll anyway */
-	psmi_poll_internal(proto->ep, 1);
+		/* Assume that we already put a few rndv requests in flight.  This helps
+		 * for bibw microbenchmarks and doesn't hurt the 'blocking' case since
+		 * we're going to poll anyway */
+		psmi_poll_internal(proto->ep, 1);
+	}
 
 fail:
 	_HFI_VDBG
 	    ("[rndv][%s->%s][b=%p][m=%d][t=%08x.%08x.%08x][req=%p/%d]: %s\n",
 	     psmi_epaddr_get_name(proto->ep->epid),
 	     psmi_epaddr_get_name(req->rts_peer->epid), buf, len,
-	     req->tag.tag[0], req->tag.tag[1], req->tag.tag[2], req,
+	     req->req_data.tag.tag[0], req->req_data.tag.tag[1], req->req_data.tag.tag[2], req,
 	     psmi_mpool_get_obj_index(req), psm2_error_get_string(err));
 	PSM2_LOG_MSG("leaving");
 	return err;
@@ -612,10 +633,51 @@ flow_select_type(struct ips_proto *proto, uint32_t len, int gpu_mem,
 	return flow_type;
 }
 
+psm2_error_t ips_proto_msg_size_thresh_query (enum psm2_info_query_thresh_et qt,
+					      uint32_t *out, psm2_mq_t mq, psm2_epaddr_t epaddr)
+{
+	struct ptl_ips *ptl = (struct ptl_ips *) epaddr->ptlctl->ptl;
+	psm2_error_t rv = PSM2_INTERNAL_ERR;
+
+	switch (qt)
+	{
+	case PSM2_INFO_QUERY_THRESH_IPS_PIO_DMA:
+		*out = ptl->proto.iovec_thresh_eager;
+		rv = PSM2_OK;
+		break;
+	case PSM2_INFO_QUERY_THRESH_IPS_TINY:
+		*out = mq->hfi_thresh_tiny;
+		rv = PSM2_OK;
+		break;
+	case PSM2_INFO_QUERY_THRESH_IPS_PIO_FRAG_SIZE:
+		{
+			ips_epaddr_t *ipsaddr = ((ips_epaddr_t *) epaddr)->msgctl->ipsaddr_next;
+			*out = ipsaddr->flows[EP_FLOW_GO_BACK_N_PIO].frag_size;
+		}
+		rv = PSM2_OK;
+		break;
+	case PSM2_INFO_QUERY_THRESH_IPS_DMA_FRAG_SIZE:
+		{
+			ips_epaddr_t *ipsaddr = ((ips_epaddr_t *) epaddr)->msgctl->ipsaddr_next;
+			*out = ipsaddr->flows[EP_FLOW_GO_BACK_N_DMA].frag_size;
+		}
+		rv = PSM2_OK;
+		break;
+	case PSM2_INFO_QUERY_THRESH_IPS_RNDV:
+		*out = mq->hfi_thresh_rv;
+		rv = PSM2_OK;
+		break;
+	default:
+		break;
+	}
+
+	return rv;
+}
+
 psm2_error_t
-ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
-		   psm2_mq_tag_t *tag, const void *ubuf, uint32_t len,
-		   void *context, psm2_mq_req_t *req_o)
+ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags_user,
+		   uint32_t flags_internal, psm2_mq_tag_t *tag, const void *ubuf,
+		   uint32_t len, void *context, psm2_mq_req_t *req_o)
 {
 	psm2_error_t err = PSM2_OK;
 	ips_epaddr_flow_t flow_type;
@@ -629,14 +691,16 @@ ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 	if_pf(req == NULL)
 		return PSM2_NO_MEMORY;
 
+	req->flags_user = flags_user;
+	req->flags_internal = flags_internal;
 	ipsaddr = ((ips_epaddr_t *) mepaddr)->msgctl->ipsaddr_next;
 	ipsaddr->msgctl->ipsaddr_next = ipsaddr->next;
 	proto = ((psm2_epaddr_t) ipsaddr)->proto;
 
 	psmi_assert(proto->msgflowid < EP_FLOW_LAST);
-	req->send_msglen = len;
-	req->tag = *tag;
-	req->context = context;
+	req->req_data.send_msglen = len;
+	req->req_data.tag = *tag;
+	req->req_data.context = context;
 
 #ifdef PSM_CUDA
 	req->is_buf_gpu_mem = psmi_cuda_is_buffer_gpu_mem((void*)ubuf);
@@ -652,7 +716,7 @@ ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 				     proto->iovec_thresh_eager);
 	flow = &ipsaddr->flows[flow_type];
 
-	if (flags & PSM2_MQ_FLAG_SENDSYNC) {
+	if (flags_user & PSM2_MQ_FLAG_SENDSYNC) {
 		goto do_rendezvous;
 	} else if (len <= mq->hfi_thresh_tiny) {
 		scb = mq_alloc_tiny(proto);
@@ -683,7 +747,14 @@ ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 		mq_copy_tiny((uint32_t *) &scb->ips_lrh.hdr_data,
 					 (uint32_t *) user_buffer, len);
 #endif
-		err = ips_mq_send_envelope(proto, flow, scb, PSMI_TRUE);
+
+		/* If this is a fast path isend, then we cannot allow
+		 * progressing of the mq from within the fast path
+		 * call otherwise messages will be lost. Therefore given fast path
+		 * we will set PSMI_FALSE which will prevent the call to
+		 * ips_recv_progress_if_busy.
+		*/
+		err = ips_mq_send_envelope(proto, flow, scb, !(flags_internal & PSMI_REQ_FLAG_FASTPATH));
 		if (err != PSM2_OK)
 			return err;
 
@@ -742,7 +813,13 @@ ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 			ips_scb_flags(scb) |= IPS_SEND_FLAG_PAYLOAD_BUF_GPU;
 		}
 #endif
-		err = ips_mq_send_envelope(proto, flow, scb, PSMI_TRUE);
+		/* If this is a fast path isend, then we cannot allow
+		 * progressing of the mq from within the fast path
+		 * call otherwise messages will be lost. Therefore given fast path
+		 * we will set PSMI_FALSE which will prevent the call to
+		 * ips_recv_progress_if_busy.
+		*/
+		err = ips_mq_send_envelope(proto, flow, scb, !(flags_internal & PSMI_REQ_FLAG_FASTPATH));
 		if (err != PSM2_OK)
 			return err;
 
@@ -961,10 +1038,11 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 #endif
 
 		req->type |= MQE_TYPE_WAITING;
-		req->send_msglen = len;
-		req->tag = *tag;
+		req->req_data.send_msglen = len;
+		req->req_data.tag = *tag;
 		req->send_msgoff = 0;
-		req->flags |= PSMI_REQ_FLAG_IS_INTERNAL;
+		req->flags_user = flags;
+		req->flags_internal |= PSMI_REQ_FLAG_IS_INTERNAL;
 
 		err = ips_ptl_mq_eager(proto, req, flow, tag, ubuf, len);
 		if (err != PSM2_OK)
@@ -986,8 +1064,9 @@ do_rendezvous:
 			return err;
 
 		req->type |= MQE_TYPE_WAITING;
-		req->tag = *tag;
-		req->flags |= PSMI_REQ_FLAG_IS_INTERNAL;
+		req->req_data.tag = *tag;
+		req->flags_user = flags;
+		req->flags_internal |= PSMI_REQ_FLAG_IS_INTERNAL;
 
 #ifdef PSM_CUDA
 		/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
@@ -1037,13 +1116,13 @@ ips_proto_mq_rts_match_callback(psm2_mq_req_t req, int was_posted)
 	 * 4) Expected protocol not initialized.
 	 */
 	if ((!req->is_buf_gpu_mem && ((req->is_sendbuf_gpu_mem &&
-	     req->recv_msglen <= GPUDIRECT_THRESH_RV)||
+	     req->req_data.recv_msglen <= GPUDIRECT_THRESH_RV)||
 	    (!req->is_sendbuf_gpu_mem &&
-	     req->recv_msglen <= proto->mq->hfi_thresh_rv))) ||
-	    (req->is_buf_gpu_mem && req->recv_msglen <= GPUDIRECT_THRESH_RV) ||
+	     req->req_data.recv_msglen <= proto->mq->hfi_thresh_rv))) ||
+	    (req->is_buf_gpu_mem && req->req_data.recv_msglen <= GPUDIRECT_THRESH_RV) ||
 	    proto->protoexp == NULL) {	/* no expected tid recieve */
 #else
-	if (req->recv_msglen <= proto->mq->hfi_thresh_rv ||/* less rv theshold */
+	if (req->req_data.recv_msglen <= proto->mq->hfi_thresh_rv ||/* less rv theshold */
 	    proto->protoexp == NULL) {  /* no expected tid recieve */
 #endif
 		/* there is no order requirement, try to push CTS request
@@ -1066,11 +1145,10 @@ ips_proto_mq_rts_match_callback(psm2_mq_req_t req, int was_posted)
 					   PSMI_TIMER_PRIO_1);
 		}
 	} else {
-		ips_protoexp_tid_get_from_token(proto->protoexp, req->buf,
-						req->recv_msglen, epaddr,
+		ips_protoexp_tid_get_from_token(proto->protoexp, req->req_data.buf,
+						req->req_data.recv_msglen, epaddr,
 						req->rts_reqidx_peer,
-						req->
-						type & MQE_TYPE_WAITING_PEER ?
+						req->type & MQE_TYPE_WAITING_PEER ?
 						IPS_PROTOEXP_TIDGET_PEERWAIT :
 						0, ips_proto_mq_rv_complete_exp,
 						req);
@@ -1102,7 +1180,7 @@ ips_proto_mq_push_cts_req(struct ips_proto *proto, psm2_mq_req_t req)
 	ips_scb_opcode(scb) = OPCODE_LONG_CTS;
 	scb->ips_lrh.khdr.kdeth0 = 0;
 	args[0].u32w0 = psmi_mpool_get_obj_index(req);
-	args[1].u32w1 = req->recv_msglen;
+	args[1].u32w1 = req->req_data.recv_msglen;
 	args[1].u32w0 = req->rts_reqidx_peer;
 
 	PSM2_LOG_EPM(OPCODE_LONG_CTS,PSM2_LOG_TX, proto->ep->epid,
@@ -1113,7 +1191,7 @@ ips_proto_mq_push_cts_req(struct ips_proto *proto, psm2_mq_req_t req)
 	flow->flush(flow, NULL);
 
 	/* have already received enough bytes */
-	if (req->recv_msgoff == req->recv_msglen) {
+	if (req->recv_msgoff == req->req_data.recv_msglen) {
 		ips_proto_mq_rv_complete(req);
 	}
 
@@ -1125,9 +1203,9 @@ psm2_error_t
 ips_proto_mq_push_rts_data(struct ips_proto *proto, psm2_mq_req_t req)
 {
 	psm2_error_t err = PSM2_OK;
-	uintptr_t buf = (uintptr_t) req->buf + req->recv_msgoff;
+	uintptr_t buf = (uintptr_t) req->req_data.buf + req->recv_msgoff;
 	ips_epaddr_t *ipsaddr = (ips_epaddr_t *) (req->rts_peer);
-	uint32_t nbytes_left = req->send_msglen - req->recv_msgoff;
+	uint32_t nbytes_left = req->req_data.send_msglen - req->recv_msgoff;
 	uint32_t nbytes_sent = 0;
 	uint32_t nbytes_this, chunk_size;
 	uint16_t frag_size, unaligned_bytes;
@@ -1141,7 +1219,7 @@ ips_proto_mq_push_rts_data(struct ips_proto *proto, psm2_mq_req_t req)
 #ifdef PSM_CUDA
 		req->is_buf_gpu_mem ||
 #endif
-		req->send_msglen > proto->iovec_thresh_eager) {
+		req->req_data.send_msglen > proto->iovec_thresh_eager) {
 		/* use SDMA transfer */
 		psmi_assert((proto->flags & IPS_PROTO_FLAG_SPIO) == 0);
 		flow = &ipsaddr->flows[EP_FLOW_GO_BACK_N_DMA];
@@ -1181,7 +1259,7 @@ ips_proto_mq_push_rts_data(struct ips_proto *proto, psm2_mq_req_t req)
 		ips_scb_opcode(scb) = OPCODE_LONG_DATA;
 		scb->ips_lrh.khdr.kdeth0 = 0;
 		scb->ips_lrh.data[0].u32w0 = req->rts_reqidx_peer;
-		scb->ips_lrh.data[1].u32w1 = req->send_msglen;
+		scb->ips_lrh.data[1].u32w1 = req->req_data.send_msglen;
 
 		/* attached unaligned bytes into packet header */
 		unaligned_bytes = nbytes_left & 0x3;
@@ -1297,9 +1375,9 @@ ips_proto_mq_handle_cts(struct ips_recvhdrq_event *rcv_ev)
 
 		/* ptl_req_ptr will be set to each tidsendc */
 		if (req->ptl_req_ptr == NULL) {
-			req->send_msglen = p_hdr->data[1].u32w1;
+			req->req_data.send_msglen = p_hdr->data[1].u32w1;
 		}
-		psmi_assert(req->send_msglen == p_hdr->data[1].u32w1);
+		psmi_assert(req->req_data.send_msglen == p_hdr->data[1].u32w1);
 
 		if (ips_tid_send_handle_tidreq(proto->protoexp,
 					       rcv_ev->ipsaddr, req, p_hdr->data[0],
@@ -1317,9 +1395,9 @@ ips_proto_mq_handle_cts(struct ips_recvhdrq_event *rcv_ev)
 		}
 	} else {
 		req->rts_reqidx_peer = p_hdr->data[0].u32w0; /* eager receive only */
-		req->send_msglen = p_hdr->data[1].u32w1;
+		req->req_data.send_msglen = p_hdr->data[1].u32w1;
 
-		if (req->send_msgoff >= req->send_msglen) {
+		if (req->send_msgoff >= req->req_data.send_msglen) {
 			/* already sent enough bytes, may truncate so using >= */
 			ips_proto_mq_rv_complete(req);
 		} else if (ips_proto_mq_push_rts_data(proto, req) != PSM2_OK) {
@@ -1419,7 +1497,7 @@ ips_proto_mq_handle_rts(struct ips_recvhdrq_event *rcv_ev)
 
 	req->rts_peer = (psm2_epaddr_t) ipsaddr;
 	req->rts_reqidx_peer = p_hdr->data[1].u32w0;
-	if (req->send_msglen > mq->hfi_thresh_rv)
+	if (req->req_data.send_msglen > mq->hfi_thresh_rv)
 	{
 		PSM2_LOG_EPM(OPCODE_LONG_RTS,PSM2_LOG_RX,req->rts_peer->epid,mq->ep->epid,
 			    "req->rts_reqidx_peer: %d",req->rts_reqidx_peer);
@@ -1686,10 +1764,10 @@ ips_proto_mq_handle_eager(struct ips_recvhdrq_event *rcv_ev)
 		 */
 		if (req) {
 #ifdef PSM_CUDA
-			if (PSMI_USE_GDR_COPY(req, req->send_msglen)) {
-				req->buf = gdr_convert_gpu_to_host_addr(GDR_FD,
+			if (PSMI_USE_GDR_COPY(req, req->req_data.send_msglen)) {
+				req->req_data.buf = gdr_convert_gpu_to_host_addr(GDR_FD,
 							(unsigned long)req->user_gpu_buffer,
-							req->send_msglen, 1, rcv_ev->proto);
+							req->req_data.send_msglen, 1, rcv_ev->proto);
 			}
 #endif
 			psmi_mq_handle_data(mq, req,
@@ -1819,7 +1897,7 @@ ips_proto_mq_handle_data(struct ips_recvhdrq_event *rcv_ev)
 
 	req = psmi_mpool_find_obj_by_index(mq->rreq_pool, p_hdr->data[0].u32w0);
 	psmi_assert(req != NULL);
-	psmi_assert(p_hdr->data[1].u32w1 == req->send_msglen);
+	psmi_assert(p_hdr->data[1].u32w1 == req->req_data.send_msglen);
 
 	/*
 	 * if a packet has very small offset, it must have unaligned data
@@ -1827,8 +1905,8 @@ ips_proto_mq_handle_data(struct ips_recvhdrq_event *rcv_ev)
 	 * for that message.
 	 */
 	if (p_hdr->data[1].u32w0 < 4 && p_hdr->data[1].u32w0 > 0) {
-		psmi_assert(p_hdr->data[1].u32w0 == (req->send_msglen&0x3));
-		mq_copy_tiny((uint32_t *)req->buf,
+		psmi_assert(p_hdr->data[1].u32w0 == (req->req_data.send_msglen&0x3));
+		mq_copy_tiny((uint32_t *)req->req_data.buf,
 				(uint32_t *)&p_hdr->mdata,
 				p_hdr->data[1].u32w0);
 		req->send_msgoff += p_hdr->data[1].u32w0;

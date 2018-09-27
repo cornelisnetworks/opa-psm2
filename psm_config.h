@@ -63,13 +63,6 @@
 /* #define RDPMC_PERF_FRAMEWORK */
 #endif
 
-#ifndef PSM2_LOG
-/* #define PSM2_LOG */
-#ifndef PSM2_LOG_FAST_IO
-/* #define PSM2_LOG_FAST_IO */
-#endif
-#endif
-
 #ifndef PSM2_MOCK_TESTING
 /* #define PSM2_MOCK_TESTING */
 #endif

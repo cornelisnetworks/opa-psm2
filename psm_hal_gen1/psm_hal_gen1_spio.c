@@ -63,7 +63,6 @@
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
 #include "psm_hal_gen1_spio.h"
-#include "ipserror.h"		/* ips error codes */
 #include "ips_proto_params.h"
 
 /* Report PIO stalls every 20 seconds at the least */
@@ -87,7 +86,6 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 	      struct ips_spio *ctrl)
 {
 	cpuid_t id;
-	int i;
 	hfp_gen1_pc_private *psm_hw_ctxt = context->psm_hw_ctxt;
 	struct _hfi_ctrl *con_ctrl = psm_hw_ctxt->ctrl;
 
@@ -155,57 +153,28 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 	}
 
 	/*
-	 * Setup the PIO block copying routine.
+	 * Setup the PIO block copying routines.
 	 */
-	ctrl->spio_blockcpy_selected = NULL;
-	ctrl->spio_blockcpy_routines[0] = hfi_pio_blockcpy_64;
 
-	ctrl->spio_blockcpy_routines[1] = hfi_pio_blockcpy_128;
+	get_cpuid(0x1, 0, &id);
 
-	ctrl->spio_blockcpy_routines[2] = hfi_pio_blockcpy_256;
-#ifdef PSM_AVX512
-	ctrl->spio_blockcpy_routines[3] = hfi_pio_blockcpy_512;
-#else
-	ctrl->spio_blockcpy_routines[3] = NULL;
-#endif
+	/* 16B copying supported */
+	ctrl->spio_blockcpy_med = (id.edx & (1<<SSE2_BIT)) ?
+		hfi_pio_blockcpy_128 : hfi_pio_blockcpy_64;
 
 	get_cpuid(0x7, 0, &id);
-	if (id.ebx & (1<<AVX512F_BIT)) {
-		/* avx512f supported */
-		for (i = 3; i>= 0; i--) {
-			if (ctrl->spio_blockcpy_routines[i]) {
-				ctrl->spio_blockcpy_selected =
-					ctrl->spio_blockcpy_routines[i];
-				break;
-			}
-		}
-	} else if (id.ebx & (1<<AVX2_BIT)) {
-		/* 32B copying supported */
-		for (i = 2; i >=0; i--) {
-			if (ctrl->spio_blockcpy_routines[i]) {
-			    ctrl->spio_blockcpy_selected =
-				ctrl->spio_blockcpy_routines[i];
-			    break;
-			}
-		}
-	} else {
-		get_cpuid(0x1, 0, &id);
-		if (id.edx & (1<<SSE2_BIT)) {
-			/* 16B copying supported */
-			for (i = 1; i >=0; i--) {
-				if (ctrl->spio_blockcpy_routines[i]) {
-				    ctrl->spio_blockcpy_selected =
-					ctrl->spio_blockcpy_routines[i];
-				    break;
-				}
-			}
-		} else {
-			/* use 8B copying */
-			ctrl->spio_blockcpy_selected =
-					ctrl->spio_blockcpy_routines[0];
-		}
-	}
-	psmi_assert(ctrl->spio_blockcpy_selected != NULL);
+
+	/* 32B copying supported */
+	ctrl->spio_blockcpy_large = (id.ebx & (1<<AVX2_BIT)) ?
+		hfi_pio_blockcpy_256 : ctrl->spio_blockcpy_med;
+
+#ifdef PSM_AVX512
+	/* 64B copying supported */
+	ctrl->spio_blockcpy_large = (id.ebx & (1<<AVX512F_BIT)) ?
+		hfi_pio_blockcpy_512 : ctrl->spio_blockcpy_med;
+
+#endif
+
 
 #ifdef PSM_CUDA
 	if (PSMI_IS_CUDA_ENABLED) {
@@ -695,7 +664,7 @@ spio_handle_resync(struct ips_spio *ctrl, uint64_t consecutive_send_failed)
  */
 static inline psm2_error_t
 ips_spio_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
-			struct hfi_pbc *pbc, uint32_t *payload,
+			struct psm_hal_pbc *pbc, uint32_t *payload,
 			uint32_t length, uint32_t isCtrlMsg,
 			uint32_t cksum_valid, uint32_t cksum
 #ifdef PSM_CUDA
@@ -827,7 +796,7 @@ fi_busy:
 	if (++ctrl->spio_block_index == ctrl->spio_total_blocks)
 		ctrl->spio_block_index = 0;
 
-	hfi_pio_blockcpy_64(pioaddr, (uint64_t *) pbc, 1);
+	ctrl->spio_blockcpy_med(pioaddr, (uint64_t *) pbc, 1);
 	_HFI_VDBG("pio qw write sop %p: 8\n", pioaddr);
 
 	/* Write to PIO: other blocks of payload */
@@ -845,14 +814,23 @@ fi_busy:
 	}
 #endif
 	if (length >= 64) {
+
+		ips_spio_blockcpy_fn_t blockcpy_fn;
+		if (length >= 256) {
+			blockcpy_fn = ctrl->spio_blockcpy_large;
+		}
+		else {
+			blockcpy_fn = ctrl->spio_blockcpy_med;
+		}
+
 		uint32_t blks2send = length >> 6;
 		uint32_t blks2end =
 			ctrl->spio_total_blocks - ctrl->spio_block_index;
 
 		pioaddr = ctrl->spio_bufbase + ctrl->spio_block_index * 8;
 		if (blks2end >= blks2send) {
-			ctrl->spio_blockcpy_selected(pioaddr,
-				(uint64_t *)payload, blks2send);
+			blockcpy_fn(pioaddr,
+					(uint64_t *)payload, blks2send);
 			_HFI_VDBG("pio blk write %p: %d\n",
 					pioaddr, blks2send);
 			ctrl->spio_block_index += blks2send;
@@ -860,15 +838,15 @@ fi_busy:
 				ctrl->spio_block_index = 0;
 			payload += blks2send*16;
 		} else {
-			ctrl->spio_blockcpy_selected(pioaddr,
-				(uint64_t *)payload, blks2end);
+			blockcpy_fn(pioaddr,
+					(uint64_t *)payload, blks2end);
 			_HFI_VDBG("pio blk write %p: %d\n",
 					pioaddr, blks2end);
 			payload += blks2end*16;
 
 			pioaddr = ctrl->spio_bufbase;
-			ctrl->spio_blockcpy_selected(pioaddr,
-				(uint64_t *)payload, (blks2send-blks2end));
+			blockcpy_fn(pioaddr,
+				    (uint64_t *)payload, (blks2send-blks2end));
 			_HFI_VDBG("pio blk write %p: %d\n",
 					pioaddr, (blks2send-blks2end));
 			ctrl->spio_block_index = blks2send - blks2end;

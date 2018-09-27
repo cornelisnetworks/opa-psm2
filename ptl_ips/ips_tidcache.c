@@ -60,6 +60,7 @@
 #define RBTREE_GET_RIGHTMOST(PAYLOAD_PTR) ((PAYLOAD_PTR)->start+((PAYLOAD_PTR)->length<<12))
 #define RBTREE_ASSERT                     psmi_assert
 #define RBTREE_MAP_COUNT(PAYLOAD_PTR)     ((PAYLOAD_PTR)->ntid)
+#define CUDA_INTERNAL_BAR1_RESERVED 32 * 1024 * 1024
 
 #include "rbtree.c"
 
@@ -181,9 +182,7 @@ ips_tidcache_register(struct ips_tid *tidc,
 	   where each entry in the tid array can accommodate only
 	   1 page. */
 	if (length > 4096*tidc->tid_ctrl->tid_num_max)
-	{
 		length = 4096*tidc->tid_ctrl->tid_num_max;
-	}
 	/*
 	 * register the new buffer.
 	 */
@@ -200,30 +199,40 @@ retry:
 				(uint64_t) start, &length,
 				(uint64_t) tidc->tid_array, &tidcnt,
 				flags) < 0) {
-		/* if driver reaches lockable memory limit */
-		if ((errno == ENOMEM
 #ifdef PSM_CUDA
-			/* This additional check is in place for just the cuda
-			 * version. It is a temporary workaround for a known
-			 * issue where nvidia driver returns EINVAL instead of
-			 * ENOMEM when there is no BAR1 space left to pin pages.
-			 * PSM frees tidcache enteries when the driver sends
-			 * EINVAL there by unpinning pages and freeing some
-			 * BAR1 space.*/
-		     || (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)start) && errno == EINVAL)
+		/* This additional check is in place for just the cuda
+		 * version. When there is no BAR1 space left to pin pages
+		 * PSM frees tidcache entries by unpinning pages and freeing
+		 * some BAR1 space. */
+		if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)start)) {
+			nvmlDevice_t dev;
+			nvmlBAR1Memory_t bar1Mem;
+
+			PSMI_NVML_CALL(nvmlDeviceGetHandleByIndex, 0, &dev);
+			PSMI_NVML_CALL(nvmlDeviceGetBAR1MemoryInfo, dev, &bar1Mem);
+
+			if (bar1Mem.bar1Free <= length + CUDA_INTERNAL_BAR1_RESERVED) {
+				uint64_t lengthEvicted = ips_tidcache_evict(tidc,length);
+				if (lengthEvicted >= length)
+					goto retry;
+			}
+		} else
 #endif
-			) && NIDLE) {
+		/* if driver reaches lockable memory limit */
+		if (errno == ENOMEM && NIDLE) {
 			uint64_t lengthEvicted = ips_tidcache_evict(tidc,length);
 
 			if (lengthEvicted >= length)
 				goto retry;
-		} else if (errno == EFAULT)
-                       psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
-                                " Unhandled error in TID Update: %s\n", strerror(errno));
+		} else if (errno == EFAULT) {
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+					" Unhandled error in TID Update: %s\n", strerror(errno));
+		}
 #ifdef PSM_CUDA
-		else if (PSMI_IS_CUDA_ENABLED && errno == ENOTSUP)
-		       psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
-                                " Nvidia driver apis mismatch: %s\n", strerror(errno));
+		else if (PSMI_IS_CUDA_ENABLED && errno == ENOTSUP) {
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+					" Nvidia driver apis mismatch: %s\n", strerror(errno));
+		}
 #endif
 
 		/* Unable to pin pages? retry later */

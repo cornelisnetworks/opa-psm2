@@ -52,9 +52,9 @@
 */
 
 #include <stdlib.h>
-#include "opa_common.h"
 #include <unistd.h>
 #include "psmi_wrappers.h"
+#include <sys/ioctl.h>
 
 /* The following indirection wrappers for external functions
  * are only created if this is a mocking tests build

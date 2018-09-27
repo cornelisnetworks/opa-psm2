@@ -594,8 +594,6 @@ static PSMI_HAL_INLINE int hfp_gen1_context_open(int unit,
 			goto bail;
 		}
 
-		pc_private->mtu = ep->mtu;
-
 		get_psm_gen1_hi()->phi.params.cap_mask = cap_mask
 			| get_cap_mask(ctrl->ctxt_info.runtime_flags)
 			| PSM_HAL_CAP_MERGED_TID_CTRLS
@@ -825,7 +823,7 @@ static PSMI_HAL_INLINE int hfp_gen1_update_tid(psmi_hal_hw_context ctxt, uint64_
 	return hfi_update_tid(psm_hw_ctxt->ctrl, vaddr, length, tidlist, tidcnt, flags);
 }
 
-static PSMI_HAL_INLINE int hfp_gen1_writev(const struct iovec *iov, int iovcnt, psmi_hal_hw_context ctxt)
+static PSMI_HAL_INLINE int hfp_gen1_writev(const struct iovec *iov, int iovcnt, struct ips_epinfo *ignored, psmi_hal_hw_context ctxt)
 {
 	hfp_gen1_pc_private *psm_hw_ctxt = (hfp_gen1_pc_private *)ctxt;
 
@@ -1004,12 +1002,12 @@ static PSMI_HAL_INLINE uint16_t hfp_gen1_get_user_minor_bldtime_version()
 	return HFI1_USER_SWMINOR;
 }
 
-static PSMI_HAL_INLINE uint16_t hfp_gen1_get_user_major_runtime_version()
+static PSMI_HAL_INLINE uint16_t hfp_gen1_get_user_major_runtime_version(psmi_hal_hw_context ctx)
 {
 	return hfi_get_user_major_version();
 }
 
-static PSMI_HAL_INLINE uint16_t hfp_gen1_get_user_minor_runtime_version()
+static PSMI_HAL_INLINE uint16_t hfp_gen1_get_user_minor_runtime_version(psmi_hal_hw_context ctx)
 {
 	return hfi_get_user_minor_version();
 }
@@ -1094,7 +1092,7 @@ static inline int hfp_gen1_cl_q_empty(psmi_hal_cl_idx head_idx,
 }
 
 static inline int hfp_gen1_get_rhf(psmi_hal_cl_idx idx,
-			    psmi_hal_gen1_raw_rhf_t *rhfp,
+			    psmi_hal_raw_rhf_t *rhfp,
 			    psmi_hal_cl_q cl_q,
 			    psmi_hal_hw_context ctxt)
 
@@ -1103,36 +1101,12 @@ static inline int hfp_gen1_get_rhf(psmi_hal_cl_idx idx,
 	psm_hal_gen1_cl_q_t *pcl_q = &psm_hw_ctxt->cl_qs[cl_q];
 	uint32_t *pu32 = (pcl_q->hdr_qe.hdrq_base_addr +
 			  (idx + get_psm_gen1_hi()->hfp_private.hdrq_rhf_off));
-	*rhfp = *((psmi_hal_gen1_raw_rhf_t*)pu32);
-	return PSM_HAL_ERROR_OK;
-}
-
-static PSMI_HAL_INLINE int hfp_gen1_rhf_set_egr_buff_index(psmi_hal_gen1_raw_rhf_t *prhf, uint32_t val)
-{
-	hfi_hdrset_egrbfr_index((uint32_t*)prhf,val);
-	return PSM_HAL_ERROR_OK;
-}
-
-static PSMI_HAL_INLINE int hfp_gen1_rhf_set_egr_buff_offset(psmi_hal_gen1_raw_rhf_t *prhf, uint32_t val)
-{
-	hfi_hdrset_egrbfr_offset((uint32_t *)prhf, val);
-	return PSM_HAL_ERROR_OK;
-}
-
-static PSMI_HAL_INLINE int hfp_gen1_rhf_set_err_flags(psmi_hal_gen1_raw_rhf_t *prhf, uint32_t val)
-{
-	hfi_hdrset_err_flags((uint32_t*) prhf, val);
-	return PSM_HAL_ERROR_OK;
-}
-
-static PSMI_HAL_INLINE int hfp_gen1_rhf_set_use_egrbfr(psmi_hal_gen1_raw_rhf_t *prhf, uint32_t val)
-{
-	hfi_hdrset_use_egrbfr((uint32_t *)prhf, val);
+	*rhfp = *((psmi_hal_raw_rhf_t*)pu32);
 	return PSM_HAL_ERROR_OK;
 }
 
 static inline int hfp_gen1_get_ips_message_hdr(psmi_hal_cl_idx idx,
-					psmi_hal_gen1_raw_rhf_t rhf,
+					psmi_hal_raw_rhf_t rhf,
 					struct ips_message_header **imhp,
 					psmi_hal_cl_q cl_q,
 					psmi_hal_hw_context ctxt)
@@ -1264,7 +1238,7 @@ ips_proto_pbc_static_rate(struct ips_proto *proto, struct ips_flow *flow,
 
 /* This is a helper function to convert Per Buffer Control to little-endian */
 PSMI_ALWAYS_INLINE(
-void ips_proto_pbc_to_le(struct hfi_pbc *pbc))
+void ips_proto_pbc_to_le(struct psm_hal_pbc *pbc))
 {
 	pbc->pbc0 = __cpu_to_le32(pbc->pbc0);
 	pbc->PbcStaticRateControlCnt = __cpu_to_le16(pbc->PbcStaticRateControlCnt);
@@ -1278,10 +1252,10 @@ void ips_proto_pbc_to_le(struct hfi_pbc *pbc))
 PSMI_ALWAYS_INLINE(
 void
 ips_proto_pbc_update(struct ips_proto *proto, struct ips_flow *flow,
-		     uint32_t isCtrlMsg, struct hfi_pbc *pbc, uint32_t hdrlen,
+		     uint32_t isCtrlMsg, struct psm_hal_pbc *pbc, uint32_t hdrlen,
 		     uint32_t paylen))
 {
-	int dw = (sizeof(struct hfi_pbc) + hdrlen + paylen) >> BYTE2DWORD_SHIFT;
+	int dw = (sizeof(struct psm_hal_pbc) + hdrlen + paylen) >> BYTE2DWORD_SHIFT;
 	int sc = proto->sl2sc[flow->path->pr_sl];
 	int vl = proto->sc2vl[sc];
 	uint16_t static_rate = 0;
@@ -1311,7 +1285,7 @@ static PSMI_HAL_INLINE int hfp_gen1_check_rhf_sequence_number(unsigned int seqno
 }
 
 static PSMI_HAL_INLINE int hfp_gen1_set_pbc(struct ips_proto *proto, struct ips_flow *flow,
-		     uint32_t isCtrlMsg, struct hfi_pbc *dest, uint32_t hdrlen,
+		     uint32_t isCtrlMsg, struct psm_hal_pbc *dest, uint32_t hdrlen,
 		     uint32_t paylen)
 {
 	ips_proto_pbc_update(proto, flow, isCtrlMsg,
@@ -1523,9 +1497,9 @@ static PSMI_HAL_INLINE int hfp_gen1_tidflow_get_genmismatch(uint64_t val, uint32
 	return PSM_HAL_ERROR_OK;
 }
 
-static PSMI_HAL_INLINE int hfp_gen1_write_header_to_subcontext(struct ips_message_header *pimh,
+static inline int hfp_gen1_write_header_to_subcontext(struct ips_message_header *pimh,
 					       psmi_hal_cl_idx idx,
-					       psmi_hal_gen1_raw_rhf_t rhf,
+					       psmi_hal_raw_rhf_t rhf,
 					       psmi_hal_cl_q cl_q,
 					       psmi_hal_hw_context ctxt)
 {
@@ -1550,7 +1524,7 @@ writehdrq_write_rhf_atomic(uint64_t *rhf_dest, uint64_t rhf_src)
 	return;
 }
 
-static PSMI_HAL_INLINE int hfp_gen1_write_rhf_to_subcontext(psmi_hal_gen1_raw_rhf_t rhf,
+static inline int hfp_gen1_write_rhf_to_subcontext(psmi_hal_raw_rhf_t rhf,
 					    psmi_hal_cl_idx idx,
 					    uint32_t *phdrq_rhf_seq,
 					    psmi_hal_cl_q cl_q,
@@ -1653,9 +1627,8 @@ ips_write_eager_packet(struct ips_writehdrq *writeq,
 			psmi_mq_mtucpy(write_payload, rcv_payload, rcv_paylen);
 
 			/* Fix up the rhf with the subcontext's eager index/offset */
-			hfp_gen1_rhf_set_egr_buff_index(&rcv_ev->psm_hal_rhf.raw_rhf, write_egr_tail);
-
-			hfp_gen1_rhf_set_egr_buff_offset(&rcv_ev->psm_hal_rhf.raw_rhf, (writeq->state->
+			hfi_hdrset_egrbfr_index((uint32_t*)(&rcv_ev->psm_hal_rhf.raw_rhf),write_egr_tail);
+			hfi_hdrset_egrbfr_offset((uint32_t *)(&rcv_ev->psm_hal_rhf.raw_rhf), (writeq->state->
 								egrq_offset >> 6));
 			/* Copy the header to the subcontext's header queue */
 			hfp_gen1_write_header_to_subcontext(rcv_ev->p_hdr,
@@ -1676,11 +1649,10 @@ ips_write_eager_packet(struct ips_writehdrq *writeq,
 	/* Copy the header to the subcontext's header queue */
 
 	/* Mark header with ETIDERR (eager overflow) */
-
-	hfp_gen1_rhf_set_err_flags(&rcv_ev->psm_hal_rhf.raw_rhf, HFI_RHF_TIDERR);
+	hfi_hdrset_err_flags((uint32_t*) (&rcv_ev->psm_hal_rhf.raw_rhf), HFI_RHF_TIDERR);
 
 	/* Clear UseEgrBfr bit because payload is dropped */
-	hfp_gen1_rhf_set_use_egrbfr(&rcv_ev->psm_hal_rhf.raw_rhf, 0);
+	hfi_hdrset_use_egrbfr((uint32_t *)(&rcv_ev->psm_hal_rhf.raw_rhf), 0);
 	hfp_gen1_write_header_to_subcontext(rcv_ev->p_hdr,
 					    write_hdr_tail,
 					    rcv_ev->psm_hal_rhf.raw_rhf,
@@ -1816,7 +1788,7 @@ static PSMI_HAL_INLINE int hfp_gen1_spio_fini(void **ctrl, psmi_hal_hw_context c
 }
 
 static PSMI_HAL_INLINE int hfp_gen1_spio_transfer_frame(struct ips_proto *proto,
-					struct ips_flow *flow, struct hfi_pbc *pbc,
+					struct ips_flow *flow, struct psm_hal_pbc *pbc,
 					uint32_t *payload, uint32_t length,
 					uint32_t isCtrlMsg, uint32_t cksum_valid,
 					uint32_t cksum, psmi_hal_hw_context ctxt
@@ -1919,13 +1891,6 @@ static PSMI_HAL_INLINE int      hfp_gen1_get_lid(psmi_hal_hw_context ctxt)
 					"Can't get HFI LID in psm2_ep_open: is SMA running?");
 	}
 	return lid;
-}
-
-static PSMI_HAL_INLINE int      hfp_gen1_get_mtu(psmi_hal_hw_context ctxt)
-{
-	hfp_gen1_pc_private *psm_hw_ctxt = ctxt;
-
-	return psm_hw_ctxt->mtu;
 }
 
 static PSMI_HAL_INLINE int      hfp_gen1_get_pio_size(psmi_hal_hw_context ctxt)

@@ -74,47 +74,44 @@ static long sysfs_page_size;
 
 void sysfs_init(const char *dflt_hfi_class_path)
 {
-	if (sysfs_path == NULL)
+	if (NULL != (sysfs_path = getenv("HFI_SYSFS_PATH")))
 	{
-		if (NULL != (sysfs_path = getenv("HFI_SYSFS_PATH")))
+		char *syspath = strdup(sysfs_path);
+
+		if (!syspath)
+			_HFI_DBG("Failed to strdup(\"%s\") for syspath.\n",
+				 sysfs_path);
+		else
+			sysfs_path = syspath;
+	}
+	if (sysfs_path == NULL) {
+		unsigned len = strlen(dflt_hfi_class_path) + 4;
+		char *syspath = malloc(len);
+
+		if (!syspath)
+			_HFI_DBG("Failed to alloc %u bytes for syspath.\n",len);
+		else
 		{
-			char *syspath = strdup(sysfs_path);
-
-			if (!syspath)
-				_HFI_DBG("Failed to strdup(\"%s\") for syspath.\n",
-					 sysfs_path);
-			else
-				sysfs_path = syspath;
+			snprintf(syspath, len, "%s_0", dflt_hfi_class_path);
+			sysfs_path = syspath;
 		}
-		if (sysfs_path == NULL) {
-			unsigned len = strlen(dflt_hfi_class_path) + 4;
-			char *syspath = malloc(len);
+	}
 
-			if (!syspath)
-				_HFI_DBG("Failed to alloc %u bytes for syspath.\n",len);
-			else
-			{
-				snprintf(syspath, len, "%s_0", dflt_hfi_class_path);
-				sysfs_path = syspath;
-			}
+	if (sysfs_path != NULL) {
+		struct stat s;
+
+		if (stat(sysfs_path, &s) || !S_ISDIR(s.st_mode))
+		{
+			_HFI_DBG("Did not find sysfs directory %s, using anyway\n",
+				 sysfs_path);
 		}
+		else
+		{
+			/* Remove the unit number from the sysfs path: */
+			char *lastUS = strrchr(sysfs_path, '_');
 
-		if (sysfs_path != NULL) {
-			struct stat s;
-
-			if (stat(sysfs_path, &s) || !S_ISDIR(s.st_mode))
-			{
-				_HFI_DBG("Did not find sysfs directory %s, using anyway\n",
-					 sysfs_path);
-			}
-			else
-			{
-				/* Remove the unit number from the sysfs path: */
-				char *lastUS = strrchr(sysfs_path, '_');
-
-				if ((NULL != lastUS) && (isdigit(lastUS[1])))
-					lastUS[1] = 0;
-			}
+			if ((NULL != lastUS) && (isdigit(lastUS[1])))
+				lastUS[1] = 0;
 		}
 	}
 
@@ -163,37 +160,6 @@ int hfi_hfifs_open(const char *attr, int flags)
 
 	errno = saved_errno;
 	return fd;
-}
-
-static int sysfs_vprintf(int fd, const char *fmt, va_list ap)
-{
-	char *buf;
-	int len, ret;
-	int saved_errno;
-
-	buf = alloca(sysfs_page_size);
-	len = vsnprintf(buf, sysfs_page_size, fmt, ap);
-
-	if (len > sysfs_page_size) {
-		_HFI_DBG("Attempt to write more (%d) than %ld bytes\n", len,
-			 sysfs_page_size);
-		saved_errno = EINVAL;
-		ret = -1;
-		goto bail;
-	}
-
-	ret = write(fd, buf, len);
-	saved_errno = errno;
-
-	if (ret != -1 && ret < len) {
-		_HFI_DBG("Write ran short (%d < %d)\n", ret, len);
-		saved_errno = EAGAIN;
-		ret = -1;
-	}
-
-bail:
-	errno = saved_errno;
-	return ret;
 }
 
 int hfi_sysfs_unit_open(uint32_t unit, const char *attr, int flags)
@@ -277,71 +243,6 @@ int hfi_hfifs_unit_open(uint32_t unit, const char *attr, int flags)
 
 	errno = saved_errno;
 	return fd;
-}
-
-int hfi_sysfs_port_printf(uint32_t unit, uint32_t port, const char *attr,
-			  const char *fmt, ...)
-{
-	va_list ap;
-	int ret = -1;
-	int saved_errno;
-	int fd;
-
-	fd = hfi_sysfs_port_open(unit, port, attr, O_WRONLY);
-	saved_errno = errno;
-
-	if (fd == -1) {
-		goto bail;
-	}
-
-	va_start(ap, fmt);
-	ret = sysfs_vprintf(fd, fmt, ap);
-	saved_errno = errno;
-	va_end(ap);
-
-	if (ret == -1) {
-		_HFI_DBG("Failed to write to attribute '%s' of unit %d: %s\n",
-			 attr, unit, strerror(errno));
-	}
-
-bail:
-	if (fd != -1)
-		close(fd);
-
-	errno = saved_errno;
-	return ret;
-}
-
-int hfi_sysfs_unit_printf(uint32_t unit, const char *attr, const char *fmt, ...)
-{
-	va_list ap;
-	int ret = -1;
-	int saved_errno;
-	int fd;
-
-	fd = hfi_sysfs_unit_open(unit, attr, O_WRONLY);
-	saved_errno = errno;
-
-	if (fd == -1) {
-		goto bail;
-	}
-
-	va_start(ap, fmt);
-	ret = sysfs_vprintf(fd, fmt, ap);
-	saved_errno = errno;
-	va_end(ap);
-
-	if (ret == -1) {
-		_HFI_DBG("Failed to write to attribute '%s' of unit %d: %s\n",
-			 attr, unit, strerror(errno));
-	}
-
-bail:
-	if (fd != -1)
-		close(fd);
-
-	errno = saved_errno;
-	return ret;
 }
 
 static int read_page(int fd, char **datap)
@@ -465,53 +366,6 @@ bail:
 	return ret;
 }
 
-int hfi_sysfs_unit_write(uint32_t unit, const char *attr, const void *data,
-			 size_t len)
-{
-	int fd = -1, ret = -1;
-	int saved_errno;
-
-	if (len > sysfs_page_size) {
-		_HFI_DBG("Attempt to write more (%ld) than %ld bytes\n",
-			 (long)len, sysfs_page_size);
-		saved_errno = EINVAL;
-		goto bail;
-	}
-
-	fd = hfi_sysfs_unit_open(unit, attr, O_WRONLY);
-	saved_errno = errno;
-
-	if (fd == -1)
-		goto bail;
-
-	ret = write(fd, data, len);
-	saved_errno = errno;
-
-	if (ret == -1) {
-		_HFI_DBG("Attempt to write %ld bytes failed: %s\n",
-			 (long)len, strerror(errno));
-		goto bail;
-	}
-
-	if (ret < len) {
-		/* sysfs routines can routine count including null byte
-		   so don't return an error if it's > len */
-		_HFI_DBG
-		    ("Attempt to write %ld bytes came up short (%ld bytes)\n",
-		     (long)len, (long)ret);
-		saved_errno = EAGAIN;
-		ret = -1;
-	}
-
-bail:
-	if (fd != -1) {
-		close(fd);
-	}
-
-	errno = saved_errno;
-	return ret;
-}
-
 /*
  * On return, caller must free *datap.
  */
@@ -610,44 +464,6 @@ int hfi_hfifs_unit_rd(uint32_t unit, const char *attr, void *buf, int n)
 
 	ret = read(fd, buf, n);
 	saved_errno = errno;
-
-bail:
-	if (fd != -1) {
-		close(fd);
-	}
-
-	errno = saved_errno;
-	return ret;
-}
-
-int hfi_hfifs_unit_write(uint32_t unit, const char *attr, const void *data,
-			 size_t len)
-{
-	int fd = -1, ret = -1;
-	int saved_errno;
-
-	fd = hfi_hfifs_unit_open(unit, attr, O_WRONLY);
-	saved_errno = errno;
-
-	if (fd == -1)
-		goto bail;
-
-	ret = write(fd, data, len);
-	saved_errno = errno;
-
-	if (ret == -1) {
-		_HFI_DBG("Attempt to write %ld bytes failed: %s\n",
-			 (long)len, strerror(errno));
-		goto bail;
-	}
-
-	if (ret != len) {
-		_HFI_DBG
-		    ("Attempt to write %ld bytes came up short (%ld bytes)\n",
-		     (long)len, (long)ret);
-		saved_errno = EAGAIN;
-		ret = -1;
-	}
 
 bail:
 	if (fd != -1) {

@@ -54,8 +54,14 @@ HISTORY = .outdirs
 HISTORIC_TARGETS = $(patsubst %, %_clean, $(shell cat $(HISTORY) 2> /dev/null))
 
 RPM_NAME := libpsm2
+CONFIG_FILE := .config
+TEMP_INST_DIR := $(shell mktemp -d)
 
-PSM_HAL_ENABLE = *
+ifeq ($(CONFIG_FILE), $(wildcard $(CONFIG_FILE)))
+include $(CONFIG_FILE)
+endif
+
+PSM_HAL_ENABLE ?= *
 
 PSM_HAL_ENABLE_D = $(wildcard $(addprefix psm_hal_,$(PSM_HAL_ENABLE)))
 
@@ -287,7 +293,7 @@ endif
 HALDECLFILE=$(OUTDIR)/psm2_hal_inlines_d.h
 HALIMPLFILE=$(OUTDIR)/psm2_hal_inlines_i.h
 
-all: outdir symlinks $(HALDECLFILE) $(HALIMPLFILE)
+all: symlinks $(HALDECLFILE) $(HALIMPLFILE) | $(OUTDIR)
 	@if [ ! -e $(HISTORY) ] || [ -z "`grep -E '^$(OUTDIR)$$' $(HISTORY)`" ]; then \
 		echo $(OUTDIR) >> $(HISTORY); \
 	fi
@@ -302,19 +308,21 @@ all: outdir symlinks $(HALDECLFILE) $(HALIMPLFILE)
 	@mkdir -p $(OUTDIR)/compat
 	$(MAKE) -j $(nthreads) -C compat OUTDIR=$(OUTDIR)/compat
 
-$(HALDECLFILE):
+$(HALDECLFILE): | $(OUTDIR)
 	@test -f $(HALDECLFILE) || ( \
 		n_hal_insts=$(words $(wildcard $(PSM_HAL_ENABLE_D)));\
 		echo "#define PSMI_HAL_INST_CNT $$n_hal_insts"                > $(HALDECLFILE);\
-		if [ $$n_hal_insts -eq 1 ]; then\
+		if [ $$n_hal_insts -eq 1 ]; then					       \
 		    echo "#define PSMI_HAL_INLINE inline"                    >> $(HALDECLFILE);\
-		    hal_inst=$(PSM_HAL_ENABLE_D);\
-		    echo "#include \"$$hal_inst/psm_hal_inline_d.h\""        >> $(HALDECLFILE);\
-		else\
+		    hal_inst_dir=$(PSM_HAL_ENABLE_D);					       \
+		    echo "#define PSMI_HAL_CAT_INL_SYM(KERNEL) hfp_$(subst psm_hal_,,$(PSM_HAL_ENABLE_D))"	       \
+				"## _ ## KERNEL"			     >> $(HALDECLFILE);\
+		    echo "#include \"psm2_hal_inline_t.h\""		     >> $(HALDECLFILE);\
+		else									       \
 		    echo "#define PSMI_HAL_INLINE /* nothing */"             >> $(HALDECLFILE);\
 		fi )
 
-$(HALIMPLFILE):
+$(HALIMPLFILE): | $(OUTDIR)
 	@test -f $(HALIMPLFILE) || ( \
 		n_hal_insts=$(words $(wildcard $(PSM_HAL_ENABLE_D)));\
 		if [ $$n_hal_insts -eq 1 ]; then\
@@ -337,6 +345,25 @@ clean: cleanlinks
 			rm -f $(HISTORY); \
 		fi; \
 	fi
+	rm -fr $(TEMP_INST_DIR)
+
+# Easily add more items to config target if more options need
+# to be cached.
+config: $(CONFIG_FILE)
+
+$(CONFIG_FILE):
+	@echo PSM_HAL_ENABLE=$(PSM_HAL_ENABLE) > $(CONFIG_FILE)
+	@echo CCARCH=$(CCARCH) >> $(CONFIG_FILE)
+	@echo HFI_BRAKE_DEBUG=$(HFI_BRAKE_DEBUG) >> $(CONFIG_FILE)
+	@echo PSM_DEBUG=$(PSM_DEBUG) >> $(CONFIG_FILE)
+	@echo PSM_AVX512=$(PSM_AVX512) >> $(CONFIG_FILE)
+	@echo PSM_LOG=$(PSM_LOG) >> $(CONFIG_FILE)
+	@echo PSM_LOG_FAST_IO=$(PSM_LOG_FAST_IO) >> $(CONFIG_FILE)
+	@echo PSM_PERF=$(PSM_PERF) >> $(CONFIG_FILE)
+	@echo PSM_HEAP_DEBUG=$(PSM_HEAP_DEBUG) >> $(CONFIG_FILE)
+	@echo PSM_PROFILE=$(PSM_PROFILE) >> $(CONFIG_FILE)
+	@echo PSM_CUDA=$(PSM_CUDA) >> $(CONFIG_FILE)
+	@echo Wrote $(CONFIG_FILE)
 
 mock: OUTDIR := $(MOCK_OUTDIR)
 mock:
@@ -355,11 +382,12 @@ specfile_clean:
 	rm -f ${OUTDIR}/${RPM_NAME}.spec
 
 distclean: specfile_clean cleanlinks $(HISTORIC_TARGETS) test_clean
+	rm -f $(CONFIG_FILE)
 	rm -rf ${OUTDIR}/${DIST}
 	rm -f ${OUTDIR}/${DIST}.tar.gz
-	rm -fr temp.*
+	rm -fr temp.* *.rej.patch
 
-outdir:
+$(OUTDIR):
 	mkdir -p ${OUTDIR}
 
 symlinks:
@@ -392,23 +420,31 @@ endif
 	# The following files and dirs were part of the noship rpm:
 	mkdir -p ${DESTDIR}/usr/include/hfi1diag
 	mkdir -p ${DESTDIR}/usr/include/hfi1diag/linux-x86_64
-	mkdir -p ${DESTDIR}/usr/include/hfi1diag/ptl_ips
-	install -m 0644 -D ptl_ips/ipserror.h ${DESTDIR}/usr/include/hfi1diag/ptl_ips/ipserror.h
 	install -m 0644 -D include/linux-x86_64/bit_ops.h ${DESTDIR}/usr/include/hfi1diag/linux-x86_64/bit_ops.h
 	install -m 0644 -D include/linux-x86_64/sysdep.h ${DESTDIR}/usr/include/hfi1diag/linux-x86_64/sysdep.h
 	install -m 0644 -D include/opa_udebug.h ${DESTDIR}/usr/include/hfi1diag/opa_udebug.h
 	install -m 0644 -D include/opa_debug.h ${DESTDIR}/usr/include/hfi1diag/opa_debug.h
 	install -m 0644 -D include/opa_intf.h ${DESTDIR}/usr/include/hfi1diag/opa_intf.h
-	install -m 0644 -D include/opa_user.h ${DESTDIR}/usr/include/hfi1diag/opa_user.h
-	install -m 0644 -D include/opa_service.h ${DESTDIR}/usr/include/hfi1diag/opa_service.h
-	install -m 0644 -D include/opa_common.h ${DESTDIR}/usr/include/hfi1diag/opa_common.h
+	for h in opa_user_gen1.h opa_service_gen1.h opa_common_gen1.h ; do \
+		sed -e 's/#include "opa_user_gen1.h"/#include "opa_user.h"/' \
+			-e 's/#include "opa_common_gen1.h"/#include "opa_common.h"/' \
+			-e 's/#include "hfi1_deprecated_gen1.h"/#include "hfi1_deprecated.h"/' \
+			-e 's/#include "opa_service_gen1.h"/#include "opa_service.h"/' psm_hal_gen1/$$h \
+				> $(TEMP_INST_DIR)/$$h ; \
+	done
+	cat include/opa_user.h    $(TEMP_INST_DIR)/opa_user_gen1.h  > $(TEMP_INST_DIR)/opa_user.h
+	cat include/opa_service.h $(TEMP_INST_DIR)/opa_service_gen1.h > $(TEMP_INST_DIR)/opa_service.h
+	install -m 0644 -D $(TEMP_INST_DIR)/opa_user.h    ${DESTDIR}/usr/include/hfi1diag/opa_user.h
+	install -m 0644 -D $(TEMP_INST_DIR)/opa_service.h ${DESTDIR}/usr/include/hfi1diag/opa_service.h
+	install -m 0644 -D $(TEMP_INST_DIR)/opa_common_gen1.h ${DESTDIR}/usr/include/hfi1diag/opa_common.h
 	install -m 0644 -D include/opa_byteorder.h ${DESTDIR}/usr/include/hfi1diag/opa_byteorder.h
 	install -m 0644 -D include/psm2_mock_testing.h ${DESTDIR}/usr/include/hfi1diag/psm2_mock_testing.h
-	install -m 0644 -D include/hfi1_deprecated.h ${DESTDIR}/usr/include/hfi1diag/hfi1_deprecated.h
 	install -m 0644 -D include/opa_revision.h ${DESTDIR}/usr/include/hfi1diag/opa_revision.h
 	install -m 0644 -D psmi_wrappers.h ${DESTDIR}/usr/include/hfi1diag/psmi_wrappers.h
+	install -m 0644 -D psm_hal_gen1/hfi1_deprecated_gen1.h ${DESTDIR}/usr/include/hfi1diag/hfi1_deprecated.h
+	rm -fr $(TEMP_INST_DIR)
 
-specfile: outdir specfile_clean
+specfile: specfile_clean | $(OUTDIR)
 	sed -e 's/@VERSION@/'${VERSION_RELEASE}'/g' libpsm2.spec.in | \
 		sed -e 's/@TARGLIB@/'${TARGLIB}'/g' \
 			-e 's/@RPM_NAME@/'${RPM_NAME}'/g' \
@@ -447,7 +483,7 @@ dist: distclean
 	PRUNE_LIST="";										\
 	for pd in ".git" "cscope*" "$(shell realpath --relative-to=${top_srcdir} ${OUTDIR})"	\
 		"*.orig" "*~" "#*" ".gitignore" "doc" "libcm" "psm.supp" "test" "psm_hal_MOCK"	\
-		 "tools" "artifacts" ; do							\
+		 "tools" "artifacts" "*.rej.patch"; do			\
 		PRUNE_LIST="$$PRUNE_LIST -name $$pd -prune -o";					\
 	done;											\
 	for hid in psm_hal_* ; do								\
@@ -515,7 +551,6 @@ ${TARGLIB}-objs := ptl_am/am_reqrep_shmem.o	\
 		   libuuid/unparse.o		\
 		   ptl_ips/ptl.o		\
 		   ptl_ips/ptl_rcvthread.o	\
-		   ptl_ips/ipserror.o		\
 		   ptl_ips/ips_scb.o		\
 		   ptl_ips/ips_epstate.o	\
 		   ptl_ips/ips_recvq.o		\
@@ -539,8 +574,7 @@ ${TARGLIB}-objs := ptl_am/am_reqrep_shmem.o	\
 		   psm_diags.o                  \
 		   psm2_hal.o			\
 		   $(PSM_HAL_INSTANCE_OBJFILES)	\
-		   psmi_wrappers.o              \
-		   psm_gdrcpy.o
+		   psmi_wrappers.o
 
 ${TARGLIB}-objs := $(patsubst %.o, ${OUTDIR}/%.o, ${${TARGLIB}-objs})
 
@@ -564,7 +598,7 @@ $(OUTDIR)/${TARGLIB}.so.${MAJOR}.${MINOR}: ${${TARGLIB}-objs} $(LINKER_SCRIPT_FI
 	echo "char psmi_hfi_git_checksum[] =\"`git rev-parse HEAD`\";" >> ${OUTDIR}/_revision.c
 	$(CC) -c $(CFLAGS) $(BASECFLAGS) $(INCLUDES) ${OUTDIR}/_revision.c -o $(OUTDIR)/_revision.o
 	$(CC) $(LINKER_SCRIPT) $(LDFLAGS) -o $@ -Wl,-soname=${TARGLIB}.so.${MAJOR} -shared \
-		${${TARGLIB}-objs} $(OUTDIR)/_revision.o -Lopa $(LDLIBS)
+		${${TARGLIB}-objs} $(OUTDIR)/_revision.o $(LDLIBS)
 
 $(OUTDIR)/${TARGLIB}.a: $(OUTDIR)/${TARGLIB}.so.${MAJOR}.${MINOR}
 	$(AR) rcs $(OUTDIR)/${TARGLIB}.a ${${TARGLIB}-objs} $(OUTDIR)/_revision.o
@@ -575,3 +609,5 @@ ${OUTDIR}/%.o: ${top_srcdir}/%.c
 $(LINKER_SCRIPT_FILE): psm2_linker_script_map.in
 	sed "s/_psm2_additional_globals_;/$(PSM2_ADDITIONAL_GLOBALS)/" \
 	     psm2_linker_script_map.in > ${OUTDIR}/psm2_linker_script.map
+
+.PHONY: all %_clean clean config mock debug distclean symlinks cleanlinks install specfile dist ofeddist cscope sources-checksum

@@ -145,11 +145,11 @@ struct ptl_shared {
 	uint32_t subcontext_cnt;
 
 	pthread_spinlock_t *context_lock;
-	struct ips_subcontext_ureg *subcontext_ureg[HFI1_MAX_SHARED_CTXTS];
+	struct ips_subcontext_ureg *subcontext_ureg[PSM_HAL_MAX_SHARED_CTXTS];
 	struct ips_hwcontext_ctrl *hwcontext_ctrl;
 	struct ips_recvhdrq recvq;	/* subcontext receive queue */
 	struct ips_recvhdrq_state recvq_state;	/* subcontext receive queue state */
-	struct ips_writehdrq writeq[HFI1_MAX_SHARED_CTXTS];	/* peer subcontexts */
+	struct ips_writehdrq writeq[PSM_HAL_MAX_SHARED_CTXTS];	/* peer subcontexts */
 };
 
 /*

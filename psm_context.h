@@ -107,14 +107,14 @@ int psmi_context_interrupt_isenabled(psmi_context_t *context);
  * If it is preferred to spread job over over entire set of
  * HFIs within the system, see ALG_ACROSS_ALL below.
  */
-#define PSMI_UNIT_SEL_ALG_ACROSS     HFI1_ALG_ACROSS
+#define PSMI_UNIT_SEL_ALG_ACROSS     PSM_HAL_ALG_ACROSS
 
-#define PSMI_UNIT_SEL_ALG_ACROSS_ALL HFI1_ALG_ACROSS_ALL
+#define PSMI_UNIT_SEL_ALG_ACROSS_ALL PSM_HAL_ALG_ACROSS_ALL
 
 /*
  * use all contexts on an HFI (round robin
  * active ports within), then next HFI
  */
-#define PSMI_UNIT_SEL_ALG_WITHIN     HFI1_ALG_WITHIN
+#define PSMI_UNIT_SEL_ALG_WITHIN     PSM_HAL_ALG_WITHIN
 
 #endif /* PSM_CONTEXT_H */

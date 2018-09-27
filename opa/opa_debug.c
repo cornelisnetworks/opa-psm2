@@ -175,7 +175,7 @@ static void hfi_sighdlr(int sig, siginfo_t *p1, void *ucv)
 	extern char *__progname;
 	PSM2_LOG_DECLARE_BT_BUFFER();
 
-	/* CALLS UNSAFE FUNCTION when PSM2_LOG is defined. */
+	/* CALLS UNSAFE FUNCTION when PSM_LOG is defined. */
 	PSM2_LOG_BT(100,__FUNCTION__);
 	/* If this is a SIGINT do not display backtrace. Just invoke exit
 	   handlers */

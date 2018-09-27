@@ -172,28 +172,25 @@ struct ips_scb {
 	psm2_mq_req_t mq_req;		/* back pointer to original request */
 #endif
 	/* sdma header place holder, PSM2 code should access
-	 * the sdma_req_info only using the psmi_get_sdma_req_info()
+	 * the psm_hal_sdma_req_info only using the psmi_get_sdma_req_info()
 	 * accessor function. */
 	/*
-	 * The size of struct sdma_req_info is variable. (10 bytes for
+	 * The size of struct psm_hal_sdma_req_info is variable. (10 bytes for
 	 * GPU-direct and 8 bytes for non GPU-Direct)
 	 * When GPU-Direct feature is used, all 10 bytes of the space is used.
 	 * Otherwise, we only use upto 8 bytes. The usage is controlled by
 	 * psmi_get_sdma_req_info() in ips_proto.h
 	 */
-	union {
-		struct sdma_req_info _DO_NOT_USE_;
-		struct sdma_req_info_v6_3 _PLEASE_DO_NOT_USE_;
-	};
+	struct psm_hal_sdma_req_info _DO_NOT_USE_;
 	struct {
-		struct hfi_pbc pbc;
+		struct psm_hal_pbc pbc;
 		struct ips_message_header ips_lrh;
 	} PSMI_CACHEALIGN;
 };
 
 /* Make sure pbc is at the right place before the message header */
 
-COMPILE_TIME_ASSERT(PBC_ABUTS_IPS_MSG_HDR,(sizeof(struct hfi_pbc) ==
+COMPILE_TIME_ASSERT(PBC_ABUTS_IPS_MSG_HDR,(sizeof(struct psm_hal_pbc) ==
     (size_t) (offsetof(struct ips_scb, ips_lrh) -
               offsetof(struct ips_scb, pbc))));
 

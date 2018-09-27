@@ -207,6 +207,8 @@ psm2_error_t ips_ptl_init(const psm2_ep_t ep, ptl_t *ptl_gen, ptl_ctl_t *ctl)
 	ctl->epaddr_stats_init = ips_ptl_epaddr_stats_init;
 	ctl->epaddr_stats_get = ips_ptl_epaddr_stats_get;
 
+	ctl->msg_size_thresh_query = ips_proto_msg_size_thresh_query;
+
 	/*
 	 * Runtime flags in 'ptl' are different from runtime flags in 'context'.
 	 * In 'context', runtime flags reflect what the driver is capable of.
@@ -270,7 +272,7 @@ psm2_error_t ips_ptl_init(const psm2_ep_t ep, ptl_t *ptl_gen, ptl_ctl_t *ctl)
 		recvshc->subcontext = psmi_hal_get_subctxt(context->psm_hw_ctxt);
 		recvshc->subcontext_cnt = psmi_hal_get_subctxt_cnt(context->psm_hw_ctxt);
 		psmi_assert_always(recvshc->subcontext_cnt <=
-				   HFI1_MAX_SHARED_CTXTS);
+				   PSM_HAL_MAX_SHARED_CTXTS);
 		psmi_assert_always(recvshc->subcontext <
 				   recvshc->subcontext_cnt);
 

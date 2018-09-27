@@ -93,10 +93,6 @@ struct ips_tf {
 	uint32_t tf_num_inuse;
 	uint32_t tf_gen_mask;
 
-#ifdef PSM_CUDA
-	void *host_to_gpu_bounce_buf_pool;
-#endif
-
 	/* Pointer to array of size HFI_TF_NFLOWS */
 	struct ips_tid_recv_desc *tidrecvc;
 };

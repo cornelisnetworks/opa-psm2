@@ -95,7 +95,6 @@ void psmi_hal_register_instance(psmi_hal_instance_t *psm_hi)
 	REJECT_IMPROPER_HI(hfp_get_hw_status_freezemsg);
 	REJECT_IMPROPER_HI(hfp_get_jkey);
 	REJECT_IMPROPER_HI(hfp_get_lid);
-	REJECT_IMPROPER_HI(hfp_get_mtu);
 	REJECT_IMPROPER_HI(hfp_get_node_id);
 	REJECT_IMPROPER_HI(hfp_get_num_contexts);
 	REJECT_IMPROPER_HI(hfp_get_num_free_contexts);
@@ -167,13 +166,68 @@ void psmi_hal_register_instance(psmi_hal_instance_t *psm_hi)
 	REJECT_IMPROPER_HI(hfp_initialize);
 
 	SLIST_INSERT_HEAD(&head_hi, psm_hi, next_hi);
+	sysfs_init(psm_hi->hfi_sys_class_path);
 }
 
-/* psmi_hal_initialize */
-int psmi_hal_initialize(void)
+static struct _psmi_hal_instance *psmi_hal_get_pi_inst(int *pnumunits,
+						       int *pnumports,
+						       int *pdflt_pkey);
+
+#if PSMI_HAL_INST_CNT > 1
+
+int psmi_hal_pre_init_func(enum psmi_hal_pre_init_func_krnls k, ...)
+{
+	va_list ap;
+	va_start(ap, k);
+
+	int rv = 0,numunits,numports,dflt_pkey;
+	struct _psmi_hal_instance *p = psmi_hal_get_pi_inst(&numunits,
+							    &numports,
+							    &dflt_pkey);
+	if (!p)
+		rv = -1;
+	else
+	{
+		switch(k)
+		{
+		case psmi_hal_pre_init_func_get_num_units:
+			rv = numunits;
+			break;
+		case psmi_hal_pre_init_func_get_num_ports:
+			rv = numports;
+			break;
+		case psmi_hal_pre_init_func_get_unit_active:
+			rv = p->hfp_get_unit_active( va_arg(ap,int) );
+			break;
+		case psmi_hal_pre_init_func_get_port_active:
+			rv = p->hfp_get_port_active( va_arg(ap,int),
+						     va_arg(ap,int) );
+			break;
+		case psmi_hal_pre_init_func_get_num_contexts:
+			rv = p->hfp_get_num_contexts( va_arg(ap,int) );
+			break;
+		case psmi_hal_pre_init_func_get_num_free_contexts:
+			rv = p->hfp_get_num_free_contexts( va_arg(ap,int) );
+			break;
+		default:
+			rv = -1;
+			break;
+		}
+	}
+
+	va_end(ap);
+	return rv;
+}
+
+#endif
+
+
+static struct _psmi_hal_instance *psmi_hal_get_pi_inst(int *pnumunits,
+						       int *pnumports,
+						       int *pdflt_pkey)
 {
 	if (SLIST_EMPTY(&head_hi))
-		return -PSM_HAL_ERROR_NO_HI_REGISTERED;
+		return NULL;
 
 	/* At this point, assuming there are multiple HAL INSTANCES that are
 	   registered, and two or more of the HAL INSTANCES are capable
@@ -212,25 +266,47 @@ int psmi_hal_initialize(void)
 				int dflt_pkey = p->hfp_get_default_pkey();
 				if (nunits > 0 && nports > 0 && dflt_pkey > 0)
 				{
-					memset(&p->params,0,sizeof(p->params));
-					int rv = p->hfp_initialize(p);
-					if (!rv)
-					{
-						sysfs_init(p->hfi_sys_class_path);
-						p->params.num_units = nunits;
-						p->params.num_ports = nports;
-						p->params.default_pkey = dflt_pkey;
-						psmi_hal_current_hal_instance = p;
-						return rv;
-					}
+					sysfs_init(p->hfi_sys_class_path);
+					*pnumunits = nunits;
+					*pnumports = nports;
+					*pdflt_pkey = dflt_pkey;
+					return p;
 				}
 			}
 		}
+	}
+	return NULL;
+}
+
+/* psmi_hal_initialize */
+int psmi_hal_initialize(void)
+{
+	int nunits = 0;
+	int nports = 0;
+	int dflt_pkey = 0;
+	struct _psmi_hal_instance *p = psmi_hal_get_pi_inst(&nunits, &nports, &dflt_pkey);
+
+	if (!p)
+		return -PSM_HAL_ERROR_INIT_FAILED;
+
+	memset(&p->params,0,sizeof(p->params));
+
+	int rv = p->hfp_initialize(p);
+
+	if (!rv)
+	{
+		p->params.num_units = nunits;
+		p->params.num_ports = nports;
+		p->params.default_pkey = dflt_pkey;
+		psmi_hal_current_hal_instance = p;
+		return rv;
 	}
 	return -PSM_HAL_ERROR_INIT_FAILED;
 }
 
 #ifdef PSM2_MOCK_TESTING
+
+#include "psm_hal_gen1/opa_user_gen1.h"
 
 void ips_ptl_non_dw_mul_sdma_init(void)
 {

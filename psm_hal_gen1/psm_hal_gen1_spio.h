@@ -91,7 +91,7 @@ static PSMI_HAL_INLINE psm2_error_t ips_spio_init(const psmi_context_t *context,
 static PSMI_HAL_INLINE psm2_error_t ips_spio_fini(struct ips_spio *ctrl);
 
 static inline psm2_error_t ips_spio_transfer_frame(struct ips_proto *proto,
-				struct ips_flow *flow, struct hfi_pbc *pbc,
+				struct ips_flow *flow, struct psm_hal_pbc *pbc,
 				uint32_t *payload, uint32_t length,
 				uint32_t isCtrlMsg, uint32_t cksum_valid,
 				uint32_t cksum
@@ -171,9 +171,9 @@ struct ips_spio {
 	psm2_error_t (*spio_reset_hfi)(struct ips_spio *ctrl);
 	psm2_error_t (*spio_credit_return_update)(struct ips_spio *ctrl);
 
-	/* 8B copying, 16B copying, 32B copying, and 64B copying */
-	ips_spio_blockcpy_fn_t spio_blockcpy_routines[4];
-	ips_spio_blockcpy_fn_t spio_blockcpy_selected;
+	/* copying routines based on block size */
+	ips_spio_blockcpy_fn_t spio_blockcpy_med;
+	ips_spio_blockcpy_fn_t spio_blockcpy_large;
 
 #ifdef PSM_CUDA
 	/* Use an intermediate buffer when writing PIO data from the

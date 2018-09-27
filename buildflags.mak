@@ -108,17 +108,38 @@ BASECFLAGS +=-Wall $(WERROR)
 # test if compiler supports 32B(AVX2)/64B(AVX512F) move instruction.
 #
 ifeq (${CC},icc)
-  MAVX2=-march=core-avx2 -DPSM_AVX512
+  ifeq ($(PSM_DISABLE_AVX2),)
+    MAVX2=-xATOM_SSE4.2 -DPSM_AVX512
+  else
+    MAVX2=-march=core-avx-i
+  endif
 else
-  MAVX2=-mavx2
-endif
-RET := $(shell echo "int main() {}" | ${CC} ${MAVX2} -E -dM -xc - 2>&1 | grep -q AVX2 ; echo $$?)
-ifeq (0,${RET})
-  BASECFLAGS += ${MAVX2}
-else
-    $(error Compiler does not support AVX2 )
+  ifeq ($(PSM_DISABLE_AVX2),)
+    MAVX2=-mavx2
+  else
+    MAVX2=-mavx
+  endif
 endif
 
+ifneq (icc,${CC})
+  ifeq ($(PSM_DISABLE_AVX2),)
+    RET := $(shell echo "int main() {}" | ${CC} ${MAVX2} -E -dM -xc - 2>&1 | grep -q AVX2 ; echo $$?)
+  else
+    RET := $(shell echo "int main() {}" | ${CC} ${MAVX2} -E -dM -xc - 2>&1 | grep -q AVX ; echo $$?)
+    $(warning ***NOTE TO USER**** Disabling AVX2 will harm performance)
+  endif
+
+  ifeq (0,${RET})
+      BASECFLAGS += ${MAVX2}
+  else
+      $(error Compiler does not support ${MAVX2} )
+  endif
+else
+    BASECFLAGS += ${MAVX2}
+endif
+
+# This support is dynamic at runtime, so is OK to enable as long as compiler can generate
+# the code.
 ifneq (,${PSM_AVX512})
   ifneq (icc,${CC})
     RET := $(shell echo "int main() {}" | ${CC} -mavx512f -E -dM -xc - 2>&1 | grep -q AVX512 ; echo $$?)
@@ -149,9 +170,9 @@ ifneq (,${PSM_COVERAGE}) # This check must come after PSM_DEBUG to override opti
   LDFLAGS += -fprofile-arcs
 endif
 ifneq (,${PSM_LOG})
-   BASECFLAGS += -DPSM2_LOG
+   BASECFLAGS += -DPSM_LOG
 ifneq (,${PSM_LOG_FAST_IO})
-   BASECFLAGS += -DPSM2_LOG_FAST_IO
+   BASECFLAGS += -DPSM_LOG_FAST_IO
    PSM2_ADDITIONAL_GLOBALS += psmi_log_fini;psmi_log_message;
 endif
 endif

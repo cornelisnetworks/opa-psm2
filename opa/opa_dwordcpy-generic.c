@@ -292,3 +292,26 @@ void hfi_pio_blockcpy_64(volatile uint64_t *dest, const uint64_t *src, uint32_t 
 		dst64[0] += 4;
 	} while (--nblock);
 }
+
+void MOCKABLE(psmi_mq_mtucpy)(void *vdest, const void *vsrc, uint32_t nchars)
+{
+
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED && (PSMI_IS_CUDA_MEM(vdest) || PSMI_IS_CUDA_MEM((void *) vsrc))) {
+		PSMI_CUDA_CALL(cuMemcpy,
+			       (CUdeviceptr)vdest, (CUdeviceptr)vsrc, nchars);
+		return;
+	}
+#endif
+	memcpy(vdest, vsrc, nchars);
+	return;
+
+
+}
+MOCK_DEF_EPILOGUE(psmi_mq_mtucpy);
+
+void psmi_mq_mtucpy_host_mem(void *vdest, const void *vsrc, uint32_t nchars)
+{
+	memcpy(vdest, vsrc, nchars);
+	return;
+}

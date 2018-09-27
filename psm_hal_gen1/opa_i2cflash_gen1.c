@@ -51,55 +51,37 @@
 
 */
 
-#ifndef OPA_SERVICE_H
-#define OPA_SERVICE_H
+/* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
-/* This file contains all the lowest level routines calling into sysfs */
-/* and qib driver. All other calls are based on these routines. */
+#include <sys/types.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <stddef.h>
+#include <unistd.h>
+#include <errno.h>
+#include <string.h>
+#include <stdio.h>
 
-#include <libgen.h>
+#include "opa_user_gen1.h"
 
-#include "opa_intf.h"
-#include "opa_udebug.h"
-#include "opa_byteorder.h"
+uint8_t hfi_flash_csum(struct hfi_flash *ifp, int adjust)
+{
+	uint8_t *ip = (uint8_t *) ifp;
+	uint8_t csum = 0, len;
 
-/* upper and lower bounds for HFI port numbers */
-#define HFI_MIN_PORT 1
-#define HFI_MAX_PORT 1
-
-/* any unit id to match. */
-#define HFI_UNIT_ID_ANY ((long)-1)
-/* any port num to match. */
-#define HFI_PORT_NUM_ANY ((long)0)
-
-/* Statistics maintained by the driver */
-int hfi_get_stats(uint64_t *, int);
-int hfi_get_stats_names(char **namep);
-/* Counters maintained in the chip, globally, and per-prot */
-int hfi_get_ctrs_unit(int unitno, uint64_t *, int);
-int hfi_get_ctrs_unit_names(int unitno, char **namep);
-int hfi_get_ctrs_port(int unitno, int port, uint64_t *, int);
-int hfi_get_ctrs_port_names(int unitno, char **namep);
-
-/* sysfs helper routines (only those currently used are exported;
- * try to avoid using others) */
-
-/* Initializes the following sysfs helper routines. */
-void sysfs_init(const char *dflt_hfi_class_path);
-
-/* read a string value into buff, no more than size bytes.
-   returns the number of bytes read */
-size_t hfi_sysfs_unit_port_read(uint32_t unit, uint32_t port, const char *attr,
-			char *buff, size_t size);
-
-/* read up to one page of malloc'ed data (caller must free), returning
-   number of bytes read or -1 */
-int hfi_hfifs_read(const char *attr, char **datap);
-int hfi_hfifs_unit_read(uint32_t unit, const char *attr, char **data);
-
-int64_t hfi_sysfs_unit_read_node_s64(uint32_t unit);
-/* these read directly into supplied buffer and take a count */
-int hfi_hfifs_rd(const char *, void *, int);
-int hfi_hfifs_unit_rd(uint32_t unit, const char *, void *, int);
-
-#endif /* OPA_SERVICE_H */
+	/*
+	 * Limit length checksummed to max length of actual data.
+	 * Checksum of erased eeprom will still be bad, but we avoid
+	 * reading past the end of the buffer we were passed.
+	 */
+	len = ifp->if_length;
+	if (len > sizeof(struct hfi_flash))
+		len = sizeof(struct hfi_flash);
+	while (len--)
+		csum += *ip++;
+	csum -= ifp->if_csum;
+	csum = ~csum;
+	if (adjust)
+		ifp->if_csum = csum;
+	return csum;
+}

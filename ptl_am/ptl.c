@@ -82,34 +82,34 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 		    || (tok == NULL && !was_posted));
 
 	_HFI_VDBG("[shm][rndv][recv] req=%p dest=%p len=%d tok=%p\n",
-		  req, req->buf, req->recv_msglen, tok);
+		  req, req->req_data.buf, req->req_data.recv_msglen, tok);
 #ifdef PSM_CUDA
 	if (req->cuda_ipc_handle_attached) {
 
-		CUdeviceptr cuda_ipc_dev_ptr = am_cuda_memhandle_acquire(req->rts_sbuf,
+		CUdeviceptr cuda_ipc_dev_ptr = am_cuda_memhandle_acquire(req->rts_sbuf - req->cuda_ipc_offset,
 						  (CUipcMemHandle*)&req->cuda_ipc_handle,
-								 req->recv_msglen,
+								 req->req_data.recv_msglen,
 								 req->rts_peer->epid);
-		cuda_ipc_dev_ptr = cuda_ipc_dev_ptr + req->recv_msgoff;
+		cuda_ipc_dev_ptr = cuda_ipc_dev_ptr + req->cuda_ipc_offset;
 		/* cuMemcpy into the receive side buffer
 		 * based on its location */
 		if (req->is_buf_gpu_mem) {
-			PSMI_CUDA_CALL(cuMemcpyDtoD, (CUdeviceptr)req->buf, cuda_ipc_dev_ptr,
-				       req->recv_msglen);
+			PSMI_CUDA_CALL(cuMemcpyDtoD, (CUdeviceptr)req->req_data.buf, cuda_ipc_dev_ptr,
+				       req->req_data.recv_msglen);
 			PSMI_CUDA_CALL(cuEventRecord, req->cuda_ipc_event, 0);
 			PSMI_CUDA_CALL(cuEventSynchronize, req->cuda_ipc_event);
 		} else
-			PSMI_CUDA_CALL(cuMemcpyDtoH, req->buf, cuda_ipc_dev_ptr,
-				       req->recv_msglen);
+			PSMI_CUDA_CALL(cuMemcpyDtoH, req->req_data.buf, cuda_ipc_dev_ptr,
+				       req->req_data.recv_msglen);
 		cuda_ipc_send_completion = 1;
-		am_cuda_memhandle_release(cuda_ipc_dev_ptr);
+		am_cuda_memhandle_release(cuda_ipc_dev_ptr - req->cuda_ipc_offset);
 		req->cuda_ipc_handle_attached = 0;
 		goto send_cts;
 	}
 #endif
 
 	if ((ptl->psmi_kassist_mode & PSMI_KASSIST_GET)
-	    && req->recv_msglen > 0
+	    && req->req_data.recv_msglen > 0
 	    && (pid = psmi_epaddr_pid(epaddr))) {
 #ifdef PSM_CUDA
 		/* If the buffer on the send side is on the host,
@@ -118,12 +118,12 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 		 * resides on the GPU
 		 */
 		if (req->is_buf_gpu_mem) {
-			void* cuda_ipc_bounce_buf = psmi_malloc(PSMI_EP_NONE, UNDEFINED, req->recv_msglen);
+			void* cuda_ipc_bounce_buf = psmi_malloc(PSMI_EP_NONE, UNDEFINED, req->req_data.recv_msglen);
 			size_t nbytes = cma_get(pid, (void *)req->rts_sbuf,
-					cuda_ipc_bounce_buf, req->recv_msglen);
-			psmi_assert_always(nbytes == req->recv_msglen);
-			PSMI_CUDA_CALL(cuMemcpyHtoD, (CUdeviceptr)req->buf, cuda_ipc_bounce_buf,
-				       req->recv_msglen);
+					cuda_ipc_bounce_buf, req->req_data.recv_msglen);
+			psmi_assert_always(nbytes == req->req_data.recv_msglen);
+			PSMI_CUDA_CALL(cuMemcpyHtoD, (CUdeviceptr)req->req_data.buf, cuda_ipc_bounce_buf,
+				       req->req_data.recv_msglen);
 			/* Cuda library has recent optimizations where they do
 			 * not guarantee synchronus nature for Host to Device
 			 * copies for msg sizes less than 64k. The event record
@@ -135,22 +135,22 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 		} else {
 			/* cma can be done in handler context or not. */
 			size_t nbytes = cma_get(pid, (void *)req->rts_sbuf,
-						req->buf, req->recv_msglen);
-			psmi_assert_always(nbytes == req->recv_msglen);
+						req->req_data.buf, req->req_data.recv_msglen);
+			psmi_assert_always(nbytes == req->req_data.recv_msglen);
 		}
 #else
 		/* cma can be done in handler context or not. */
 		size_t nbytes = cma_get(pid, (void *)req->rts_sbuf,
-					req->buf, req->recv_msglen);
+					req->req_data.buf, req->req_data.recv_msglen);
 		if (nbytes == -1) {
 			ptl->psmi_kassist_mode = PSMI_KASSIST_OFF;
 			_HFI_ERROR("Reading from remote process' memory failed. Disabling CMA support\n");
 		}
 		else {
-			psmi_assert_always(nbytes == req->recv_msglen);
+			psmi_assert_always(nbytes == req->req_data.recv_msglen);
 			cma_succeed = 1;
 		}
-		psmi_assert_always(nbytes == req->recv_msglen);
+		psmi_assert_always(nbytes == req->req_data.recv_msglen);
 #endif
 	}
 
@@ -159,8 +159,8 @@ send_cts:
 #endif
 	args[0].u64w0 = (uint64_t) (uintptr_t) req->ptl_req_ptr;
 	args[1].u64w0 = (uint64_t) (uintptr_t) req;
-	args[2].u64w0 = (uint64_t) (uintptr_t) req->buf;
-	args[3].u32w0 = req->recv_msglen;
+	args[2].u64w0 = (uint64_t) (uintptr_t) req->req_data.buf;
+	args[3].u32w0 = req->req_data.recv_msglen;
 	args[3].u32w1 = tok != NULL ? 1 : 0;
 	args[4].u32w0 = ptl->psmi_kassist_mode;		// pass current kassist mode to the peer process
 
@@ -174,7 +174,7 @@ send_cts:
 
 	/* 0-byte completion or we used kassist */
 	if (pid || cma_succeed ||
-		req->recv_msglen == 0 || cuda_ipc_send_completion == 1) {
+		req->req_data.recv_msglen == 0 || cuda_ipc_send_completion == 1) {
 		psmi_mq_handle_rts_complete(req);
 	}
 	PSM2_LOG_MSG("leaving.");
@@ -241,7 +241,7 @@ psmi_am_mq_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			if (buf && len > 0) {
 				req->cuda_ipc_handle = *((CUipcMemHandle*)buf);
 				req->cuda_ipc_handle_attached = 1;
-				req->recv_msgoff = args[2].u32w0;
+				req->cuda_ipc_offset = args[2].u32w0;
 			}
 #endif
 
@@ -298,7 +298,7 @@ psmi_am_mq_handler_rtsmatch(void *toki, psm2_amarg_t *args, int narg, void *buf,
 	psm2_amarg_t rarg[1];
 
 	_HFI_VDBG("[rndv][send] req=%p dest_req=%p src=%p dest=%p len=%d\n",
-		  sreq, (void *)(uintptr_t) args[1].u64w0, sreq->buf, dest,
+		  sreq, (void *)(uintptr_t) args[1].u64w0, sreq->req_data.buf, dest,
 		  msglen);
 
 	if (msglen > 0) {
@@ -315,7 +315,7 @@ psmi_am_mq_handler_rtsmatch(void *toki, psm2_amarg_t *args, int narg, void *buf,
 
 		if (kassist_mode & PSMI_KASSIST_PUT) {
 			int pid = psmi_epaddr_pid(tok->tok.epaddr_incoming);
-			size_t nbytes = cma_put(sreq->buf, pid, dest, msglen);
+			size_t nbytes = cma_put(sreq->req_data.buf, pid, dest, msglen);
 			if (nbytes == -1) {
 				_HFI_ERROR("Writing to remote process' memory failed. Disabling CMA support\n");
 				((struct ptl_am *)ptl)->psmi_kassist_mode = PSMI_KASSIST_OFF;
@@ -331,7 +331,7 @@ psmi_am_mq_handler_rtsmatch(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			/* Only transfer if kassist is off, i.e. neither GET nor PUT. */
 no_kassist:
 			psmi_amsh_long_reply(tok, mq_handler_rtsdone_hidx, rarg,
-					     1, sreq->buf, msglen, dest, 0);
+					     1, sreq->req_data.buf, msglen, dest, 0);
 		}
 	}
 	psmi_mq_handle_rts_complete(sreq);
@@ -343,8 +343,8 @@ psmi_am_mq_handler_rtsdone(void *toki, psm2_amarg_t *args, int narg, void *buf,
 {
 	psm2_mq_req_t rreq = (psm2_mq_req_t) (uintptr_t) args[0].u64w0;
 	psmi_assert(narg == 1);
-	_HFI_VDBG("[rndv][recv] req=%p dest=%p len=%d\n", rreq, rreq->buf,
-		  rreq->recv_msglen);
+	_HFI_VDBG("[rndv][recv] req=%p dest=%p len=%d\n", rreq, rreq->req_data.buf,
+		  rreq->req_data.recv_msglen);
 	psmi_mq_handle_rts_complete(rreq);
 }
 

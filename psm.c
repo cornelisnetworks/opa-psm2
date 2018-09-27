@@ -173,6 +173,7 @@ int psmi_cuda_lib_load()
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDeviceGet);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDeviceGetCount);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuStreamCreate);
+	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuStreamDestroy);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuEventCreate);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuEventDestroy);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuEventQuery);
@@ -195,11 +196,24 @@ int psmi_cuda_lib_load()
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDevicePrimaryCtxRelease);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuCtxGetDevice);
 
+	psmi_nvml_lib = dlopen("libnvidia-ml.so", RTLD_LAZY);
+	if (!psmi_nvml_lib) {
+		dlerr = dlerror();
+		_HFI_ERROR("Unable to open libnvidia-ml.so.  Error %s\n",
+				dlerr ? dlerr : "no dlerror()");
+		goto fail;
+	}
+	PSMI_CUDA_DLSYM(psmi_nvml_lib, nvmlInit);
+	PSMI_CUDA_DLSYM(psmi_nvml_lib, nvmlDeviceGetHandleByIndex);
+	PSMI_CUDA_DLSYM(psmi_nvml_lib, nvmlDeviceGetBAR1MemoryInfo);
+
 	PSM2_LOG_MSG("leaving");
 	return err;
 fail:
 	if (psmi_cuda_lib)
 		dlclose(psmi_cuda_lib);
+	if (psmi_nvml_lib)
+		dlclose(psmi_nvml_lib);
 	err = psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR, "Unable to load CUDA library.\n");
 	return err;
 }
@@ -310,6 +324,8 @@ int psmi_cuda_initialize()
 
 	if (gdr_copy_threshold_recv < 8)
 		gdr_copy_threshold_recv = GDR_COPY_THRESH_RECV;
+
+	PSMI_NVML_CALL(nvmlInit);
 
 	PSM2_LOG_MSG("leaving");
 	return err;
@@ -537,6 +553,196 @@ fail:
 }
 PSMI_API_DECL(psm2_init)
 
+static
+psm2_error_t psmi_get_psm2_config(psm2_mq_t     mq,
+				  psm2_epaddr_t epaddr,
+				  uint32_t *out)
+{
+	psm2_error_t rv = PSM2_INTERNAL_ERR;
+
+	*out = 0;
+	if (&mq->ep->ptl_ips == epaddr->ptlctl)
+	{
+		rv = PSM2_OK;
+		*out |= PSM2_INFO_QUERY_CONFIG_IPS;
+#ifdef PSM_CUDA
+		if (PSMI_IS_CUDA_ENABLED)
+		{
+			*out |= PSM2_INFO_QUERY_CONFIG_CUDA;
+			if (PSMI_IS_GDR_COPY_ENABLED)
+				*out |= PSM2_INFO_QUERY_CONFIG_GDR_COPY;
+		}
+#endif
+		{
+			union psmi_envvar_val env_sdma;
+
+			psmi_getenv("PSM2_SDMA",
+				    "hfi send dma flags (0 disables send dma, 2 disables send pio, "
+				    "1 for both sdma/spio, default 1)",
+				    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
+				    (union psmi_envvar_val)1, &env_sdma);
+			if (env_sdma.e_uint == 0)
+				*out |= PSM2_INFO_QUERY_CONFIG_PIO;
+			else if (env_sdma.e_uint == 1)
+				*out |= (PSM2_INFO_QUERY_CONFIG_PIO | PSM2_INFO_QUERY_CONFIG_DMA);
+			else if (env_sdma.e_uint == 2)
+				*out |= PSM2_INFO_QUERY_CONFIG_DMA;
+		}
+	}
+	else if (&mq->ep->ptl_amsh == epaddr->ptlctl)
+	{
+		*out |= PSM2_INFO_QUERY_CONFIG_AMSH;
+		rv = PSM2_OK;
+	}
+	else if (&mq->ep->ptl_self == epaddr->ptlctl)
+	{
+		*out |= PSM2_INFO_QUERY_CONFIG_SELF;
+		rv = PSM2_OK;
+	}
+	return rv;
+}
+
+psm2_error_t __psm2_info_query(psm2_info_query_t q, void *out,
+			       size_t nargs, psm2_info_query_arg_t args[])
+{
+	static const size_t expected_arg_cnt[PSM2_INFO_QUERY_LAST] =
+	{
+		0, /* PSM2_INFO_QUERY_NUM_UNITS         */
+		0, /* PSM2_INFO_QUERY_NUM_PORTS         */
+		1, /* PSM2_INFO_QUERY_UNIT_STATUS       */
+		2, /* PSM2_INFO_QUERY_UNIT_PORT_STATUS  */
+		1, /* PSM2_INFO_QUERY_NUM_FREE_CONTEXTS */
+		1, /* PSM2_INFO_QUERY_NUM_CONTEXTS      */
+		2, /* PSM2_INFO_QUERY_CONFIG            */
+		3, /* PSM2_INFO_QUERY_THRESH            */
+		3, /* PSM2_INFO_QUERY_DEVICE_NAME       */
+	        2, /* PSM2_INFO_QUERY_MTU               */
+		2, /* PSM2_INFO_QUERY_LINK_SPEED        */
+		1, /* PSM2_INFO_QUERY_NETWORK_TYPE      */
+	};
+	psm2_error_t rv = PSM2_INTERNAL_ERR;
+
+	if ((q < 0) ||
+	    (q >= PSM2_INFO_QUERY_LAST) ||
+	    (nargs != expected_arg_cnt[q]))
+		return rv;
+
+	switch (q)
+	{
+	case PSM2_INFO_QUERY_NUM_UNITS:
+		*((uint32_t*)out) = psmi_hal_get_num_units_(1);
+		rv = PSM2_OK;
+		break;
+	case PSM2_INFO_QUERY_NUM_PORTS:
+		*((uint32_t*)out) = psmi_hal_get_num_ports_();
+		rv = PSM2_OK;
+		break;
+	case PSM2_INFO_QUERY_UNIT_STATUS:
+		*((uint32_t*)out) = psmi_hal_get_unit_active(args[0].unit);
+		rv = PSM2_OK;
+		break;
+	case PSM2_INFO_QUERY_UNIT_PORT_STATUS:
+		*((uint32_t*)out) = psmi_hal_get_port_active(args[0].unit,
+								args[1].port);
+		rv = PSM2_OK;
+		break;
+	case PSM2_INFO_QUERY_NUM_FREE_CONTEXTS:
+		*((uint32_t*)out) = psmi_hal_get_num_free_contexts(args[0].unit);
+		rv = PSM2_OK;
+		break;
+	case PSM2_INFO_QUERY_NUM_CONTEXTS:
+		*((uint32_t*)out) = psmi_hal_get_num_contexts(args[0].unit);
+		rv = PSM2_OK;
+		break;
+	case PSM2_INFO_QUERY_CONFIG:
+		{
+			psm2_mq_t     mq     = args[0].mq;
+			psm2_epaddr_t epaddr = args[1].epaddr;
+			rv = psmi_get_psm2_config(mq, epaddr, (uint32_t*)out);
+		}
+		break;
+	case PSM2_INFO_QUERY_THRESH:
+		{
+			psm2_mq_t                      mq     = args[0].mq;
+			psm2_epaddr_t                  epaddr = args[1].epaddr;
+			enum psm2_info_query_thresh_et iqt    = args[2].mstq;
+
+			uint32_t                       config;
+			rv = psmi_get_psm2_config(mq, epaddr, &config);
+			if (rv == PSM2_OK)
+			{
+				*((uint32_t*)out) = 0;
+				/* Delegate the call to the ptl member function: */
+				rv = epaddr->ptlctl->msg_size_thresh_query(iqt, (uint32_t*)out, mq, epaddr);
+			}
+		}
+		break;
+	case PSM2_INFO_QUERY_DEVICE_NAME:
+		{
+			char         *hfiName       = (char*)out;
+			psm2_mq_t     mq            = args[0].mq;
+			psm2_epaddr_t epaddr        = args[1].epaddr;
+			size_t        hfiNameLength = args[2].length;
+			uint32_t      config;
+
+			rv = psmi_get_psm2_config(mq, epaddr, &config);
+			if (rv == PSM2_OK)
+			{
+				if (snprintf(hfiName, hfiNameLength, "%s_%d",
+					     psmi_hal_get_hfi_name(),
+					     psmi_hal_get_unit_id(mq->ep->context.psm_hw_ctxt))
+				    < hfiNameLength)
+					rv = PSM2_OK;
+			}
+		}
+		break;
+	case PSM2_INFO_QUERY_MTU:
+		{
+			psm2_mq_t     mq     = args[0].mq;
+			psm2_epaddr_t epaddr = args[1].epaddr;
+			uint32_t      config;
+
+			rv = psmi_get_psm2_config(mq, epaddr, &config);
+			if (rv == PSM2_OK)
+			{
+				*((uint32_t*)out) = mq->ep->mtu;
+			}
+		}
+		break;
+	case PSM2_INFO_QUERY_LINK_SPEED:
+		{
+			psm2_mq_t     mq     = args[0].mq;
+			psm2_epaddr_t epaddr = args[1].epaddr;
+			uint32_t      config;
+
+			rv = psmi_get_psm2_config(mq, epaddr, &config);
+			if (rv == PSM2_OK)
+			{
+				*((uint32_t*)out) = psmi_hal_get_port_rate(psmi_hal_get_unit_id(mq->ep->context.psm_hw_ctxt),
+								       psmi_hal_get_port_num(mq->ep->context.psm_hw_ctxt));
+			}
+		}
+		break;
+	case PSM2_INFO_QUERY_NETWORK_TYPE:
+		{
+			char              *networkType      = (char*)out;
+			size_t            networkTypeLength = args[0].length;
+			const char *const intelopa          = "Intel(R) OPA";
+			if (networkTypeLength >= strlen(intelopa)+1)
+			{
+				strcpy(networkType,intelopa);
+				rv = PSM2_OK;
+			}
+		}
+
+		break;
+	default:
+		break;
+	}
+
+	return rv;
+}
+PSMI_API_DECL(psm2_info_query)
 
 uint64_t __psm2_get_capability_mask(uint64_t req_cap_mask)
 {

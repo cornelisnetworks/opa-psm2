@@ -1680,7 +1680,7 @@ psm2_error_t psmi_am_getopt(const void *am_obj, int optname,
 	return psmi_amopt_ctl(am_obj, optname, optval, optlen, 1);
 }
 
-#ifdef PSM2_LOG
+#ifdef PSM_LOG
 
 #include <execinfo.h>
 #include <stdio.h>
@@ -1690,7 +1690,7 @@ psm2_error_t psmi_am_getopt(const void *am_obj, int optname,
 #include "ptl_ips/ips_proto_header.h"
 
 /* A treeNode is used to store the list of Function Name Lists that
-   are passed to the PSM2_LOG facility via environment variables.
+   are passed to the PSM_LOG facility via environment variables.
    See psm_log.h for more information.
 
    Note that treeNode is a node in a binary tree data structure. */
@@ -2097,7 +2097,7 @@ void psmi_log_initialize(void)
 			&excludeFunctionNamesTreeRoot);
 }
 
-#ifdef PSM2_LOG_FAST_IO
+#ifdef PSM_LOG_FAST_IO
 
 struct psmi_log_io_thread_info
 {
@@ -2330,7 +2330,7 @@ static int psmi_buff_fputc(int c, int port)
 #define IS_PSMI_LOG_MAGIC(S) ((((uint64_t)(S)) <= ((uint64_t)PSM2_LOG_MIN_MAGIC)) && \
 			      (((uint64_t)(S)) >= ((uint64_t)PSM2_LOG_MAX_MAGIC)))
 
-/* plmf is short for 'psm log message facility. All of the PSM2_LOG macros defined in psm_log.h
+/* plmf is short for 'psm log message facility. All of the PSM_LOG macros defined in psm_log.h
    are serviced from this back end. */
 void psmi_log_message(const char *fileName,
 		      const char *functionName,
@@ -2391,7 +2391,7 @@ void psmi_log_message(const char *fileName,
 		void            *dumpAddr[2] = {0};
 		size_t           dumpSize[2] = {0};
 
-#ifdef PSM2_LOG_FAST_IO
+#ifdef PSM_LOG_FAST_IO
 #define IO_PORT         0
 #define MY_FPRINTF      psmi_buff_fprintf
 #define MY_VFPRINTF     psmi_buff_vfprintf
@@ -2408,7 +2408,7 @@ void psmi_log_message(const char *fileName,
 #endif
 		struct timespec tp;
 
-		/* Pop arguments for the alternative forms of PSM2_LOG functionality: */
+		/* Pop arguments for the alternative forms of PSM_LOG functionality: */
 		if (format == PSM2_LOG_BT_MAGIC)
 		{
 			voidarray = va_arg(ap,void **);
@@ -2453,7 +2453,7 @@ void psmi_log_message(const char *fileName,
 			}
 		}
 
-#ifdef PSM2_LOG_FAST_IO
+#ifdef PSM_LOG_FAST_IO
 		if (psmi_log_register_tls() != 0)
 		{
 			va_end(ap);
@@ -2595,4 +2595,4 @@ void psmi_log_message(const char *fileName,
 
 	va_end(ap);
 }
-#endif /* #ifdef PSM2_LOG */
+#endif /* #ifdef PSM_LOG */

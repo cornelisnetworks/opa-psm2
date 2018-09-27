@@ -450,6 +450,7 @@ psm2_error_t ips_protoexp_fini(struct ips_protoexp *protoexp)
 		 !(protoexp->proto->flags & IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV)) {
 		psmi_mpool_destroy(protoexp->cuda_hostbuf_pool_small_recv);
 		psmi_mpool_destroy(protoexp->cuda_hostbuf_pool_recv);
+		PSMI_CUDA_CALL(cuStreamDestroy, protoexp->cudastream_recv);
 	}
 #endif
 	psmi_mpool_destroy(protoexp->tid_getreq_pool);
@@ -845,7 +846,7 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 			psmi_free(tidsendc->userbuf);
 	}
 #endif
-	if (req->send_msgoff == req->send_msglen) {
+	if (req->send_msgoff == req->req_data.send_msglen) {
 		psmi_mq_handle_rts_complete(req);
 	}
 
@@ -1100,12 +1101,12 @@ void psmi_cuda_run_prefetcher(struct ips_protoexp *protoexp,
 	uint32_t offset, window_len;
 
 	/* try to push the prefetcher forward */
-	if (req->prefetch_send_msgoff < req->send_msglen) {
+	if (req->prefetch_send_msgoff < req->req_data.send_msglen) {
 		/* some data remains to be sent */
 		offset = req->prefetch_send_msgoff;
 		window_len =
 			ips_cuda_next_window(tidsendc->ipsaddr->window_rv,
-					     offset, req->buf_len);
+					     offset, req->req_data.buf_len);
 		if (window_len <= CUDA_SMALLHOSTBUF_SZ)
 			chb = (struct ips_cuda_hostbuf *) psmi_mpool_get(
 				proto->cuda_hostbuf_pool_small_send);
@@ -1119,7 +1120,7 @@ void psmi_cuda_run_prefetcher(struct ips_protoexp *protoexp,
 		chb->offset = offset;
 		chb->size = window_len;
 		chb->req = req;
-		chb->gpu_buf = (CUdeviceptr) req->buf + offset;
+		chb->gpu_buf = (CUdeviceptr) req->req_data.buf + offset;
 		chb->bytes_read = 0;
 		PSMI_CUDA_CALL(cuMemcpyDtoHAsync,
 			       chb->host_buf, chb->gpu_buf,
@@ -1154,7 +1155,7 @@ void psmi_attach_chb_to_tidsendc(struct ips_protoexp *protoexp,
 		offset = req->prefetch_send_msgoff;
 		window_len =
 			ips_cuda_next_window(tidsendc->ipsaddr->window_rv,
-					     offset, req->buf_len);
+					     offset, req->req_data.buf_len);
 		if (window_len <= CUDA_SMALLHOSTBUF_SZ)
 			chb = (struct ips_cuda_hostbuf *) psmi_mpool_get(
 				proto->cuda_hostbuf_pool_small_send);
@@ -1171,7 +1172,7 @@ void psmi_attach_chb_to_tidsendc(struct ips_protoexp *protoexp,
 		chb->offset = offset;
 		chb->size = window_len;
 		chb->req = req;
-		chb->gpu_buf = (CUdeviceptr) req->buf + offset;
+		chb->gpu_buf = (CUdeviceptr) req->req_data.buf + offset;
 		chb->bytes_read = 0;
 		PSMI_CUDA_CALL(cuMemcpyDtoHAsync,
 			       chb->host_buf, chb->gpu_buf,
@@ -1378,7 +1379,7 @@ ips_tid_send_handle_tidreq(struct ips_protoexp *protoexp,
 	tidsendc->tidflow.xmit_ack_num.psn_val = tidflow_genseq;
 
 	tidsendc->userbuf =
-	    (void *)((uintptr_t) req->buf + tid_list->tsess_srcoff);
+	    (void *)((uintptr_t) req->req_data.buf + tid_list->tsess_srcoff);
 	tidsendc->buffer = (void *)((uintptr_t)tidsendc->userbuf +
 				tid_list->tsess_unaligned_start);
 	tidsendc->length = tid_list->tsess_length;

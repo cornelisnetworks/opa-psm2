@@ -68,7 +68,6 @@
 #include <fcntl.h>
 #include <malloc.h>
 
-#include "ipserror.h"
 #include "hfi_user.h"
 
 /*

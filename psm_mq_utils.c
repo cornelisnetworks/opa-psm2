@@ -84,17 +84,18 @@ psm2_mq_req_t MOCKABLE(psmi_mq_req_alloc)(psm2_mq_t mq, uint32_t type)
 		memset(req->next, 0, NUM_MQ_SUBLISTS * sizeof(psm2_mq_req_t));
 		memset(req->prev, 0, NUM_MQ_SUBLISTS * sizeof(psm2_mq_req_t));
 		memset(req->q, 0, NUM_MQ_SUBLISTS * sizeof(struct mqq *));
-		req->error_code = PSM2_OK;
+		req->req_data.error_code = PSM2_OK;
 		req->mq = mq;
 		req->testwait_callback = NULL;
 		req->rts_peer = NULL;
-		req->peer = NULL;
+		req->req_data.peer = NULL;
 		req->ptl_req_ptr = NULL;
-		req->flags = 0;
 #ifdef PSM_CUDA
 		req->is_buf_gpu_mem = 0;
 		req->user_gpu_buffer = NULL;
 #endif
+		req->flags_user = 0;
+		req->flags_internal = 0;
 		return req;
 	} else {	/* we're out of reqs */
 		int issend = (type == MQE_TYPE_SEND);

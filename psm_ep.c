@@ -545,7 +545,7 @@ psm2_error_t __psm2_ep_epid_lookup2(psm2_ep_t ep, psm2_epid_t epid, psm2_epconn_
 	}
 
 	if (epconn == NULL) {
-		err = psmi_handle_error(NULL, PSM2_PARAM_ERR,
+		err = psmi_handle_error(ep, PSM2_PARAM_ERR,
 					"Invalid output parameter");
 		PSM2_LOG_MSG("leaving");
 		return err;
@@ -562,7 +562,7 @@ psm2_error_t __psm2_ep_epid_lookup2(psm2_ep_t ep, psm2_epid_t epid, psm2_epconn_
 		return err;
 	}
 
-	err = psmi_handle_error(NULL, PSM2_EPID_UNKNOWN,
+	err = psmi_handle_error(ep, PSM2_EPID_UNKNOWN,
 				"Endpoint connection status unknown");
 	PSM2_LOG_MSG("leaving");
 	return err;

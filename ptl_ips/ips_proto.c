@@ -61,7 +61,6 @@
 #include <sys/uio.h>		/* writev */
 #include "psm_user.h"
 #include "psm2_hal.h"
-#include "ipserror.h"
 #include "ips_proto.h"
 #include "ips_proto_internal.h"
 #include "ips_proto_help.h"
@@ -118,6 +117,30 @@ void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *context, void *obj)
 	return;
 }
 #endif
+
+static uint16_t ips_proto_compute_mtu_code(int mtu)
+{
+	static const struct MapMTUToMtuCode
+	{
+		int      mtu;
+		uint16_t mtu_code;
+	} mtumap[] =
+		  {
+			  {  256, IBTA_MTU_256 },
+			  {  512, IBTA_MTU_512 },
+			  { 1024, IBTA_MTU_1024},
+			  { 2048, IBTA_MTU_2048},
+			  { 4096, IBTA_MTU_4096},
+			  { 8192, OPA_MTU_8192 },
+			  {10240, OPA_MTU_10240},
+		  };
+	int i;
+
+	for (i=0;i < sizeof(mtumap)/sizeof(mtumap[0]);i++)
+		if (mtu == mtumap[i].mtu)
+			return mtumap[i].mtu_code;
+	return 0;
+}
 
 psm2_error_t
 ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
@@ -184,6 +207,8 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 		if (proto->epinfo.ep_mtu > env_mtu.e_int)
 			proto->epinfo.ep_mtu = env_mtu.e_int;
 	}
+
+	proto->epinfo.ep_mtu_code = ips_proto_compute_mtu_code(proto->epinfo.ep_mtu);
 
 	/*
 	 * The PIO size should not include the ICRC because it is
@@ -255,22 +280,6 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	proto->psmi_logevent_tid_send_reqs.interval_secs = 15;
 	proto->psmi_logevent_tid_send_reqs.next_warning = 0;
 	proto->psmi_logevent_tid_send_reqs.count = 0;
-#ifdef PSM_CUDA
-	/*
-	 * We will need to add two extra bytes to iov_len
-	 * when passing sdma hdr info to driver due to
-	 * the new flags member in the struct.
-	 */
-	if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
-		proto->ips_extra_sdmahdr_size = sizeof(struct sdma_req_info) -
-						sizeof(struct sdma_req_info_v6_3);
-	else
-#endif
-	if (sizeof(struct sdma_req_info) != sizeof(struct sdma_req_info_v6_3))
-		proto->ips_extra_sdmahdr_size = sizeof(struct sdma_req_info) -
-						sizeof(struct sdma_req_info_v6_3);
-	else
-		proto->ips_extra_sdmahdr_size = 0;
 
 	/* Initialize IBTA related stuff (path record, SL2VL, CCA etc.) */
 	if ((err = ips_ibta_init(proto)))
@@ -909,6 +918,12 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 			proto->num_connected_outgoing, proto->num_connected_incoming,
 			(int)(cycles_to_nanosecs(t_grace_finish - t_grace_start) /
 			MSEC_ULL), (int)(t_grace_time / MSEC_ULL));
+	}
+#endif
+
+#ifdef PSM_CUDA
+	if (PSMI_IS_CUDA_ENABLED) {
+		PSMI_CUDA_CALL(cuStreamDestroy, proto->cudastream_send);
 	}
 #endif
 
@@ -1790,7 +1805,7 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 {
 	ssize_t ret;
 	psm2_error_t err;
-	struct sdma_req_info *sdmahdr;
+	struct psm_hal_sdma_req_info *sdmahdr;
 	uint16_t iovcnt;
 	struct iovec iovec[2];
 
@@ -1833,8 +1848,8 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 	/*
 	 * Setup SDMA header and io vector.
 	 */
-	sdmahdr = (struct sdma_req_info *)
-		   psmi_get_sdma_req_info(scb, proto->ips_extra_sdmahdr_size);
+	size_t extra_bytes;
+	sdmahdr = psmi_get_sdma_req_info(scb, &extra_bytes);
 	sdmahdr->npkts = 1;
 	sdmahdr->fragsize = flow->frag_size;
 	sdmahdr->comp_idx = proto->sdma_fill_index;
@@ -1842,8 +1857,7 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 
 	iovcnt = 1;
 	iovec[0].iov_base = sdmahdr;
-	iovec[0].iov_len = psmi_hal_get_sdma_req_size(proto->ep->context.psm_hw_ctxt) +
-		proto->ips_extra_sdmahdr_size;
+	iovec[0].iov_len = psmi_hal_get_sdma_req_size(proto->ep->context.psm_hw_ctxt) + extra_bytes;
 
 	if (paylen > 0) {
 		iovcnt++;
@@ -1868,7 +1882,7 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 	 * Write into driver to do SDMA work.
 	 */
 retry:
-	ret = psmi_hal_writev(iovec, iovcnt, proto->ep->context.psm_hw_ctxt);
+	ret = psmi_hal_writev(iovec, iovcnt, &proto->epinfo, proto->ep->context.psm_hw_ctxt);
 
 	if (ret > 0) {
 		proto->writevFailTime = 0;
@@ -1961,7 +1975,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 	     struct ips_scb_pendlist *slist, int *num_sent)
 {
 	psm2_error_t err = PSM2_OK;
-	struct sdma_req_info *sdmahdr;
+	struct psm_hal_sdma_req_info *sdmahdr;
 	struct ips_scb *scb;
 	struct iovec *iovec;
 	uint16_t iovcnt;
@@ -2033,8 +2047,8 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 		psmi_assert(psmi_hal_dma_slot_available(fillidx, proto->ep->context.
 								    psm_hw_ctxt));
 
-		sdmahdr = (struct sdma_req_info *)
-			   psmi_get_sdma_req_info(scb, proto->ips_extra_sdmahdr_size);
+		size_t extra_bytes;
+		sdmahdr = psmi_get_sdma_req_info(scb, &extra_bytes);
 
 		sdmahdr->npkts =
 			scb->nfrag > 1 ? scb->nfrag_remaining : scb->nfrag;
@@ -2051,9 +2065,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 		 */
 		iovec[vec_idx].iov_base = sdmahdr;
 		iovec[vec_idx].iov_len = psmi_hal_get_sdma_req_size(proto->ep->context.
-								    psm_hw_ctxt) +
-			proto->ips_extra_sdmahdr_size;
-
+								    psm_hw_ctxt) + extra_bytes;
 		vec_idx++;
 		iovcnt = 1;
 		_HFI_VDBG("hdr=%p,%d\n",
@@ -2163,7 +2175,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 	}
 	psmi_assert(vec_idx > 0);
 retry:
-	ret = psmi_hal_writev(iovec, vec_idx, proto->ep->context.psm_hw_ctxt);
+	ret = psmi_hal_writev(iovec, vec_idx, &proto->epinfo, proto->ep->context.psm_hw_ctxt);
 
 	if (ret > 0) {
 		proto->writevFailTime = 0;

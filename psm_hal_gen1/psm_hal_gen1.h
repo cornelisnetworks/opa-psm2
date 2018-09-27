@@ -56,6 +56,7 @@
 #include "ips_proto_internal.h"
 #include "psm_hal_gen1_spio.h"
 #include "psm_mq_internal.h"
+#include "opa_user_gen1.h"
 
 #define LAST_RHF_SEQNO 13
 
@@ -77,10 +78,11 @@ typedef struct
 	};
 } psm_hal_gen1_cl_q_t;
 
+COMPILE_TIME_ASSERT(MAX_SHARED_CTXTS_MUST_MATCH, PSM_HAL_MAX_SHARED_CTXTS == HFI1_MAX_SHARED_CTXTS);
+
 /* Private struct on a per-context basis. */
 typedef struct _hfp_gen1_pc_private
 {
-	int			    mtu;
 	struct _hfi_ctrl	    *ctrl; /* driver opaque hfi_proto */
 	psm_hal_gen1_cl_q_t         cl_qs[PSM_HAL_GET_SC_CL_Q_RX_EGR_Q(7) + 1];
 	struct ips_hwcontext_ctrl  *hwcontext_ctrl;
@@ -91,11 +93,11 @@ typedef struct _hfp_gen1_pc_private
 
 /* At the end of each scb struct, we have space reserved to accommodate
  * three structures (for GEN1)-
- * struct sdma_req_info, struct hfi_pbc and struct ips_message_header.
+ * struct psm_hal_sdma_req_info, struct psm_hal_pbc and struct ips_message_header.
  * The HIC should get the size needed for the extended memory region
  * using a HAL call (psmi_hal_get_scb_extended_mem_size). For Gen1, this API
  * will return the size of the below struct psm_hal_gen1_scb_extended
- * aligned up to be able to fit hfi_pbc struct on a 64-byte boundary.
+ * aligned up to be able to fit struct psm_hal_pbc on a 64-byte boundary.
  */
 
 #define PSMI_SHARED_CONTEXTS_ENABLED_BY_DEFAULT   1
@@ -107,7 +109,7 @@ struct psm_hal_gen1_scb_extended {
 		struct sdma_req_info_v6_3 sri2;
 	};
 	struct {
-		struct hfi_pbc pbc;
+		struct psm_hal_pbc pbc;
 		struct ips_message_header ips_lrh;
 	} PSMI_CACHEALIGN;
 };

@@ -293,6 +293,7 @@ void psmi_profile_reblock(int did_no_progress) __attribute__ ((weak));
 #ifdef PSM_CUDA
 #include <cuda.h>
 #include <driver_types.h>
+#include <nvml.h>
 
 #if CUDA_VERSION < 7000
 #error Please update CUDA driver, required minimum version is 7.0
@@ -305,6 +306,8 @@ extern int cuda_lib_version;
 
 extern CUcontext ctxt;
 void *psmi_cuda_lib;
+void *psmi_nvml_lib;
+
 CUresult (*psmi_cuInit)(unsigned int  Flags );
 CUresult (*psmi_cuCtxDetach)(CUcontext c);
 CUresult (*psmi_cuCtxSetCurrent)(CUcontext c);
@@ -317,6 +320,7 @@ CUresult (*psmi_cuDeviceGetAttribute)(int* pi, CUdevice_attribute attrib, CUdevi
 CUresult (*psmi_cuDriverGetVersion)(int* driverVersion);
 CUresult (*psmi_cuDeviceGetCount)(int* count);
 CUresult (*psmi_cuStreamCreate)(CUstream* phStream, unsigned int Flags);
+CUresult (*psmi_cuStreamDestroy)(CUstream phStream);
 CUresult (*psmi_cuEventCreate)(CUevent* phEvent, unsigned int Flags);
 CUresult (*psmi_cuEventDestroy)(CUevent hEvent);
 CUresult (*psmi_cuEventQuery)(CUevent hEvent);
@@ -338,6 +342,10 @@ CUresult (*psmi_cuDevicePrimaryCtxGetState)(CUdevice dev, unsigned int* flags, i
 CUresult (*psmi_cuDevicePrimaryCtxRetain)(CUcontext* pctx, CUdevice dev);
 CUresult (*psmi_cuCtxGetDevice)(CUdevice* device);
 CUresult (*psmi_cuDevicePrimaryCtxRelease)(CUdevice device);
+
+nvmlReturn_t (*psmi_nvmlInit)(void);
+nvmlReturn_t (*psmi_nvmlDeviceGetHandleByIndex)(unsigned int index, nvmlDevice_t *device);
+nvmlReturn_t (*psmi_nvmlDeviceGetBAR1MemoryInfo)(nvmlDevice_t device, nvmlBAR1Memory_t *bar1Memory);
 
 #define PSMI_CUDA_CALL(func, args...) do {				\
 		CUresult cudaerr;					\
@@ -378,6 +386,22 @@ CUresult (*psmi_cuDevicePrimaryCtxRelease)(CUdevice device);
 			       " Unable to resolve %s symbol"		\
 			       " in CUDA libraries.\n",STRINGIFY(func));\
 	}                                                               \
+} while (0)
+
+#define PSMI_NVML_CALL(func, args...) do {				\
+	nvmlReturn_t nvmlerr;						\
+	nvmlerr = psmi_##func(args);					\
+	if (nvmlerr != NVML_SUCCESS) {					\
+		if (ctxt == NULL)					\
+			_HFI_ERROR( "Check if CUDA is initialized"	\
+				    "before psm2_ep_open call \n");	\
+	    	_HFI_ERROR( "NVML failure: %s() (at %s:%d)"		\
+			    "returned %d\n",				\
+			    #func, __FILE__, __LINE__, nvmlerr);	\
+	    	psmi_handle_error(					\
+			    PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,	\
+			    "Error returned from CUDA function.\n");	\
+	}								\
 } while (0)
 
 PSMI_ALWAYS_INLINE(

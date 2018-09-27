@@ -56,7 +56,8 @@ top_srcdir := $(this_srcdir)/..
 
 INCLUDES += -I$(top_srcdir) -I$(top_srcdir)/ptl_ips
 
-${TARGLIB}-objs := psm_hal_gen1.o
+${TARGLIB}-objs := psm_hal_gen1.o opa_service_gen1.o opa_utils_gen1.o \
+			opa_proto_gen1.o opa_i2cflash_gen1.o psm_gdrcpy.o
 ${TARGLIB}-objs := $(patsubst %.o, $(OUTDIR)/%.o, ${${TARGLIB}-objs})
 
 DEPS:= $(${TARGLIB}-objs:.o=.d)

@@ -426,6 +426,40 @@ struct psm2_mq_status2 {
 /** @brief PSM2 Communication handle (opaque) */
 typedef struct psm2_mq_req *psm2_mq_req_t;
 
+
+/** @brief MQ Request Struct
+ *
+ * Message completion request for asynchronous communication operations.
+ * Upon completion, requests are filled with the valid data for the
+ * corresponding send/recv operation that was completed. This datatype
+ * contains the status data and is converted into the
+ * mq_status structures in wait/test functions.
+ */
+struct psm2_mq_req_user {
+	/* Tag matching vars */
+	psm2_epaddr_t peer;
+	psm2_mq_tag_t tag __attribute__ ((aligned(16)));/* Alignment added
+							 * to preserve the
+							 * layout as is
+							 * expected by
+							 * existent code */
+	psm2_mq_tag_t tagsel;	/* used for receives */
+
+	/* Buffer attached to request.  May be a system buffer for unexpected
+	 * messages or a user buffer when an expected message */
+	uint8_t *buf;
+	uint32_t buf_len;
+	uint32_t error_code;
+
+	uint32_t recv_msglen;	/* Message length we are ready to receive */
+	uint32_t send_msglen;	/* Message length from sender */
+
+	/* Used for request to send messages */
+	void *context;		/* user context associated to sends or receives */
+
+	uint64_t user_reserved[4];
+};
+
 /*! @} */
 /*! @ingroup mq
  * @defgroup mq_options PSM Matched Queue Options
@@ -501,6 +535,72 @@ psm2_error_t psm2_mq_setopt(psm2_mq_t mq, int option, const void *value);
 
 #define PSM2_MQ_ANY_ADDR		((psm2_epaddr_t)NULL)
 				/**< MQ receive from any source epaddr */
+
+
+/** @brief MQ fast-path operation enumeration
+ *
+ * To provide for quick enqueing of send/receives from within an AM handler
+ * PSM2 provdes fast path send/recv options that will enqueue those ops
+ * into the MQ. The supported operations to call in fast path are enumerated
+ * in the @ref psm2_mq_fp_op enum.
+ */
+enum psm2_mq_fp_op {
+	PSM2_MQ_ISEND_FP = 1,
+	PSM2_MQ_IRECV_FP,
+};
+
+/** @brief Post a fast-path isend/irecv into the MQ
+ *
+ * Function to only enqueue fast-path non-blocking sends or non-blocking recvs
+ * into a particular MQ. These calls only work if the process already holds
+ * the mq progress lock, this case traditionally only applies to calls from
+ * a registered AM Handler.
+ *
+ * This function helps to enable one-sided communication models from middleware
+ * such as OFI to provide fast >2KB message transfers for RMA operations.
+ *
+ * When posting irecvs every MQ message received on a particular MQ,
+ * the @c tag and @c tagsel parameters are used against the incoming
+ * message's send tag as described in @ref tagmatch.
+ *
+ * When posting isends the user gurantees that the source data will remain
+ * unmodified until the send is locally completed through a call such as
+ * @ref psm2_mq_wait or @ref psm2_mq_test.
+ *
+ * Progress on the operations enqueued into the MQ will may not occur until
+ * the next PSM2 progress API is invoked.
+ *
+ * @param[in] ep PSM2 endpoint
+ * @param[in] mq Matched Queue Handle
+ * @param[in] addr Destination EP address (used only on isends)
+ * @param[in] tag Send/Receive tag
+ * @param[in] tagsel Receive tag selector (used only on irecvs)
+ * @param[in] flags Send/Receive Flags
+ * @param[in] buf Send/Receive buffer
+ * @param[in] len Send/Receive buffer length
+ * @param[in] context User context pointer, available in @ref psm2_mq_status_t
+ *                    upon completion
+ * @param[in] fp_type Fast-path op requested
+ * @param[out] req PSM MQ Request handle created by the preposted receive, to
+ *                 be used for explicitly controlling message receive
+ *                 completion.
+ *
+ * @post The supplied buffer is given to MQ to match against incoming
+ *       messages unless it is cancelled via @ref psm2_mq_cancel @e before any
+ *       match occurs.
+ *
+ * @remark This function may be called simultaneously from multiple threads
+ * 	   as long as different MQ arguments are used in each of the calls.
+ *
+ * The following error code is returned.  Other errors are handled by the PSM
+ * error handler (@ref psm2_error_register_handler).
+ *
+ * @retval PSM2_OK The receive buffer has successfully been posted to the MQ.
+ */
+psm2_error_t
+psm2_mq_fp_msg(psm2_ep_t ep, psm2_mq_t mq, psm2_epaddr_t addr, psm2_mq_tag_t *tag,
+		psm2_mq_tag_t *tagsel, uint32_t flags, void *buf, uint32_t len,
+		void *context, enum psm2_mq_fp_op fp_type, psm2_mq_req_t *req);
 
 /** @brief Post a receive to a Matched Queue with tag selection criteria
  *
@@ -1089,6 +1189,79 @@ psm2_mq_ipeek(psm2_mq_t mq, psm2_mq_req_t *req, psm2_mq_status_t *status);
  */
 psm2_error_t
 psm2_mq_ipeek2(psm2_mq_t mq, psm2_mq_req_t *req, psm2_mq_status2_t *status);
+
+/** @brief User defined Callback function handling copy of MQ request into user datatype
+ *
+ * Callback function used to convert an MQ request into a user's desired
+ * status structure. The user's callback function converts the MQ request into
+ * the provided status_array at the specified index.
+ *
+ * @param[in] req MQ External non-blocking Request structure
+ * @param[in] status_array Array of User defined status datatypes
+ * @param[in] entry_index Index in array where the converted request will be
+ *                  stored if successful
+ *
+ * The following error codes are returned.
+ *
+ * @retval < 0 The MQ conversion failed with a user defined error.
+ *
+ * @retval 0 The MQ was successfully processed, but was not saved
+ *                 in the provided @c status_array.
+ *
+ * @retval 1 The MQ was successfully processed and was saved in the
+ *                 @c status_array at the specified index.
+ *
+ * @retval >1 The MQ was successfully processed and was saved in the
+ *                 @c status_array at the specified index. This should
+ *                 be the last MQ converted in the batch, even if there
+ *                 are still spaces in @c status_array.
+ */
+typedef int (*psmi_mq_status_copy_user_t) (struct psm2_mq_req_user *req,
+        void *status_array, int entry_index);
+
+/** @brief Check and dequeue MQ requests into a user's status array using a callback.
+ *
+ * Function to atomically check and dequeue MQ entries from the completed
+ * queue and copy the MQ requests into a user's status datatype through a
+ * status_copy callback function.
+ *
+ * Once the MQ request has been successfully converted by the callback, the
+ * MQ request is freed and the next entry is processed making the supplied
+ * Request pointer invalid.
+ *
+ * The variable "count" passed in will only be increased if the MQ request was
+ * successfully stored into the user's passed in array. Otherwise the count
+ * variable is unchanged.
+ *
+ * NOTE: a count of 0 passed into psm2_mq_ipeek_dequeue_multi will result in
+ * no MQ elements being processed.
+ *
+ * @param[in] mq Matched Queue Handle
+ * @param[in] status_array Array of User defined status datatypes
+ * @param[in] status_copy Callback function pointer to convert
+ *                  MQ to caller datatype
+ * @param[in/out] count [in]Size of status_array, [out]number of elements
+ *                  populated into status_array or user's error return code
+ *
+ * The following error codes are returned.
+ *
+ * @retval PSM2_OK The dequeue operation was successful and populated the
+ *                  full @c status_array up to @c count entries. The parameter
+ *                  @c count is equal to the count passed in by the user.
+ *
+ * @retval PSM2_MQ_NO_COMPLETIONS The dequeue operation was not able to read
+ *                  @c count entries into the @c status_array. The number
+ *                  of entries that were successfully written to the
+ *                  @c status_array is set in the @c count for the user.
+ *
+ * @retval PSM2_INTERNAL_ERR The @c status_copy failed to successfully
+ *                  copy the status entry into the user's datatype.
+ *                  @c count is set to the return code from the
+ *                  @c status_copy.
+ */
+ psm2_error_t
+ psm2_mq_ipeek_dequeue_multi(psm2_mq_t mq, void *status_array,
+        psmi_mq_status_copy_user_t status_copy, int *count);
 
 /** @brief Check and dequeue the first request entry from the completed queue.
  *

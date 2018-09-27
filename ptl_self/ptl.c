@@ -74,9 +74,9 @@ ptl_handle_rtsmatch(psm2_mq_req_t recv_req, int was_posted)
 {
 	psm2_mq_req_t send_req = (psm2_mq_req_t) recv_req->ptl_req_ptr;
 
-	if (recv_req->recv_msglen > 0) {
-		psmi_mq_mtucpy(recv_req->buf, send_req->buf,
-			       recv_req->recv_msglen);
+	if (recv_req->req_data.recv_msglen > 0) {
+		psmi_mq_mtucpy(recv_req->req_data.buf, send_req->req_data.buf,
+			       recv_req->req_data.recv_msglen);
 	}
 
 	psmi_mq_handle_rts_complete(recv_req);
@@ -85,8 +85,8 @@ ptl_handle_rtsmatch(psm2_mq_req_t recv_req, int was_posted)
 	 * buffered. */
 	if (send_req->state == MQ_STATE_COMPLETE) {
 		psmi_mq_stats_rts_account(send_req);
-		if (send_req->buf != NULL && send_req->send_msglen > 0)
-			psmi_mq_sysbuf_free(send_req->mq, send_req->buf);
+		if (send_req->req_data.buf != NULL && send_req->req_data.send_msglen > 0)
+			psmi_mq_sysbuf_free(send_req->mq, send_req->req_data.buf);
 		/* req was left "live" even though the sender was told that the
 		 * send was done */
 		psmi_mq_req_free(send_req);
@@ -94,7 +94,7 @@ ptl_handle_rtsmatch(psm2_mq_req_t recv_req, int was_posted)
 		psmi_mq_handle_rts_complete(send_req);
 
 	_HFI_VDBG("[self][complete][b=%p][sreq=%p][rreq=%p]\n",
-		  recv_req->buf, send_req, recv_req);
+		  recv_req->req_data.buf, send_req, recv_req);
 	return PSM2_OK;
 }
 
@@ -112,12 +112,12 @@ psm2_error_t self_mq_send_testwait(psm2_mq_req_t *ireq)
 	 */
 	req->testwait_callback = NULL;	/* no more calls here */
 
-	ubuf = req->buf;
-	if (ubuf != NULL && req->send_msglen > 0) {
-		req->buf = psmi_mq_sysbuf_alloc(req->mq, req->send_msglen);
-		if (req->buf == NULL)
+	ubuf = req->req_data.buf;
+	if (ubuf != NULL && req->req_data.send_msglen > 0) {
+		req->req_data.buf = psmi_mq_sysbuf_alloc(req->mq, req->req_data.send_msglen);
+		if (req->req_data.buf == NULL)
 			return PSM2_NO_MEMORY;
-		psmi_mq_mtucpy(req->buf, ubuf, req->send_msglen);
+		psmi_mq_mtucpy(req->req_data.buf, ubuf, req->req_data.send_msglen);
 	}
 
 	/* Mark it complete but don't free the req, it's freed when the receiver
@@ -130,9 +130,9 @@ psm2_error_t self_mq_send_testwait(psm2_mq_req_t *ireq)
 /* Self is different.  We do everything as rendezvous. */
 static
 psm2_error_t
-self_mq_isend(psm2_mq_t mq, psm2_epaddr_t epaddr, uint32_t flags,
-	      psm2_mq_tag_t *tag, const void *ubuf, uint32_t len, void *context,
-	      psm2_mq_req_t *req_o)
+self_mq_isend(psm2_mq_t mq, psm2_epaddr_t epaddr, uint32_t flags_user,
+	      uint32_t flags_internal, psm2_mq_tag_t *tag, const void *ubuf,
+	      uint32_t len, void *context, psm2_mq_req_t *req_o)
 {
 	psm2_mq_req_t send_req;
 	psm2_mq_req_t recv_req;
@@ -162,10 +162,10 @@ self_mq_isend(psm2_mq_t mq, psm2_epaddr_t epaddr, uint32_t flags,
 	rc = psmi_mq_handle_rts(mq, epaddr, tag,
 				len, NULL, 0, 1,
 				ptl_handle_rtsmatch, &recv_req);
-	send_req->tag = *tag;
-	send_req->buf = (void *)ubuf;
-	send_req->send_msglen = len;
-	send_req->context = context;
+	send_req->req_data.tag = *tag;
+	send_req->req_data.buf = (void *)ubuf;
+	send_req->req_data.send_msglen = len;
+	send_req->req_data.context = context;
 	recv_req->ptl_req_ptr = (void *)send_req;
 	recv_req->rts_sbuf = (uintptr_t) ubuf;
 	recv_req->rts_peer = epaddr;
@@ -188,7 +188,7 @@ self_mq_send(psm2_mq_t mq, psm2_epaddr_t epaddr, uint32_t flags,
 {
 	psm2_error_t err;
 	psm2_mq_req_t req;
-	err = self_mq_isend(mq, epaddr, flags, tag, ubuf, len, NULL, &req);
+	err = self_mq_isend(mq, epaddr, flags, PSMI_REQ_FLAG_NORMAL, tag, ubuf, len, NULL, &req);
 	psmi_mq_wait_internal(&req);
 	return err;
 }

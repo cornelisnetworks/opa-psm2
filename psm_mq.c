@@ -87,11 +87,11 @@ psmi_mq_fastpath_disable(psm2_mq_t mq)
 	for (curp = &qp->first; (cur = *curp) != NULL; curp = &cur->next[t]) {
 		mq->unexpected_hash_len++;
 		hashvals[PSM2_TAG_SRC] =
-			hash_64(*(uint64_t *) cur->tag.tag) % NUM_HASH_BUCKETS;
+			hash_64(*(uint64_t *) cur->req_data.tag.tag) % NUM_HASH_BUCKETS;
 		hashvals[PSM2_TAG_ANYSRC] =
-			hash_32(cur->tag.tag[0]) % NUM_HASH_BUCKETS;
+			hash_32(cur->req_data.tag.tag[0]) % NUM_HASH_BUCKETS;
 		hashvals[PSM2_ANYTAG_SRC] =
-			hash_32(cur->tag.tag[1]) % NUM_HASH_BUCKETS;
+			hash_32(cur->req_data.tag.tag[1]) % NUM_HASH_BUCKETS;
 		for (t = PSM2_TAG_SRC; t < PSM2_ANYTAG_ANYSRC; t++)
 			mq_qq_append_which(mq->unexpected_htab,
 					   t, hashvals[t], cur);
@@ -103,21 +103,21 @@ psmi_mq_fastpath_disable(psm2_mq_t mq)
 	for (curp = &qp->first; (cur = *curp) != NULL; /*curp = &cur->next*/) {
 		/* must read next ptr before remove */
 		curp = &cur->next[PSM2_ANYTAG_ANYSRC];
-		if ((cur->tagsel.tag[0] == 0xFFFFFFFF) &&
-		    (cur->tagsel.tag[1] == 0xFFFFFFFF)) {
+		if ((cur->req_data.tagsel.tag[0] == 0xFFFFFFFF) &&
+		    (cur->req_data.tagsel.tag[1] == 0xFFFFFFFF)) {
 			/* hash tag0 and tag1 */
 			t = PSM2_TAG_SRC;
-			hashvals[t] = hash_64(*(uint64_t *) cur->tag.tag) % NUM_HASH_BUCKETS;
+			hashvals[t] = hash_64(*(uint64_t *) cur->req_data.tag.tag) % NUM_HASH_BUCKETS;
 			mq_qq_append_which(mq->expected_htab,
 					   t, hashvals[t], cur);
-		} else if (cur->tagsel.tag[0] == 0xFFFFFFFF) {
+		} else if (cur->req_data.tagsel.tag[0] == 0xFFFFFFFF) {
 			t = PSM2_TAG_ANYSRC;
-			hashvals[t] = hash_32(cur->tag.tag[0]) % NUM_HASH_BUCKETS;
+			hashvals[t] = hash_32(cur->req_data.tag.tag[0]) % NUM_HASH_BUCKETS;
 			mq_qq_append_which(mq->expected_htab,
 					   t, hashvals[t], cur);
-		} else if (cur->tagsel.tag[1] == 0xFFFFFFFF) {
+		} else if (cur->req_data.tagsel.tag[1] == 0xFFFFFFFF) {
 			t = PSM2_ANYTAG_SRC;
-			hashvals[t] = hash_32(cur->tag.tag[1]) % NUM_HASH_BUCKETS;
+			hashvals[t] = hash_32(cur->req_data.tag.tag[1]) % NUM_HASH_BUCKETS;
 			mq_qq_append_which(mq->expected_htab,
 					   t, hashvals[t], cur);
 		} else
@@ -192,11 +192,11 @@ mq_req_match_with_tagsel(psm2_mq_t mq, psm2_epaddr_t src,
 	}
 
 	for (curp = &qp->first; (cur = *curp) != NULL; curp = &cur->next[i]) {
-		psmi_assert(cur->peer != PSM2_MQ_ANY_ADDR);
-		if ((src == PSM2_MQ_ANY_ADDR || src == cur->peer) &&
-		    !((tag->tag[0] ^ cur->tag.tag[0]) & tagsel->tag[0]) &&
-		    !((tag->tag[1] ^ cur->tag.tag[1]) & tagsel->tag[1]) &&
-		    !((tag->tag[2] ^ cur->tag.tag[2]) & tagsel->tag[2])) {
+		psmi_assert(cur->req_data.peer != PSM2_MQ_ANY_ADDR);
+		if ((src == PSM2_MQ_ANY_ADDR || src == cur->req_data.peer) &&
+		    !((tag->tag[0] ^ cur->req_data.tag.tag[0]) & tagsel->tag[0]) &&
+		    !((tag->tag[1] ^ cur->req_data.tag.tag[1]) & tagsel->tag[1]) &&
+		    !((tag->tag[2] ^ cur->req_data.tag.tag[2]) & tagsel->tag[2])) {
 			/* match! */
 			if (remove) {
 				if_pt (i == PSM2_ANYTAG_ANYSRC)
@@ -225,20 +225,20 @@ static void mq_add_to_expected_hashes(psm2_mq_t mq, psm2_mq_req_t req)
 		mq->expected_list_len++;
 		if_pf (mq->expected_list_len >= HASH_THRESHOLD)
 			psmi_mq_fastpath_disable(mq);
-	} else if ((req->tagsel.tag[0] == 0xFFFFFFFF) &&
-		   (req->tagsel.tag[1] == 0xFFFFFFFF)) {
+	} else if ((req->req_data.tagsel.tag[0] == 0xFFFFFFFF) &&
+		   (req->req_data.tagsel.tag[1] == 0xFFFFFFFF)) {
 		i = PSM2_TAG_SRC;
-		hashval = hash_64(*(uint64_t *) req->tag.tag) % NUM_HASH_BUCKETS;
+		hashval = hash_64(*(uint64_t *) req->req_data.tag.tag) % NUM_HASH_BUCKETS;
 		mq_qq_append_which(mq->expected_htab, i, hashval, req);
 		mq->expected_hash_len++;
-	} else if (req->tagsel.tag[0] == 0xFFFFFFFF) {
+	} else if (req->req_data.tagsel.tag[0] == 0xFFFFFFFF) {
 		i = PSM2_TAG_ANYSRC;
-		hashval = hash_32(req->tag.tag[0]) % NUM_HASH_BUCKETS;
+		hashval = hash_32(req->req_data.tag.tag[0]) % NUM_HASH_BUCKETS;
 		mq_qq_append_which(mq->expected_htab, i, hashval, req);
 		mq->expected_hash_len++;
-	} else if (req->tagsel.tag[1] == 0xFFFFFFFF) {
+	} else if (req->req_data.tagsel.tag[1] == 0xFFFFFFFF) {
 		i = PSM2_ANYTAG_SRC;
-		hashval = hash_32(req->tag.tag[1]) % NUM_HASH_BUCKETS;
+		hashval = hash_32(req->req_data.tag.tag[1]) % NUM_HASH_BUCKETS;
 		mq_qq_append_which(mq->expected_htab, i, hashval, req);
 		mq->expected_hash_len++;
 	} else {
@@ -283,30 +283,6 @@ int mq_req_remove_single(psm2_mq_t mq, psm2_mq_req_t req)
 	psmi_mq_fastpath_try_reenable(mq);
 	return 1;
 }
-
-void MOCKABLE(psmi_mq_mtucpy)(void *vdest, const void *vsrc, uint32_t nchars)
-{
-
-#ifdef PSM_CUDA
-	if (PSMI_IS_CUDA_ENABLED && (PSMI_IS_CUDA_MEM(vdest) || PSMI_IS_CUDA_MEM((void *) vsrc))) {
-		PSMI_CUDA_CALL(cuMemcpy,
-			       (CUdeviceptr)vdest, (CUdeviceptr)vsrc, nchars);
-		return;
-	}
-#endif
-	memcpy(vdest, vsrc, nchars);
-	return;
-
-
-}
-MOCK_DEF_EPILOGUE(psmi_mq_mtucpy);
-
-void psmi_mq_mtucpy_host_mem(void *vdest, const void *vsrc, uint32_t nchars)
-{
-	memcpy(vdest, vsrc, nchars);
-	return;
-}
-
 
 PSMI_ALWAYS_INLINE(
 psm2_mq_req_t
@@ -530,7 +506,7 @@ psmi_mq_wait_inner(psm2_mq_req_t *ireq, void *status,
 		req->type |= MQE_TYPE_WAITING;
 
 		_HFI_VDBG("req=%p, buf=%p, len=%d, waiting\n",
-			  req, req->buf, req->buf_len);
+			  req, req->req_data.buf, req->req_data.buf_len);
 
 		if (req->testwait_callback) {
 			err = req->testwait_callback(ireq);
@@ -558,7 +534,7 @@ psmi_mq_wait_inner(psm2_mq_req_t *ireq, void *status,
 	}
 
 	_HFI_VDBG("req=%p complete, buf=%p, len=%d, err=%d\n",
-		  req, req->buf, req->buf_len, req->error_code);
+		  req, req->req_data.buf, req->req_data.buf_len, req->req_data.error_code);
 
 	psmi_mq_req_free(req);
 	*ireq = PSM2_MQ_REQINVALID;
@@ -640,8 +616,9 @@ psmi_mq_test_inner(psm2_mq_req_t *ireq, void *status,
 
 	_HFI_VDBG
 	    ("req=%p complete, tag=%08x.%08x.%08x buf=%p, len=%d, err=%d\n",
-	     req, req->tag.tag[0], req->tag.tag[1], req->tag.tag[2], req->buf,
-	     req->buf_len, req->error_code);
+	     req, req->req_data.tag.tag[0], req->req_data.tag.tag[1],
+	     req->req_data.tag.tag[2], req->req_data.buf,
+	     req->req_data.buf_len, req->req_data.error_code);
 
 	PSMI_LOCK(req->mq->progress_lock);
 	mq_qq_remove(&req->mq->completed_q, req);
@@ -692,14 +669,14 @@ __psm2_mq_isend2(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags,
 
 	PSMI_LOCK(mq->progress_lock);
 	err =
-	    dest->ptlctl->mq_isend(mq, dest, flags, stag, buf, len, context,
-				   req);
+		dest->ptlctl->mq_isend(mq, dest, flags, PSMI_REQ_FLAG_NORMAL,
+				stag, buf, len, context, req);
 	PSMI_UNLOCK(mq->progress_lock);
 
 	psmi_assert(*req != NULL);
 	psmi_assert_req_not_internal(*req);
 
-	(*req)->peer = dest;
+	(*req)->req_data.peer = dest;
 
 	PSM2_LOG_MSG("leaving");
 
@@ -722,15 +699,14 @@ __psm2_mq_isend(psm2_mq_t mq, psm2_epaddr_t dest, uint32_t flags, uint64_t stag,
 	PSMI_ASSERT_INITIALIZED();
 
 	PSMI_LOCK(mq->progress_lock);
-	err =
-	    dest->ptlctl->mq_isend(mq, dest, flags, &tag, buf, len, context,
-				   req);
+	err = dest->ptlctl->mq_isend(mq, dest, flags, PSMI_REQ_FLAG_NORMAL,
+				&tag, buf, len, context, req);
 	PSMI_UNLOCK(mq->progress_lock);
 
 	psmi_assert(*req != NULL);
 	psmi_assert_req_not_internal(*req);
 
-	(*req)->peer = dest;
+	(*req)->req_data.peer = dest;
 
 	PSM2_LOG_MSG("leaving");
 	return err;
@@ -800,8 +776,8 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 
 	switch (req->state) {
 	case MQ_STATE_COMPLETE:
-		if (req->buf != NULL) {	/* 0-byte messages don't alloc a sysbuf */
-			copysz = mq_set_msglen(req, len, req->send_msglen);
+		if (req->req_data.buf != NULL) {	/* 0-byte messages don't alloc a sysbuf */
+			copysz = mq_set_msglen(req, len, req->req_data.send_msglen);
 			void *ubuf = buf;
 #ifdef PSM_CUDA
 			if (PSMI_USE_GDR_COPY(req, len)) {
@@ -810,28 +786,28 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 								    mq->ep->epaddr->proto);
 				psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
 			}
-			psmi_mtucpy_fn(ubuf, (const void *)req->buf, copysz);
+			psmi_mtucpy_fn(ubuf, (const void *)req->req_data.buf, copysz);
 #else
-			psmi_mq_mtucpy(ubuf, (const void *)req->buf, copysz);
+			psmi_mq_mtucpy(ubuf, (const void *)req->req_data.buf, copysz);
 #endif
-			psmi_mq_sysbuf_free(mq, req->buf);
+			psmi_mq_sysbuf_free(mq, req->req_data.buf);
 		}
-		req->buf = buf;
-		req->buf_len = len;
+		req->req_data.buf = buf;
+		req->req_data.buf_len = len;
 		mq_qq_append(&mq->completed_q, req);
 		break;
 
 	case MQ_STATE_UNEXP:	/* not done yet */
-		copysz = mq_set_msglen(req, len, req->send_msglen);
+		copysz = mq_set_msglen(req, len, req->req_data.send_msglen);
 		/* Copy What's been received so far and make sure we don't receive
 		 * any more than copysz.  After that, swap system with user buffer
 		 */
 		req->recv_msgoff = min(req->recv_msgoff, copysz);
 
 #ifdef PSM_CUDA
-		if (PSMI_USE_GDR_COPY(req, req->send_msglen)) {
+		if (PSMI_USE_GDR_COPY(req, req->req_data.send_msglen)) {
 			buf = gdr_convert_gpu_to_host_addr(GDR_FD, (unsigned long)req->user_gpu_buffer,
-							   req->send_msglen, 1,
+							   req->req_data.send_msglen, 1,
 							   mq->ep->epaddr->proto);
 			psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
 		}
@@ -843,18 +819,18 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 #else
 			psmi_mq_mtucpy
 #endif
-				(buf, (const void *)req->buf,
+				(buf, (const void *)req->req_data.buf,
 				       req->recv_msgoff);
 		}
-		psmi_mq_sysbuf_free(mq, req->buf);
+		psmi_mq_sysbuf_free(mq, req->req_data.buf);
 
 		req->state = MQ_STATE_MATCHED;
-		req->buf = buf;
-		req->buf_len = len;
+		req->req_data.buf = buf;
+		req->req_data.buf_len = len;
 		break;
 
 	case MQ_STATE_UNEXP_RV:	/* rendez-vous ... */
-		copysz = mq_set_msglen(req, len, req->send_msglen);
+		copysz = mq_set_msglen(req, len, req->req_data.send_msglen);
 		/* Copy What's been received so far and make sure we don't receive
 		 * any more than copysz.  After that, swap system with user buffer
 		 */
@@ -865,16 +841,16 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 #else
 			psmi_mq_mtucpy
 #endif
-				(buf, (const void *)req->buf,
+				(buf, (const void *)req->req_data.buf,
 				       req->recv_msgoff);
 		}
 		if (req->send_msgoff) {
-			psmi_mq_sysbuf_free(mq, req->buf);
+			psmi_mq_sysbuf_free(mq, req->req_data.buf);
 		}
 
 		req->state = MQ_STATE_MATCHED;
-		req->buf = buf;
-		req->buf_len = len;
+		req->req_data.buf = buf;
+		req->req_data.buf_len = len;
 		req->rts_callback(req, 0);
 		break;
 
@@ -882,13 +858,117 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 		fprintf(stderr, "Unexpected state %d in req %p\n", req->state,
 			req);
 		fprintf(stderr, "type=%d, mq=%p, tag=%08x.%08x.%08x\n",
-			req->type, req->mq, req->tag.tag[0], req->tag.tag[1],
-			req->tag.tag[2]);
+			req->type, req->mq, req->req_data.tag.tag[0], req->req_data.tag.tag[1],
+			req->req_data.tag.tag[2]);
 		abort();
 	}
 	PSM2_LOG_MSG("leaving");
 	return PSM2_OK;
 }
+
+psm2_error_t
+__psm2_mq_fp_msg(psm2_ep_t ep, psm2_mq_t mq, psm2_epaddr_t addr, psm2_mq_tag_t *tag,
+		psm2_mq_tag_t *tagsel, uint32_t flags, void *buf, uint32_t len,
+		void *context, enum psm2_mq_fp_op fp_type, psm2_mq_req_t *req)
+{
+	psm2_error_t err = PSM2_OK;
+
+	PSM2_LOG_MSG("entering");
+
+	PSMI_ASSERT_INITIALIZED();
+
+	PSMI_LOCK_ASSERT(mq->progress_lock);
+
+	if (fp_type == PSM2_MQ_ISEND_FP) {
+		psmi_assert(tag != NULL);
+		err =
+			addr->ptlctl->mq_isend(mq, addr, flags, PSMI_REQ_FLAG_FASTPATH,
+					       tag, buf, len, context, req);
+
+		psmi_assert(*req != NULL);
+		psmi_assert_req_not_internal(*req);
+
+		(*req)->req_data.peer = addr;
+	} else if (fp_type == PSM2_MQ_IRECV_FP) {
+		psm2_mq_req_t recv_req;
+
+#ifdef PSM_CUDA
+		int gpu_mem = 0;
+		void *gpu_user_buffer = NULL;
+		/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
+		 * when the buffer pointer received into PSM has been allocated
+		 * by the application. This guarantees the all memory operations
+		 * to this region of memory (used by multiple layers of the stack)
+		 * always synchronize
+		 */
+		if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)buf)) {
+			int trueflag = 1;
+			PSMI_CUDA_CALL(cuPointerSetAttribute, &trueflag,
+					   CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
+					  (CUdeviceptr)buf);
+			gpu_mem = 1;
+			gpu_user_buffer = buf;
+		}
+#endif
+
+		/* First check unexpected Queue and remove req if found */
+		recv_req = mq_req_match_with_tagsel(mq, addr, tag, tagsel, REMOVE_ENTRY);
+
+		if (recv_req == NULL) {
+			/* prepost before arrival, add to expected q */
+			recv_req = psmi_mq_req_alloc(mq, MQE_TYPE_RECV);
+			if_pf(recv_req == NULL) {
+				err = PSM2_NO_MEMORY;
+				goto recv_ret;
+			}
+
+			recv_req->req_data.peer = addr;
+			recv_req->req_data.tag = *tag;
+			recv_req->req_data.tagsel = *tagsel;
+			recv_req->state = MQ_STATE_POSTED;
+			recv_req->req_data.buf = buf;
+			recv_req->req_data.buf_len = len;
+			recv_req->req_data.recv_msglen = len;
+			recv_req->recv_msgoff = 0;
+			recv_req->req_data.context = context;
+
+#ifdef PSM_CUDA
+			recv_req->is_buf_gpu_mem = gpu_mem;
+			recv_req->user_gpu_buffer = gpu_user_buffer;
+#endif
+
+			mq_add_to_expected_hashes(mq, recv_req);
+			_HFI_VDBG("buf=%p,len=%d,tag=%08x.%08x.%08x "
+				  " tagsel=%08x.%08x.%08x req=%p\n",
+				  buf, len, tag->tag[0], tag->tag[1], tag->tag[2],
+				  tagsel->tag[0], tagsel->tag[1], tagsel->tag[2], recv_req);
+		} else {
+			_HFI_VDBG("unexpected buf=%p,len=%d,tag=%08x.%08x.%08x"
+				  " tagsel=%08x.%08x.%08x req=%p\n", buf, len,
+				  tag->tag[0], tag->tag[1], tag->tag[2],
+				  tagsel->tag[0], tagsel->tag[1], tagsel->tag[2], recv_req);
+
+#ifdef PSM_CUDA
+			recv_req->is_buf_gpu_mem = gpu_mem;
+			recv_req->user_gpu_buffer = gpu_user_buffer;
+#endif
+
+			recv_req->req_data.context = context;
+
+			psm2_mq_irecv_inner(mq, recv_req, buf, len);
+		}
+recv_ret:
+		psmi_assert_req_not_internal(recv_req);
+		*req = recv_req;
+	} else {
+		err = PSM2_PARAM_ERR;
+	}
+
+	PSM2_LOG_MSG("leaving");
+
+	return err;
+}
+PSMI_API_DECL(psm2_mq_fp_msg)
 
 psm2_error_t
 __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
@@ -933,15 +1013,15 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 			goto ret;
 		}
 
-		req->peer = src;
-		req->tag = *tag;
-		req->tagsel = *tagsel;
+		req->req_data.peer = src;
+		req->req_data.tag = *tag;
+		req->req_data.tagsel = *tagsel;
 		req->state = MQ_STATE_POSTED;
-		req->buf = buf;
-		req->buf_len = len;
-		req->recv_msglen = len;
+		req->req_data.buf = buf;
+		req->req_data.buf_len = len;
+		req->req_data.recv_msglen = len;
 		req->recv_msgoff = 0;
-		req->context = context;
+		req->req_data.context = context;
 
 #ifdef PSM_CUDA
 		req->is_buf_gpu_mem = gpu_mem;
@@ -969,7 +1049,7 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 			req->user_gpu_buffer = NULL;
 #endif
 
-		req->context = context;
+		req->req_data.context = context;
 
 		psm2_mq_irecv_inner(mq, req, buf, len);
 	}
@@ -1028,7 +1108,7 @@ __psm2_mq_imrecv(psm2_mq_t mq, uint32_t flags, void *buf, uint32_t len,
 	} else {
 		/* Message is already matched -- begin delivering message data to the
 		   user's buffer. */
-		req->context = context;
+		req->req_data.context = context;
 
 #ifdef PSM_CUDA
 	/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
@@ -1121,6 +1201,49 @@ __psm2_mq_ipeek(psm2_mq_t mq, psm2_mq_req_t *oreq, psm2_mq_status_t *status)
 	return rv;
 }
 PSMI_API_DECL(psm2_mq_ipeek)
+
+psm2_error_t __psm2_mq_ipeek_dequeue_multi(psm2_mq_t mq, void *status_array,
+		psmi_mq_status_copy_user_t status_copy, int *count)
+{
+	psm2_mq_req_t req;
+	int read_count = *count;
+	int ret = 0;
+
+	PSMI_ASSERT_INITIALIZED();
+
+	*count = 0;
+	while (*count < read_count) {
+		PSMI_LOCK(mq->progress_lock);
+
+		if (mq->completed_q.first == NULL)
+			psmi_poll_internal(mq->ep, 1);
+
+		if ((req = mq->completed_q.first) == NULL) {
+			PSMI_UNLOCK(mq->progress_lock);
+			return PSM2_MQ_NO_COMPLETIONS;
+		}
+
+		mq_qq_remove(&mq->completed_q, req);
+		PSMI_UNLOCK(mq->progress_lock);
+
+		ret = status_copy(&req->req_data, status_array, *count);
+		psmi_mq_req_free(req);
+
+		if (unlikely(ret < 0)) {
+			*count = ret;
+			return PSM2_INTERNAL_ERR;
+		} else if (ret == 0) {
+			continue;
+		}
+
+		*count = *count + 1;
+
+		if (ret > 1)
+			break;
+	}
+	return PSM2_OK;
+}
+PSMI_API_DECL(psm2_mq_ipeek_dequeue_multi)
 
 psm2_error_t __psm2_mq_ipeek_dequeue(psm2_mq_t mq, psm2_mq_req_t *oreq)
 {

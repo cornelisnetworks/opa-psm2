@@ -56,15 +56,16 @@
 #define __PSM2_HAL_H__
 
 #include "psm_user.h"
-#include "ptl_ips/ips_proto_header.h" /* Needed for decl of struct ips_message_header. */
 
-/* Fwd decl of structs: */
+/* Forward declaration of PSM structs: */
 struct ips_subcontext_ureg;
 struct ips_recvhdrq_event;
 struct ips_writehdrq;
 struct ips_flow;
 struct ips_scb;
 struct ips_tid_session_list_tag;
+struct ips_epinfo;
+struct ips_message_header;
 
 /* Declare types: */
 typedef enum
@@ -234,6 +235,12 @@ typedef enum
 #define PSM_HAL_GET_SC_CL_Q_RX_EGR_Q(SC) ((SC)*2 + PSM_HAL_CL_Q_RX_EGR_Q_SC_0)
 } psmi_hal_cl_q;
 
+#define PSM_HAL_MAX_SHARED_CTXTS 8
+
+#define PSM_HAL_ALG_ACROSS     0
+#define PSM_HAL_ALG_WITHIN     1
+#define PSM_HAL_ALG_ACROSS_ALL 2
+
 typedef enum
 {
 	PSM_HAL_EXP   = 0,
@@ -251,7 +258,7 @@ typedef enum
 #define PSM_HAL_BUF_GPU_MEM  1
 #endif
 
-struct PSM_HAL_sdma_req_info {
+struct psm_hal_sdma_req_info {
 	/*
 	 * bits 0-3 - version (currently used only for GPU direct)
 	 *               1 - user space is NOT using flags field
@@ -283,6 +290,9 @@ struct PSM_HAL_sdma_req_info {
 	 * Buffer flags for this request. See HFI1_BUF_*
 	 */
 	__u16 flags;
+	/* The extra bytes for the PSM_CUDA version of the sdma req info
+	 * struct is the size of the flags member. */
+#define PSM_HAL_CUDA_SDMA_REQ_INFO_EXTRA sizeof(__u16)
 #endif
 } __attribute__((packed));
 
@@ -293,6 +303,8 @@ typedef enum {
 	PSM_HAL_SDMA_RING_COMPLETE  = 2,
 	PSM_HAL_SDMA_RING_ERROR     = 3,
 } psmi_hal_sdma_ring_slot_status;
+
+typedef uint64_t psmi_hal_raw_rhf_t;
 
 typedef struct psmi_hal_rhf_
 {
@@ -359,6 +371,12 @@ typedef enum {
 	PSM_HAL_RHF_RX_TYPE_NON_KD   = 2,
 	PSM_HAL_RHF_RX_TYPE_ERROR    = 3
 } psmi_hal_rhf_rx_type;
+
+struct psm_hal_pbc {
+	__u32 pbc0;
+	__u16 PbcStaticRateControlCnt;
+	__u16 fill1;
+};
 
 typedef enum {
 	PSMI_HAL_POLL_TYPE_URGENT = 1
@@ -449,7 +467,7 @@ struct _psmi_hal_instance
 			      uint64_t tidlist, uint32_t *tidcnt,
 			      uint16_t flags);
 	/* Initiate a DMA.  Intrinsically specifies a DMA slot to use. */
-	int (*hfp_writev)(const struct iovec *iov, int iovcnt, psmi_hal_hw_context);
+	int (*hfp_writev)(const struct iovec *iov, int iovcnt, struct ips_epinfo *, psmi_hal_hw_context);
 	/* Updates PSM from h/w on DMA completions: */
 	int (*hfp_get_sdma_ring_slot_status)(int slotIdx, psmi_hal_sdma_ring_slot_status *, uint32_t *errorCode, psmi_hal_hw_context);
 	/* Returns > 0 if the specified slots is available.  0 if not available
@@ -515,7 +533,7 @@ struct _psmi_hal_instance
 
 	/* Set PBC struct that lies within the extended memory region of SCB */
 	int (*hfp_set_pbc)(struct ips_proto *proto, struct ips_flow *flow,
-			   uint32_t isCtrlMsg, struct hfi_pbc *dest, uint32_t hdrlen,
+			   uint32_t isCtrlMsg, struct psm_hal_pbc *dest, uint32_t hdrlen,
 			   uint32_t paylen);
 
 
@@ -609,9 +627,9 @@ struct _psmi_hal_instance
 
 	uint16_t (*hfp_get_user_minor_bldtime_version) (void);
 
-	uint16_t (*hfp_get_user_major_runtime_version) (void);
+	uint16_t (*hfp_get_user_major_runtime_version) (psmi_hal_hw_context);
 
-	uint16_t (*hfp_get_user_minor_runtime_version) (void);
+	uint16_t (*hfp_get_user_minor_runtime_version) (psmi_hal_hw_context);
 
 	int (*hfp_set_pio_size)(uint32_t, psmi_hal_hw_context);
 
@@ -622,7 +640,7 @@ struct _psmi_hal_instance
 	int (*hfp_spio_fini)(void **ctrl, psmi_hal_hw_context);
 
 	int (*hfp_spio_transfer_frame)(struct ips_proto *proto,
-				       struct ips_flow *flow, struct hfi_pbc *pbc,
+				       struct ips_flow *flow, struct psm_hal_pbc *pbc,
 				       uint32_t *payload, uint32_t length,
 				       uint32_t isCtrlMsg, uint32_t cksum_valid,
 				       uint32_t cksum, psmi_hal_hw_context
@@ -640,7 +658,6 @@ struct _psmi_hal_instance
 	int      (*hfp_get_hfi_type)(psmi_hal_hw_context);
 	int      (*hfp_get_jkey)(psmi_hal_hw_context);
 	int      (*hfp_get_lid)(psmi_hal_hw_context);
-	int      (*hfp_get_mtu)(psmi_hal_hw_context);
 	int      (*hfp_get_pio_size)(psmi_hal_hw_context);
 	int      (*hfp_get_port_num)(psmi_hal_hw_context);
 	int      (*hfp_get_rx_egr_tid_cnt)(psmi_hal_hw_context);
@@ -682,35 +699,40 @@ Is intentionally left out as it is called during initialization,
 and the results are cached in the hw params.
 */
 
-
-#ifdef PSM_DEBUG
-#define PSMI_HAL_INIT_GUARD() (!psmi_hal_current_hal_instance)
-#else
-#define PSMI_HAL_INIT_GUARD() (0)
-#endif
-
 #include "psm2_hal_inlines_d.h"
 
 #if PSMI_HAL_INST_CNT == 1
 
-#define PSMI_HAL_DISPATCH_(KERNEL,TYPE,...) ( PSMI_HAL_INIT_GUARD() ?	\
-					       ((TYPE)(-PSM_HAL_ERROR_NOT_INITIALIZED)) :	\
-					      PSMI_HAL_CAT_INL_SYM(KERNEL) ( __VA_ARGS__ ) )
+#define PSMI_HAL_DISPATCH(KERNEL,...)    ( PSMI_HAL_CAT_INL_SYM(KERNEL) ( __VA_ARGS__ ) )
+
+#define PSMI_HAL_DISPATCH_PI(KERNEL,...) PSMI_HAL_DISPATCH(KERNEL , ##__VA_ARGS__ )
 
 #else
 
-#define PSMI_HAL_DISPATCH_(KERNEL,TYPE,...) ( PSMI_HAL_INIT_GUARD() ?	\
-					       ((TYPE)(-PSM_HAL_ERROR_NOT_INITIALIZED)) :	\
-					      (psmi_hal_current_hal_instance->hfp_ ## KERNEL ( __VA_ARGS__ )))
+enum psmi_hal_pre_init_func_krnls
+{
+	psmi_hal_pre_init_func_get_num_units,
+	psmi_hal_pre_init_func_get_num_ports,
+	psmi_hal_pre_init_func_get_unit_active,
+	psmi_hal_pre_init_func_get_port_active,
+	psmi_hal_pre_init_func_get_num_contexts,
+	psmi_hal_pre_init_func_get_num_free_contexts,
+};
+
+int psmi_hal_pre_init_func(enum psmi_hal_pre_init_func_krnls k, ...);
+
+#define PSMI_HAL_DISPATCH(KERNEL,...)    ( psmi_hal_current_hal_instance->hfp_ ## KERNEL ( __VA_ARGS__ ))
+
+#define PSMI_HAL_DISPATCH_PI(KERNEL,...) ( psmi_hal_pre_init_func(psmi_hal_pre_init_func_ ## KERNEL , ##__VA_ARGS__ ) )
 
 #endif
 
-#define PSMI_HAL_DISPATCH(K,...) PSMI_HAL_DISPATCH_(K,int,__VA_ARGS__)
-
-#define psmi_hal_get_unit_active(...)				PSMI_HAL_DISPATCH(get_unit_active,__VA_ARGS__)
-#define psmi_hal_get_port_active(...)				PSMI_HAL_DISPATCH(get_port_active,__VA_ARGS__)
-#define psmi_hal_get_num_contexts(...)				PSMI_HAL_DISPATCH(get_num_contexts,__VA_ARGS__)
-#define psmi_hal_get_num_free_contexts(...)			PSMI_HAL_DISPATCH(get_num_free_contexts,__VA_ARGS__)
+#define psmi_hal_get_num_units_(...)				PSMI_HAL_DISPATCH_PI(get_num_units,__VA_ARGS__)
+#define psmi_hal_get_num_ports_(...)				PSMI_HAL_DISPATCH_PI(get_num_ports,##__VA_ARGS__)
+#define psmi_hal_get_unit_active(...)				PSMI_HAL_DISPATCH_PI(get_unit_active,__VA_ARGS__)
+#define psmi_hal_get_port_active(...)				PSMI_HAL_DISPATCH_PI(get_port_active,__VA_ARGS__)
+#define psmi_hal_get_num_contexts(...)				PSMI_HAL_DISPATCH_PI(get_num_contexts,__VA_ARGS__)
+#define psmi_hal_get_num_free_contexts(...)			PSMI_HAL_DISPATCH_PI(get_num_free_contexts,__VA_ARGS__)
 #define psmi_hal_context_open(...)				PSMI_HAL_DISPATCH(context_open,__VA_ARGS__)
 #define psmi_hal_close_context(...)				PSMI_HAL_DISPATCH(close_context,__VA_ARGS__)
 #define psmi_hal_get_port_index2pkey(...)			PSMI_HAL_DISPATCH(get_port_index2pkey,__VA_ARGS__)
@@ -736,7 +758,7 @@ and the results are cached in the hw params.
 #define psmi_hal_set_cl_q_tail_index(...)			PSMI_HAL_DISPATCH(set_cl_q_tail_index,__VA_ARGS__)
 #define psmi_hal_cl_q_empty(...)				PSMI_HAL_DISPATCH(cl_q_empty,__VA_ARGS__)
 #define psmi_hal_get_receive_event(...)				PSMI_HAL_DISPATCH(get_receive_event,__VA_ARGS__)
-#define psmi_hal_get_egr_buff(...)				PSMI_HAL_DISPATCH_(get_egr_buff,void*,__VA_ARGS__)
+#define psmi_hal_get_egr_buff(...)				PSMI_HAL_DISPATCH(get_egr_buff,__VA_ARGS__)
 #define psmi_hal_retire_hdr_q_entry(...)			PSMI_HAL_DISPATCH(retire_hdr_q_entry,__VA_ARGS__)
 #define psmi_hal_get_rhf_expected_sequence_number(...)		PSMI_HAL_DISPATCH(get_rhf_expected_sequence_number,__VA_ARGS__)
 #define psmi_hal_set_rhf_expected_sequence_number(...)		PSMI_HAL_DISPATCH(set_rhf_expected_sequence_number,__VA_ARGS__)
@@ -778,12 +800,11 @@ and the results are cached in the hw params.
 #define psmi_hal_get_node_id(...)				PSMI_HAL_DISPATCH(get_node_id,__VA_ARGS__)
 #define psmi_hal_get_bthqp(...)					PSMI_HAL_DISPATCH(get_bthqp,__VA_ARGS__)
 #define psmi_hal_get_context(...)				PSMI_HAL_DISPATCH(get_context,__VA_ARGS__)
-#define psmi_hal_get_gid_lo(...)				PSMI_HAL_DISPATCH_(get_gid_lo,uint64_t,__VA_ARGS__)
-#define psmi_hal_get_gid_hi(...)				PSMI_HAL_DISPATCH_(get_gid_hi,uint64_t,__VA_ARGS__)
+#define psmi_hal_get_gid_lo(...)				PSMI_HAL_DISPATCH(get_gid_lo,__VA_ARGS__)
+#define psmi_hal_get_gid_hi(...)				PSMI_HAL_DISPATCH(get_gid_hi,__VA_ARGS__)
 #define psmi_hal_get_hfi_type(...)				PSMI_HAL_DISPATCH(get_hfi_type,__VA_ARGS__)
 #define psmi_hal_get_jkey(...)					PSMI_HAL_DISPATCH(get_jkey,__VA_ARGS__)
 #define psmi_hal_get_lid(...)					PSMI_HAL_DISPATCH(get_lid,__VA_ARGS__)
-#define psmi_hal_get_mtu(...)					PSMI_HAL_DISPATCH(get_mtu,__VA_ARGS__)
 #define psmi_hal_get_pio_size(...)				PSMI_HAL_DISPATCH(get_pio_size,__VA_ARGS__)
 #define psmi_hal_get_port_num(...)				PSMI_HAL_DISPATCH(get_port_num,__VA_ARGS__)
 #define psmi_hal_get_rx_egr_tid_cnt(...)			PSMI_HAL_DISPATCH(get_rx_egr_tid_cnt,__VA_ARGS__)

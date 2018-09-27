@@ -57,7 +57,7 @@ this_srcdir = $(shell readlink -m .)
 top_srcdir := $(this_srcdir)/..
 INCLUDES += -I$(top_srcdir) -I$(top_srcdir)/ptl_ips
 
-${TARGLIB}-objs := ptl.o ptl_rcvthread.o ips_proto.o ipserror.o ips_recvq.o \
+${TARGLIB}-objs := ptl.o ptl_rcvthread.o ips_proto.o ips_recvq.o \
 		   ips_recvhdrq.o ips_proto_recv.o ips_proto_connect.o \
 		   ips_proto_dump.o ips_proto_mq.o \
 		   ips_writehdrq.o ips_proto_expected.o ips_tid.o \

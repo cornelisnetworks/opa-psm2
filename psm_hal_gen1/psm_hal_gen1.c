@@ -55,7 +55,8 @@
 #include "psm2_hal.h"
 
 #if PSMI_HAL_INST_CNT > 1
-#include "psm_hal_inline_d.h"
+#define PSMI_HAL_CAT_INL_SYM(KERNEL) hfp_gen1_ ## KERNEL
+#include "psm2_hal_inline_t.h"
 #include "psm_hal_inline_i.h"
 #endif
 
@@ -100,7 +101,6 @@ static hfp_gen1_t psm_gen1_hi = {
 		.hfp_get_hw_status_freezemsg		  = hfp_gen1_get_hw_status_freezemsg,
 		.hfp_get_jkey				  = hfp_gen1_get_jkey,
 		.hfp_get_lid				  = hfp_gen1_get_lid,
-		.hfp_get_mtu				  = hfp_gen1_get_mtu,
 		.hfp_get_node_id			  = hfp_gen1_get_node_id,
 		.hfp_get_num_contexts			  = hfp_gen1_get_num_contexts,
 		.hfp_get_num_free_contexts		  = hfp_gen1_get_num_free_contexts,

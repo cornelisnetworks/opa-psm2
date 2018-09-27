@@ -51,6 +51,7 @@
 
 */
 
+#include <stdlib.h>
 #include "../psm2.h"
 #include "../psm2_mq.h"
 #include "../psm2_am.h"

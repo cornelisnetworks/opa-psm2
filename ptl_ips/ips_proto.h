@@ -88,6 +88,7 @@ struct ips_epinfo {
 	uint16_t ep_hfi_type;
 	uint16_t ep_sl;		/* HFI_SL only when path record not used */
 	uint16_t ep_mtu;
+	uint16_t ep_mtu_code;
 	uint16_t ep_piosize;
 	uint16_t ep_pkey;	/* PSM2_PKEY only when path record not used */
 	uint16_t ep_jkey;
@@ -415,7 +416,7 @@ struct ips_proto {
 	CUstream cudastream_send;
 	unsigned cuda_prefetch_limit;
 #endif
-	int ips_extra_sdmahdr_size;
+
 /*
  * Control message queue for pending messages.
  *
@@ -673,9 +674,12 @@ psm2_error_t ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t epaddr,
 			      const void *ubuf, uint32_t len);
 
 psm2_error_t ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t epaddr,
-			       uint32_t flags, psm2_mq_tag_t *tag,
-			       const void *ubuf, uint32_t len, void *context,
-			       psm2_mq_req_t *req_o);
+				uint32_t flags_user, uint32_t flags_internal,
+				psm2_mq_tag_t *tag, const void *ubuf, uint32_t len,
+				void *context, psm2_mq_req_t *req_o);
+
+psm2_error_t ips_proto_msg_size_thresh_query (enum psm2_info_query_thresh_et,
+					      uint32_t *out, psm2_mq_t mq, psm2_epaddr_t);
 
 int ips_proto_am(struct ips_recvhdrq_event *rcv_ev);
 
@@ -697,14 +701,20 @@ MOCK_DCL_EPILOGUE(ips_ibta_init);
 psm2_error_t ips_ibta_fini(struct ips_proto *proto);
 
 PSMI_ALWAYS_INLINE(
-void* psmi_get_sdma_req_info(struct ips_scb *scb, int sdmahdr_extra_bytes))
+struct psm_hal_sdma_req_info *
+psmi_get_sdma_req_info(struct ips_scb *scb, size_t *extra))
 {
+	*extra = 0;
 #ifdef PSM_CUDA
-	if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
-		return (void *)(((char*)&scb->pbc) - sizeof(struct sdma_req_info_v6_3) -
-				  sdmahdr_extra_bytes);
+	if (!PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
+		return (void *)(((char *)&scb->pbc) -
+				(sizeof(struct psm_hal_sdma_req_info) -
+				 PSM_HAL_CUDA_SDMA_REQ_INFO_EXTRA));
+
+	*extra = PSM_HAL_CUDA_SDMA_REQ_INFO_EXTRA;
 #endif
-	return (void *)(((char*)&scb->pbc) - sizeof(struct sdma_req_info_v6_3));
+
+	return (void *)(((char *)&scb->pbc) - (sizeof(struct psm_hal_sdma_req_info)));
 }
 
 #ifdef PSM_CUDA

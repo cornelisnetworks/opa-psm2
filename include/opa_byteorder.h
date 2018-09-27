@@ -60,6 +60,7 @@
 extern "C" {
 #endif
 
+#include <linux/types.h>
 #include <sys/param.h>
 #include <endian.h>
 

@@ -55,7 +55,6 @@
 
 #include "psm_user.h"
 #include "psm2_hal.h"
-#include "ipserror.h"
 #include "ips_proto.h"
 #include "ips_expected_proto.h"
 #include "ips_tidflow.h"

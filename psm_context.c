@@ -545,7 +545,6 @@ psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 	int ctxt          = psmi_hal_get_context(context->psm_hw_ctxt);
 	int subctxt       = psmi_hal_get_subctxt(context->psm_hw_ctxt);
 	uint32_t hfi_type = psmi_hal_get_hfi_type(context->psm_hw_ctxt);
-	ep->mtu           = psmi_hal_get_mtu(context->psm_hw_ctxt);
 	context->ep       = (psm2_ep_t) ep;
 
 	/* Construct epid for this Endpoint */
