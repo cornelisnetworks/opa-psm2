@@ -243,35 +243,25 @@ static struct _psmi_hal_instance *psmi_hal_get_pi_inst(int *pnumunits,
 		    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
 		    (union psmi_envvar_val)PSM_HAL_INSTANCE_ANY_GEN, &env_hi_pref);
 
-	int wait; /* loop control variable */
-	/* Optimization note:
-	   The following code attempts to initialize two different times:
-	   First time assumes that the driver is already up, and so it attempts to
-	   initialize with the loop control variable: wait, set to 0.
-	   The second time, when wait is set to 1, waits for the driver to come up.
-	   (When the parameter to: hfp_get_num_units() call below is 0,
-	   hfp_get_num_units() does not wait for the driver to come up.
-	   When the parameter is non-zero, the hfp_get_num_units() call below,
-	   will wait for the driver to come up.) */
-	for (wait=0;wait <= 1;wait++)
+	int wait = 0;
+	/* The hfp_get_num_units() call below, will not wait for the HFI driver
+	   to come up and create device nodes in /dev/.) */
+	struct _psmi_hal_instance *p;
+	SLIST_FOREACH(p, &head_hi, next_hi)
 	{
-		struct _psmi_hal_instance *p;
-		SLIST_FOREACH(p, &head_hi, next_hi)
+		if ((env_hi_pref.e_int == PSM_HAL_INSTANCE_ANY_GEN) ||
+		    (p->type == env_hi_pref.e_int))
 		{
-			if ((env_hi_pref.e_int == PSM_HAL_INSTANCE_ANY_GEN) ||
-			    (p->type           == env_hi_pref.e_int))
+			int nunits = p->hfp_get_num_units(wait);
+			int nports = p->hfp_get_num_ports();
+			int dflt_pkey = p->hfp_get_default_pkey();
+			if (nunits > 0 && nports > 0 && dflt_pkey > 0)
 			{
-				int nunits = p->hfp_get_num_units(wait);
-				int nports = p->hfp_get_num_ports();
-				int dflt_pkey = p->hfp_get_default_pkey();
-				if (nunits > 0 && nports > 0 && dflt_pkey > 0)
-				{
-					sysfs_init(p->hfi_sys_class_path);
-					*pnumunits = nunits;
-					*pnumports = nports;
-					*pdflt_pkey = dflt_pkey;
-					return p;
-				}
+				sysfs_init(p->hfi_sys_class_path);
+				*pnumunits = nunits;
+				*pnumports = nports;
+				*pdflt_pkey = dflt_pkey;
+				return p;
 			}
 		}
 	}
