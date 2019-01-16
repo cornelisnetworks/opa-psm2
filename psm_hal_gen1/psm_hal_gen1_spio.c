@@ -677,7 +677,7 @@ ips_spio_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 	volatile uint64_t *pioaddr;
 	uint32_t paylen, nblks;
 	psm2_error_t err = PSM2_OK;
-	int do_lock = psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
+	int do_lock = psmi_hal_has_sw_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
 
 	if (do_lock)
 		pthread_spin_lock(&ctrl->spio_lock);

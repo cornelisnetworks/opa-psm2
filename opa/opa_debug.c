@@ -76,6 +76,7 @@ static void init_hfi_mylabel(void) __attribute__ ((constructor));
 static void init_hfi_backtrace(void) __attribute__ ((constructor));
 static void init_hfi_dbgfile(void) __attribute__ ((constructor));
 static void fini_hfi_backtrace(void) __attribute__ ((destructor));
+static void fini_hfi_mylabel(void) __attribute__ ((destructor));
 static struct sigaction SIGSEGV_old_act;
 static struct sigaction SIGBUS_old_act;
 static struct sigaction SIGILL_old_act;
@@ -158,6 +159,12 @@ static void init_hfi_mylabel(void)
 	if (lbl[0] == '\0')
 		snprintf(lbl, 1024, "%s.%u", hostname, getpid());
 	__hfi_mylabel = strdup(lbl);
+}
+
+static void fini_hfi_mylabel(void)
+{
+	if(__hfi_mylabel != NULL)
+		free(__hfi_mylabel);
 }
 
 /* FIXME: This signal handler does not conform to the posix standards described

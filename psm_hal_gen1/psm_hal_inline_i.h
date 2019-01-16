@@ -178,6 +178,7 @@ static PSMI_HAL_INLINE int hfp_gen1_close_context(psmi_hal_hw_context *ctxtp)
 	}
 
 	close(psm_hw_ctxt->ctrl->fd);
+	free(psm_hw_ctxt->ctrl);
 	psmi_free(psm_hw_ctxt);
 
 	return PSM_HAL_ERROR_OK;
@@ -736,6 +737,7 @@ static PSMI_HAL_INLINE int hfp_gen1_context_open(int unit,
 	return PSM_HAL_ERROR_OK;
 
 bail:
+	free(pc_private->ctrl);
 	psmi_free(pc_private);
 	return -PSM_HAL_ERROR_GENERAL_ERROR;
 }
@@ -1367,7 +1369,7 @@ static PSMI_HAL_INLINE int hfp_gen1_tidflow_check_update_pkt_seq(void *vpprotoex
 	struct ips_protoexp *protoexp = (struct ips_protoexp *) vpprotoexp;
 	struct ips_tid_recv_desc *tidrecvc = (struct ips_tid_recv_desc *) vptidrecvc;
 
-	if_pf(protoexp->tid_flags & IPS_PROTOEXP_FLAG_HDR_SUPP) {
+	if_pf(psmi_hal_has_sw_status(PSM_HAL_HDRSUPP_ENABLED)) {
 		/* Drop packet if generation number does not match. There
 		 * is a window that before we program the hardware tidflow
 		 * table with new gen/seq, hardware might receive some

@@ -227,7 +227,6 @@
 #endif
 
 #define IPS_PROTOEXP_FLAG_ENABLED	     0x01	/* default */
-#define IPS_PROTOEXP_FLAG_HDR_SUPP           0x02	/* Header suppression enabled */
 #define IPS_PROTOEXP_FLAG_TID_DEBUG	     0x04	/* *not* default */
 #define IPS_PROTOEXP_FLAG_RTS_CTS_INTERLEAVE 0x08	/* Interleave RTS handling. */
 #define IPS_PROTOEXP_FLAG_CTS_SERIALIZED 0x10	/* CTS serialized */

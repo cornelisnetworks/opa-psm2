@@ -141,7 +141,7 @@ int psmi_cuda_lib_load()
 	PSM2_LOG_MSG("entering");
 	_HFI_VDBG("Loading CUDA library.\n");
 
-	psmi_cuda_lib = dlopen("libcuda.so", RTLD_LAZY);
+	psmi_cuda_lib = dlopen("libcuda.so.1", RTLD_LAZY);
 	if (!psmi_cuda_lib) {
 		dlerr = dlerror();
 		_HFI_ERROR("Unable to open libcuda.so.  Error %s\n",
@@ -196,7 +196,7 @@ int psmi_cuda_lib_load()
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDevicePrimaryCtxRelease);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuCtxGetDevice);
 
-	psmi_nvml_lib = dlopen("libnvidia-ml.so", RTLD_LAZY);
+	psmi_nvml_lib = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
 	if (!psmi_nvml_lib) {
 		dlerr = dlerror();
 		_HFI_ERROR("Unable to open libnvidia-ml.so.  Error %s\n",

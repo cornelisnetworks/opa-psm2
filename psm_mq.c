@@ -1227,7 +1227,7 @@ psm2_error_t __psm2_mq_ipeek_dequeue_multi(psm2_mq_t mq, void *status_array,
 		PSMI_UNLOCK(mq->progress_lock);
 
 		ret = status_copy(&req->req_data, status_array, *count);
-		psmi_mq_req_free(req);
+		psm2_mq_req_free(mq, req);
 
 		if (unlikely(ret < 0)) {
 			*count = ret;

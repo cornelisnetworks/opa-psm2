@@ -127,8 +127,8 @@ psm2_error_t ips_ptl_rcvthread_init(ptl_t *ptl_gen, struct ips_recvhdrq *recvq)
 		PSMI_CUDA_CALL(cuCtxGetCurrent, &ctxt);
 #endif
 
-	if (psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RTS_RX_THREAD) &&
-	    (!psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED))){
+	if (psmi_hal_has_sw_status(PSM_HAL_PSMI_RUNTIME_RTS_RX_THREAD) &&
+	    (!psmi_hal_has_sw_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED))){
 
 		if ((err = rcvthread_initsched(rcvc)))
 			goto fail;
@@ -141,7 +141,7 @@ psm2_error_t ips_ptl_rcvthread_init(ptl_t *ptl_gen, struct ips_recvhdrq *recvq)
 			goto fail;
 		}
 
-		psmi_hal_add_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
+		psmi_hal_add_sw_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
 		if (pthread_create(&rcvc->hdrq_threadid, NULL,
 				   ips_ptl_pollintr, ptl->rcvthread)) {
 			close(rcvc->pipefd[0]);
@@ -173,7 +173,7 @@ psm2_error_t ips_ptl_rcvthread_fini(ptl_t *ptl_gen)
 	if (ptl->rcvthread == NULL)
 		return err;
 
-	if (rcvc->hdrq_threadid && psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED)) {
+	if (rcvc->hdrq_threadid && psmi_hal_has_sw_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED)) {
 		t_now = get_cycles();
 
 		/* Disable interrupts then kill the receive thread */
@@ -195,7 +195,7 @@ psm2_error_t ips_ptl_rcvthread_fini(ptl_t *ptl_gen)
 			    ("unable to close pipe to receive thread cleanly\n");
 		}
 		pthread_join(rcvc->hdrq_threadid, NULL);
-		psmi_hal_sub_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
+		psmi_hal_sub_sw_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
 		rcvc->hdrq_threadid = 0;
 		if (_HFI_PRDBG_ON) {
 			_HFI_PRDBG_ALWAYS
@@ -216,7 +216,7 @@ void ips_ptl_rcvthread_transfer_ownership(ptl_t *from_ptl_gen, ptl_t *to_ptl_gen
 {
 	struct ptl_rcvthread *rcvc;
 
-	psmi_hal_sub_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
+	psmi_hal_sub_sw_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
 	struct ptl_ips *from_ptl = (struct ptl_ips *)from_ptl_gen;
 	struct ptl_ips *to_ptl   = (struct ptl_ips *)to_ptl_gen;
 	to_ptl->rcvthread = from_ptl->rcvthread;
@@ -354,7 +354,7 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 	PSM2_LOG_MSG("entering");
 	/* No reason to have many of these, keep this as a backup in case the
 	 * recvhdrq init function is misused */
-	psmi_assert_always(psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED));
+	psmi_assert_always(psmi_hal_has_sw_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED));
 
 	/* Switch driver to a mode where it can interrupt on urgent packets */
 	if (psmi_context_interrupt_set((psmi_context_t *)
@@ -500,7 +500,7 @@ static psm2_error_t rcvthread_initstats(ptl_t *ptl_gen)
 
 	/* If we don't want a thread, make sure we still initialize the counters
 	 * but set them to NaN instead */
-	if (!psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED)) {
+	if (!psmi_hal_has_sw_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED)) {
 		int i;
 		static uint64_t ctr_nan = MPSPAWN_NAN;
 		for (i = 0; i < (int)PSMI_STATS_HOWMANY(entries); i++) {

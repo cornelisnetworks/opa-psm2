@@ -475,7 +475,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 
 	/* If progress thread is enabled, set the proto flag */
 	{
-		if (psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RTS_RX_THREAD))
+		if (psmi_hal_has_sw_status(PSM_HAL_PSMI_RUNTIME_RTS_RX_THREAD))
 			proto->flags |= IPS_PROTO_FLAG_RCVTHREAD;
 	}
 

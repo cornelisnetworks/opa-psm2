@@ -136,19 +136,6 @@ MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 	protoexp->timerq = proto->timerq;
 	srand48_r((long int) getpid(), &protoexp->tidflow_drand48_data);
 	protoexp->tid_flags = protoexp_flags;
-	if (psmi_hal_has_cap(PSM_HAL_CAP_HDRSUPP)) {
-		union psmi_envvar_val env_hdrsupp;
-
-		psmi_getenv("PSM2_HDRSUPP",
-			"header suppression(0 disables it)",
-			PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
-			(union psmi_envvar_val)1, &env_hdrsupp);
-		if (env_hdrsupp.e_uint)
-			protoexp->tid_flags |= IPS_PROTOEXP_FLAG_HDR_SUPP;
-		else
-			/* user wants to turn off header suppression */
-		  psmi_hal_set_tf_valid(0, context->psm_hw_ctxt);
-	}
 
 	if (context->ep->memmode == PSMI_MEMMODE_MINIMAL) {
 		protoexp->tid_flags |= IPS_PROTOEXP_FLAG_CTS_SERIALIZED;

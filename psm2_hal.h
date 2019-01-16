@@ -164,6 +164,8 @@ typedef enum
 	/* Rx thread is started. */
 	PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED	= (1UL <<  1),
 	PSM_HAL_PSMI_RUNTIME_INTR_ENABLED       = (1UL <<  2),
+	/* Header suppression is enabled: */
+	PSM_HAL_HDRSUPP_ENABLED                 = (1UL <<  3),
 } psmi_hal_sw_status;
 
 /* The _psmi_hal_params structure stores values that remain constant for the entire life of
@@ -870,9 +872,9 @@ int psmi_hal_pre_init_func(enum psmi_hal_pre_init_func_krnls k, ...);
 
 #define psmi_hal_get_sw_status()				psmi_hal_current_hal_instance->params.sw_status
 #define psmi_hal_set_sw_status(NEW_STATUS)			(psmi_hal_current_hal_instance->params.sw_status = (NEW_STATUS))
-#define psmi_hal_add_status(STATUS)				(psmi_hal_current_hal_instance->params.sw_status |= (STATUS))
-#define psmi_hal_sub_status(STATUS)				(psmi_hal_current_hal_instance->params.sw_status &= (~(STATUS)))
-#define psmi_hal_has_status(STATUS)				((psmi_hal_get_sw_status() & (STATUS)) == (STATUS))
+#define psmi_hal_add_sw_status(STATUS)				(psmi_hal_current_hal_instance->params.sw_status |= (STATUS))
+#define psmi_hal_sub_sw_status(STATUS)				(psmi_hal_current_hal_instance->params.sw_status &= (~(STATUS)))
+#define psmi_hal_has_sw_status(STATUS)				((psmi_hal_get_sw_status() & (STATUS)) == (STATUS))
 
 
 #include "psm2_hal_inlines_i.h"

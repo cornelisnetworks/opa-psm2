@@ -520,7 +520,7 @@ static
 uint32_t
 ips_ptl_rcvthread_is_enabled(const ptl_t *ptl)
 {
-	return psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
+	return psmi_hal_has_sw_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
 }
 
 psm2_error_t ips_ptl_poll(ptl_t *ptl_gen, int _ignored)
@@ -528,7 +528,7 @@ psm2_error_t ips_ptl_poll(ptl_t *ptl_gen, int _ignored)
 	struct ptl_ips *ptl = (struct ptl_ips *)ptl_gen;
 	const uint64_t current_count = get_cycles();
 	const int do_lock = PSMI_LOCK_DISABLED &&
-		psmi_hal_has_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
+		psmi_hal_has_sw_status(PSM_HAL_PSMI_RUNTIME_RX_THREAD_STARTED);
 	psm2_error_t err = PSM2_OK_NO_PROGRESS;
 	psm2_error_t err2;
 

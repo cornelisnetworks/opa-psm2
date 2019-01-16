@@ -488,9 +488,7 @@ psm2_error_t psmi_shm_map_remote(ptl_t *ptl_gen, psm2_epid_t epid, uint16_t *shm
 	action_stash.addr = dest_mapptr;
 	action_stash.len = segsz;
 
-	struct sigaction act;
-	act.sa_sigaction = amsh_mmap_fault;
-	act.sa_flags = SA_SIGINFO;
+	struct sigaction act = { .sa_sigaction = amsh_mmap_fault, .sa_flags = SA_SIGINFO };
 
 	sigaction(SIGSEGV, &act, &action_stash.SIGSEGV_old_act);
 	sigaction(SIGBUS, &act, &action_stash.SIGBUS_old_act);

@@ -289,6 +289,22 @@ int psmi_hal_initialize(void)
 		p->params.num_ports = nports;
 		p->params.default_pkey = dflt_pkey;
 		psmi_hal_current_hal_instance = p;
+
+		if (psmi_hal_has_cap(PSM_HAL_CAP_HDRSUPP)) {
+			union psmi_envvar_val env_hdrsupp;
+
+			psmi_getenv("PSM2_HDRSUPP",
+				    "Receive header suppression. Default is 1 (enabled),"
+				    	" 0 to disable.\n",
+				    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
+				    (union psmi_envvar_val)1, &env_hdrsupp);
+			if (env_hdrsupp.e_uint)
+				psmi_hal_add_sw_status(PSM_HAL_HDRSUPP_ENABLED);
+			else
+				/* user wants to disable header suppression */
+				psmi_hal_set_tf_valid(0, p);
+		}
+
 		return rv;
 	}
 	return -PSM_HAL_ERROR_INIT_FAILED;
