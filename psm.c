@@ -196,24 +196,11 @@ int psmi_cuda_lib_load()
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDevicePrimaryCtxRelease);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuCtxGetDevice);
 
-	psmi_nvml_lib = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
-	if (!psmi_nvml_lib) {
-		dlerr = dlerror();
-		_HFI_ERROR("Unable to open libnvidia-ml.so.  Error %s\n",
-				dlerr ? dlerr : "no dlerror()");
-		goto fail;
-	}
-	PSMI_CUDA_DLSYM(psmi_nvml_lib, nvmlInit);
-	PSMI_CUDA_DLSYM(psmi_nvml_lib, nvmlDeviceGetHandleByIndex);
-	PSMI_CUDA_DLSYM(psmi_nvml_lib, nvmlDeviceGetBAR1MemoryInfo);
-
 	PSM2_LOG_MSG("leaving");
 	return err;
 fail:
 	if (psmi_cuda_lib)
 		dlclose(psmi_cuda_lib);
-	if (psmi_nvml_lib)
-		dlclose(psmi_nvml_lib);
 	err = psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR, "Unable to load CUDA library.\n");
 	return err;
 }
@@ -324,8 +311,6 @@ int psmi_cuda_initialize()
 
 	if (gdr_copy_threshold_recv < 8)
 		gdr_copy_threshold_recv = GDR_COPY_THRESH_RECV;
-
-	PSMI_NVML_CALL(nvmlInit);
 
 	PSM2_LOG_MSG("leaving");
 	return err;
