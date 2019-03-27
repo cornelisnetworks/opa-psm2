@@ -86,6 +86,10 @@ Requires: numactl-libs
 %endif
 %endif
 
+%package -n @RPM_NAME@-utils
+Summary: Examples for Intel PSM2
+Requires: %{name}%{?_isa} = %{version}-%{release}
+
 %package -n @RPM_NAME@-devel
 Summary: Development files for Intel PSM2
 Requires: %{name}%{?_isa} = %{version}-%{release}
@@ -123,6 +127,9 @@ family of products. PSM2 users are enabled with mechanisms
 necessary to implement higher level communications
 interfaces in parallel environments.
 
+%description -n @RPM_NAME@-utils
+Example test programs for the librdmacm library.
+
 %description -n @RPM_NAME@-devel
 Intel(R) PSM2, psm2*.h, headers and libpsm2.so files necessary
 for developing software using libpsm2.
@@ -153,6 +160,11 @@ make %{?_smp_mflags}
 %{_libdir}/@TARGLIB@.so.@MAJOR@.@MINOR@
 %{_libdir}/@TARGLIB@.so.@MAJOR@
 @40_PSM_RULES@
+
+%files -n @RPM_NAME@-utils
+%{_bindir}/psm2_bw-mrate
+%{_bindir}/psm2_bi-bw-mrate
+%{_bindir}/psm2_latency
 
 %files -n @RPM_NAME@-devel
 %{_libdir}/@TARGLIB@.so

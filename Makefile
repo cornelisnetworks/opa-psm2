@@ -307,6 +307,11 @@ all: symlinks $(HALDECLFILE) $(HALIMPLFILE) | $(OUTDIR)
 	$(MAKE) -j $(nthreads) $(OUTDIR)/${TARGLIB}.a
 	@mkdir -p $(OUTDIR)/compat
 	$(MAKE) -j $(nthreads) -C compat OUTDIR=$(OUTDIR)/compat
+	@for subdir in perf_test; do \
+		mkdir -p $(OUTDIR)/$$subdir; \
+		$(MAKE) -j $(nthreads) -C $$subdir OUTDIR=$(OUTDIR)/$$subdir; \
+		if [ $$? -ne 0 ]; then exit 1; fi ;\
+	done
 
 $(HALDECLFILE): | $(OUTDIR)
 	@test -f $(HALDECLFILE) || ( \
@@ -336,7 +341,7 @@ $(HALIMPLFILE): | $(OUTDIR)
 %_clean:
 	make OUTDIR=$* clean
 
-clean: cleanlinks
+clean: cleanlinks test_clean
 	rm -rf ${OUTDIR}
 	@if [ -e $(HISTORY) ]; then \
 		grep -v -E "^$(OUTDIR)$$" $(HISTORY) > $(HISTORY)_tmp; \
@@ -374,8 +379,8 @@ debug:
 	$(MAKE) OUTDIR=$(OUTDIR) PSM_DEBUG=1
 
 test_clean:
-	if [ -d ./test ]; then \
-		$(MAKE) -C test clean; \
+	if [ -d ./perf_test ]; then \
+		$(MAKE) -C perf_test clean; \
 	fi
 
 specfile_clean:
@@ -414,6 +419,9 @@ install: all
 	install -m 0644 -D psm2.h ${DESTDIR}/usr/include/psm2.h
 	install -m 0644 -D psm2_mq.h ${DESTDIR}/usr/include/psm2_mq.h
 	install -m 0644 -D psm2_am.h ${DESTDIR}/usr/include/psm2_am.h
+	for prog in latency bi-bw-mrate bw-mrate; do \
+		install -m 0755 -D perf_test/$${prog} ${DESTDIR}/usr/bin/psm2_$${prog}; \
+	done
 ifneq (fedora,${DISTRO})
 	install -m 0644 -D 40-psm.rules ${DESTDIR}$(UDEVDIR)/rules.d/40-psm.rules
 endif

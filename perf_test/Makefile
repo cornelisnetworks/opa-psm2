@@ -49,8 +49,8 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-CFLAGS+=-Wall -g -I.
-LIBS=-lpsm2
+CFLAGS+=-Wall -g -I. -I..
+LIBS=-L../build_release -lpsm2
 
 SRC=$(wildcard *.c)
 OBJS=$(patsubst %.c, %.o, $(SRC))
