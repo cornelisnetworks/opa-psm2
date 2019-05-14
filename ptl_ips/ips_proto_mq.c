@@ -704,6 +704,7 @@ ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags_user,
 
 #ifdef PSM_CUDA
 	req->is_buf_gpu_mem = psmi_cuda_is_buffer_gpu_mem((void*)ubuf);
+	req->cuda_hostbuf_used = 0;
 	if (req->is_buf_gpu_mem) {
 		psmi_cuda_set_attr_sync_memops((void*)ubuf);
 		if (psmi_cuda_is_needed_rendezvous(proto, len))
@@ -1031,6 +1032,7 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 			return err;
 
 #ifdef PSM_CUDA
+		req->cuda_hostbuf_used = 0;
 		if (gpu_mem) {
 			req->is_buf_gpu_mem = 1;
 		} else
