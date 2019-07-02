@@ -246,6 +246,8 @@ int psmi_cuda_initialize()
 	/* Check if all devices support Unified Virtual Addressing. */
 	PSMI_CUDA_CALL(cuDeviceGetCount, &num_devices);
 
+	device_support_gpudirect = 1;
+
 	for (dev = 0; dev < num_devices; dev++) {
 		CUdevice device;
 		PSMI_CUDA_CALL(cuDeviceGet, &device, dev);
@@ -265,9 +267,7 @@ int psmi_cuda_initialize()
 				&major,
 				CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
 				device);
-		if (major >= 3)
-			device_support_gpudirect = 1;
-		else {
+		if (major < 3) {
 			device_support_gpudirect = 0;
 			_HFI_INFO("Device %d does not support GPUDirect RDMA (Non-fatal error) \n", dev);
 		}
