@@ -370,9 +370,7 @@ MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 				psmi_mpool_create_for_cuda(sizeof(struct ips_cuda_hostbuf),
 							   chunksz, max_elements, 0,
 							   UNDEFINED, NULL, NULL,
-							   psmi_cuda_hostbuf_alloc_func,
-							   (void *)
-							   &protoexp->cuda_hostbuf_recv_cfg);
+							   psmi_cuda_hostbuf_alloc_func);
 
 			if (protoexp->cuda_hostbuf_pool_recv == NULL) {
 				err = psmi_handle_error(proto->ep, PSM2_NO_MEMORY,
@@ -386,9 +384,7 @@ MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 				psmi_mpool_create_for_cuda(sizeof(struct ips_cuda_hostbuf),
 							   chunksz, max_elements, 0,
 							   UNDEFINED, NULL, NULL,
-							   psmi_cuda_hostbuf_alloc_func,
-							   (void *)
-							   &protoexp->cuda_hostbuf_small_recv_cfg);
+							   psmi_cuda_hostbuf_alloc_func);
 
 			if (protoexp->cuda_hostbuf_pool_small_recv == NULL) {
 				err = psmi_handle_error(proto->ep, PSM2_NO_MEMORY,

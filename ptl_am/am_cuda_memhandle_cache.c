@@ -82,8 +82,7 @@ am_cuda_memhandle_mpool_init(uint32_t memcache_size)
 					cuda_memhandle_cache_size,
 					cuda_memhandle_cache_size, 0,
 					UNDEFINED, NULL, NULL,
-					psmi_cuda_memhandle_cache_alloc_func,
-					NULL);
+					psmi_cuda_memhandle_cache_alloc_func);
 	if (cuda_memhandle_mpool == NULL) {
 		err = psmi_handle_error(PSMI_EP_NORETURN, PSM2_NO_MEMORY,
 				"Couldn't allocate CUDA host receive buffer pool");
@@ -308,7 +307,7 @@ am_cuda_memhandle_release(CUdeviceptr cuda_ipc_dev_ptr)
  * which helps in closing all memhandles.
  */
 void
-psmi_cuda_memhandle_cache_alloc_func(int is_alloc, void* context, void* obj)
+psmi_cuda_memhandle_cache_alloc_func(int is_alloc, void* obj)
 {
 	cl_map_item_t* memcache_item = (cl_map_item_t*)obj;
 	if (!is_alloc) {

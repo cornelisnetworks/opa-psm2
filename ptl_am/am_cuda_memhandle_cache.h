@@ -115,7 +115,7 @@ am_cuda_memhandle_acquire(uintptr_t sbuf, CUipcMemHandle* handle,
 void
 am_cuda_memhandle_release(CUdeviceptr cuda_ipc_dev_ptr);
 
-void psmi_cuda_memhandle_cache_alloc_func(int is_alloc, void* context, void* obj);
+void psmi_cuda_memhandle_cache_alloc_func(int is_alloc, void* obj);
 
 void am_cuda_memhandle_cache_map_fini();
 

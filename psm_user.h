@@ -439,7 +439,7 @@ struct ips_cuda_hostbuf {
 struct ips_cuda_hostbuf_mpool_cb_context {
 	unsigned bufsz;
 };
-void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *context, void *obj);
+void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *obj);
 
 #define CUDA_HOSTBUFFER_LIMITS {				\
 	    .env = "PSM_CUDA_BOUNCEBUFFERS_MAX",		\

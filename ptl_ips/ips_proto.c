@@ -95,7 +95,7 @@ static psm2_error_t proto_sdma_init(struct ips_proto *proto,
 				   const psmi_context_t *context);
 
 #ifdef PSM_CUDA
-void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *context, void *obj)
+void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *obj)
 {
 	struct ips_cuda_hostbuf *icb = (struct ips_cuda_hostbuf *)obj;
 	if (is_alloc) {
@@ -726,9 +726,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 			psmi_mpool_create_for_cuda(sizeof(struct ips_cuda_hostbuf),
 						   chunksz, max_elements, 0,
 						   UNDEFINED, NULL, NULL,
-						   psmi_cuda_hostbuf_alloc_func,
-						   (void *)
-						   &proto->cuda_hostbuf_send_cfg);
+						   psmi_cuda_hostbuf_alloc_func);
 
 		if (proto->cuda_hostbuf_pool_send == NULL) {
 			err = psmi_handle_error(proto->ep, PSM2_NO_MEMORY,
@@ -742,9 +740,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 			psmi_mpool_create_for_cuda(sizeof(struct ips_cuda_hostbuf),
 						   chunksz, max_elements, 0,
 						   UNDEFINED, NULL, NULL,
-						   psmi_cuda_hostbuf_alloc_func,
-						   (void *)
-						   &proto->cuda_hostbuf_small_send_cfg);
+						   psmi_cuda_hostbuf_alloc_func);
 
 		if (proto->cuda_hostbuf_pool_small_send == NULL) {
 			err = psmi_handle_error(proto->ep, PSM2_NO_MEMORY,
