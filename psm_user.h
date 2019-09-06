@@ -318,6 +318,7 @@ CUresult (*psmi_cuDriverGetVersion)(int* driverVersion);
 CUresult (*psmi_cuDeviceGetCount)(int* count);
 CUresult (*psmi_cuStreamCreate)(CUstream* phStream, unsigned int Flags);
 CUresult (*psmi_cuStreamDestroy)(CUstream phStream);
+CUresult (*psmi_cuStreamSynchronize)(CUstream hStream);
 CUresult (*psmi_cuEventCreate)(CUevent* phEvent, unsigned int Flags);
 CUresult (*psmi_cuEventDestroy)(CUevent hEvent);
 CUresult (*psmi_cuEventQuery)(CUevent hEvent);

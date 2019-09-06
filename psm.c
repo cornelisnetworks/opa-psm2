@@ -174,6 +174,7 @@ int psmi_cuda_lib_load()
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDeviceGetCount);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuStreamCreate);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuStreamDestroy);
+	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuStreamSynchronize);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuEventCreate);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuEventDestroy);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuEventQuery);

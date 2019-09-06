@@ -249,7 +249,6 @@ struct psm2_mq_req {
 	uint32_t prefetch_send_msgoff;
 	int cuda_hostbuf_used;
 	CUipcMemHandle cuda_ipc_handle;
-	CUevent cuda_ipc_event;
 	uint8_t cuda_ipc_handle_attached;
 	uint32_t cuda_ipc_offset;
 	/*
