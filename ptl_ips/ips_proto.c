@@ -97,20 +97,15 @@ static psm2_error_t proto_sdma_init(struct ips_proto *proto,
 #ifdef PSM_CUDA
 void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *context, void *obj)
 {
-	struct ips_cuda_hostbuf *icb;
-	struct ips_cuda_hostbuf_mpool_cb_context *ctxt =
-		(struct ips_cuda_hostbuf_mpool_cb_context *) context;
-
-	icb = (struct ips_cuda_hostbuf *)obj;
+	struct ips_cuda_hostbuf *icb = (struct ips_cuda_hostbuf *)obj;
 	if (is_alloc) {
-		PSMI_CUDA_CALL(cuMemHostAlloc,
-			       (void **) &icb->host_buf,
-			       ctxt->bufsz,
-			       CU_MEMHOSTALLOC_PORTABLE);
-		PSMI_CUDA_CALL(cuEventCreate, &icb->copy_status, CU_EVENT_DEFAULT);
+		icb->host_buf = NULL;
+		icb->copy_status = NULL;
 	} else {
-		if (icb->host_buf) {
+		if (icb->host_buf != NULL) {
 			PSMI_CUDA_CALL(cuMemFreeHost, icb->host_buf);
+		}
+		if (icb->copy_status != NULL) {
 			PSMI_CUDA_CALL(cuEventDestroy, icb->copy_status);
 		}
 	}
@@ -520,10 +515,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 
 	if (protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED) {
 #ifdef PSM_CUDA
-		if (PSMI_IS_CUDA_ENABLED) {
-			PSMI_CUDA_CALL(cuStreamCreate,
-				   &proto->cudastream_send, CU_STREAM_NON_BLOCKING);
-		}
+		proto->cudastream_send = NULL;
 #endif
 		proto->scbc_rv = NULL;
 		if ((err = ips_protoexp_init(context, proto, protoexp_flags,
@@ -925,7 +917,7 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 #endif
 
 #ifdef PSM_CUDA
-	if (PSMI_IS_CUDA_ENABLED) {
+	if (PSMI_IS_CUDA_ENABLED && proto->cudastream_send) {
 		PSMI_CUDA_CALL(cuStreamDestroy, proto->cudastream_send);
 	}
 #endif

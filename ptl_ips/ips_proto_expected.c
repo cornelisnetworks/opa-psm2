@@ -396,9 +396,7 @@ MOCKABLE(ips_protoexp_init)(const psmi_context_t *context,
 				goto fail;
 			}
 
-			PSMI_CUDA_CALL(cuStreamCreate,
-				&protoexp->cudastream_recv,
-				CU_STREAM_NON_BLOCKING);
+			protoexp->cudastream_recv = NULL;
 			STAILQ_INIT(&protoexp->cudapend_getreqsq);
 		} else {
 			protoexp->cuda_hostbuf_pool_recv = NULL;
@@ -437,7 +435,9 @@ psm2_error_t ips_protoexp_fini(struct ips_protoexp *protoexp)
 		 !(protoexp->proto->flags & IPS_PROTO_FLAG_GPUDIRECT_RDMA_RECV)) {
 		psmi_mpool_destroy(protoexp->cuda_hostbuf_pool_small_recv);
 		psmi_mpool_destroy(protoexp->cuda_hostbuf_pool_recv);
-		PSMI_CUDA_CALL(cuStreamDestroy, protoexp->cudastream_recv);
+		if (protoexp->cudastream_recv != NULL) {
+			PSMI_CUDA_CALL(cuStreamDestroy, protoexp->cudastream_recv);
+		}
 	}
 #endif
 	psmi_mpool_destroy(protoexp->tid_getreq_pool);
@@ -1094,12 +1094,17 @@ void psmi_cuda_run_prefetcher(struct ips_protoexp *protoexp,
 		window_len =
 			ips_cuda_next_window(tidsendc->ipsaddr->window_rv,
 					     offset, req->req_data.buf_len);
-		if (window_len <= CUDA_SMALLHOSTBUF_SZ)
+		unsigned bufsz;
+		if (window_len <= CUDA_SMALLHOSTBUF_SZ) {
 			chb = (struct ips_cuda_hostbuf *) psmi_mpool_get(
 				proto->cuda_hostbuf_pool_small_send);
-		if (chb == NULL)
+			bufsz = proto->cuda_hostbuf_small_send_cfg.bufsz;
+		}
+		if (chb == NULL) {
 			chb = (struct ips_cuda_hostbuf *) psmi_mpool_get(
 				proto->cuda_hostbuf_pool_send);
+			bufsz = proto->cuda_hostbuf_send_cfg.bufsz;
+		}
 		/* were any buffers available for the prefetcher? */
 		if (chb == NULL)
 			return;
@@ -1109,6 +1114,20 @@ void psmi_cuda_run_prefetcher(struct ips_protoexp *protoexp,
 		chb->req = req;
 		chb->gpu_buf = (CUdeviceptr) req->req_data.buf + offset;
 		chb->bytes_read = 0;
+
+		if (proto->cudastream_send == NULL) {
+			PSMI_CUDA_CALL(cuStreamCreate,
+				   &proto->cudastream_send, CU_STREAM_NON_BLOCKING);
+		}
+		if (chb->host_buf == NULL) {
+			PSMI_CUDA_CALL(cuMemHostAlloc,
+				       (void **) &chb->host_buf,
+				       bufsz,
+				       CU_MEMHOSTALLOC_PORTABLE);
+		}
+		if (chb->copy_status == NULL) {
+			PSMI_CUDA_CALL(cuEventCreate, &chb->copy_status, CU_EVENT_DEFAULT);
+		}
 		PSMI_CUDA_CALL(cuMemcpyDtoHAsync,
 			       chb->host_buf, chb->gpu_buf,
 			       window_len,
@@ -1143,12 +1162,17 @@ void psmi_attach_chb_to_tidsendc(struct ips_protoexp *protoexp,
 		window_len =
 			ips_cuda_next_window(tidsendc->ipsaddr->window_rv,
 					     offset, req->req_data.buf_len);
-		if (window_len <= CUDA_SMALLHOSTBUF_SZ)
+		unsigned bufsz;
+		if (window_len <= CUDA_SMALLHOSTBUF_SZ) {
 			chb = (struct ips_cuda_hostbuf *) psmi_mpool_get(
 				proto->cuda_hostbuf_pool_small_send);
-		if (chb == NULL)
+			bufsz = proto->cuda_hostbuf_small_send_cfg.bufsz;
+		}
+		if (chb == NULL) {
 			chb = (struct ips_cuda_hostbuf *) psmi_mpool_get(
 				proto->cuda_hostbuf_pool_send);
+			bufsz = proto->cuda_hostbuf_send_cfg.bufsz;
+		}
 
 		/* were any buffers available? If not force allocate */
 		if (chb == NULL) {
@@ -1162,6 +1186,19 @@ void psmi_attach_chb_to_tidsendc(struct ips_protoexp *protoexp,
 		chb->req = req;
 		chb->gpu_buf = (CUdeviceptr) req->req_data.buf + offset;
 		chb->bytes_read = 0;
+		if (proto->cudastream_send == NULL) {
+			PSMI_CUDA_CALL(cuStreamCreate,
+				   &proto->cudastream_send, CU_STREAM_NON_BLOCKING);
+		}
+		if (chb->host_buf == NULL) {
+			PSMI_CUDA_CALL(cuMemHostAlloc,
+				       (void **) &chb->host_buf,
+				       bufsz,
+				       CU_MEMHOSTALLOC_PORTABLE);
+		}
+		if (chb->copy_status == NULL) {
+			PSMI_CUDA_CALL(cuEventCreate, &chb->copy_status, CU_EVENT_DEFAULT);
+		}
 		PSMI_CUDA_CALL(cuMemcpyDtoHAsync,
 			       chb->host_buf, chb->gpu_buf,
 			       window_len,
@@ -2052,14 +2089,19 @@ ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 	/* 4. allocate a cuda bounce buffer, if required */
 	struct ips_cuda_hostbuf *chb = NULL;
 	if (getreq->cuda_hostbuf_used) {
-		if (nbytes_this <= CUDA_SMALLHOSTBUF_SZ)
+		unsigned bufsz;
+		if (nbytes_this <= CUDA_SMALLHOSTBUF_SZ) {
 			chb = (struct ips_cuda_hostbuf *)
 				psmi_mpool_get(
 					protoexp->cuda_hostbuf_pool_small_recv);
-		if (chb == NULL)
+			bufsz = protoexp->cuda_hostbuf_small_recv_cfg.bufsz;
+		}
+		if (chb == NULL) {
 			chb = (struct ips_cuda_hostbuf *)
 				psmi_mpool_get(
 					protoexp->cuda_hostbuf_pool_recv);
+			bufsz = protoexp->cuda_hostbuf_recv_cfg.bufsz;
+		}
 		if (chb == NULL) {
 			/* Unable to get a cudahostbuf for TID.
 			 * Release the resources we're holding and reschedule.*/
@@ -2074,6 +2116,12 @@ ips_tid_recv_alloc(struct ips_protoexp *protoexp,
 			return PSM2_EP_NO_RESOURCES;
 		}
 
+		if (chb->host_buf == NULL) {
+			PSMI_CUDA_CALL(cuMemHostAlloc,
+				       (void **) &chb->host_buf,
+				       bufsz,
+				       CU_MEMHOSTALLOC_PORTABLE);
+		}
 		tidrecvc->cuda_hostbuf = chb;
 		tidrecvc->buffer = chb->host_buf;
 		chb->size = 0;
@@ -2429,11 +2477,20 @@ void psmi_cudamemcpy_tid_to_device(struct ips_tid_recv_desc *tidrecvc)
 	chb->size += tidrecvc->recv_tidbytes + tidrecvc->tid_list.tsess_unaligned_start +
 			tidrecvc->tid_list.tsess_unaligned_end;
 
+	if (protoexp->cudastream_recv == NULL) {
+		PSMI_CUDA_CALL(cuStreamCreate,
+			&protoexp->cudastream_recv,
+			CU_STREAM_NON_BLOCKING);
+	}
+
 	PSMI_CUDA_CALL(cuMemcpyHtoDAsync,
 		       chb->gpu_buf, chb->host_buf,
 		       tidrecvc->recv_tidbytes + tidrecvc->tid_list.tsess_unaligned_start +
 							tidrecvc->tid_list.tsess_unaligned_end,
 		       protoexp->cudastream_recv);
+	if (chb->copy_status == NULL) {
+		PSMI_CUDA_CALL(cuEventCreate, &chb->copy_status, CU_EVENT_DEFAULT);
+	}
 	PSMI_CUDA_CALL(cuEventRecord, chb->copy_status,
 		       protoexp->cudastream_recv);
 

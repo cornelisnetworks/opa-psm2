@@ -181,10 +181,7 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 
 
 #ifdef PSM_CUDA
-	if (PSMI_IS_CUDA_ENABLED) {
-		PSMI_CUDA_CALL(cuMemHostAlloc, (void **) &ctrl->cuda_pio_buffer,
-				MAX_CUDA_MTU, CU_MEMHOSTALLOC_PORTABLE);
-	}
+	ctrl->cuda_pio_buffer = NULL;
 #endif
 
 	_HFI_PRDBG("ips_spio_init() done\n");
@@ -195,7 +192,7 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 static PSMI_HAL_INLINE psm2_error_t ips_spio_fini(struct ips_spio *ctrl)
 {
 #ifdef PSM_CUDA
-	if (PSMI_IS_CUDA_ENABLED)
+	if (PSMI_IS_CUDA_ENABLED && ctrl->cuda_pio_buffer != NULL)
 		PSMI_CUDA_CALL(cuMemFreeHost, (void *) ctrl->cuda_pio_buffer);
 #endif
 	spio_report_stall(ctrl, get_cycles(), 0ULL);
@@ -806,6 +803,10 @@ fi_busy:
 	/* Write to PIO: other blocks of payload */
 #ifdef PSM_CUDA
 	if (is_cuda_payload) {
+		if (ctrl->cuda_pio_buffer == NULL) {
+			PSMI_CUDA_CALL(cuMemHostAlloc, (void **) &ctrl->cuda_pio_buffer,
+							MAX_CUDA_MTU, CU_MEMHOSTALLOC_PORTABLE);
+		}
 		/* Since the implementation of cuMemcpy is unknown,
 		   and the HFI specifies several conditions for how PIO
 		   writes must occur, for safety reasons we should not assume
