@@ -90,7 +90,6 @@ int is_gdr_copy_enabled;
 int device_support_gpudirect;
 int cuda_lib_version;
 int is_driver_gpudirect_enabled;
-int is_cuda_primary_context_retain = 0;
 uint32_t cuda_thresh_rndv;
 uint32_t gdr_copy_threshold_send;
 uint32_t gdr_copy_threshold_recv;
@@ -219,30 +218,6 @@ int psmi_cuda_initialize()
 		goto fail;
 
 	PSMI_CUDA_CALL(cuInit, 0);
-
-	/* Check if CUDA context is available. If not, we are not allowed to
-	 * launch any CUDA API calls */
-	PSMI_CUDA_CALL(cuCtxGetCurrent, &ctxt);
-	if (ctxt == NULL) {
-		_HFI_INFO("Unable to find active CUDA context\n");
-		is_cuda_enabled = 0;
-		err = PSM2_OK;
-		return err;
-	}
-
-	CUdevice device;
-	CUcontext primary_ctx;
-	PSMI_CUDA_CALL(cuCtxGetDevice, &device);
-	int is_ctx_active;
-	unsigned ctx_flags;
-	PSMI_CUDA_CALL(cuDevicePrimaryCtxGetState, device, &ctx_flags, &is_ctx_active);
-	if (!is_ctx_active) {
-		/* There is an issue where certain CUDA API calls create
-		 * contexts but does not make it active which cause the
-		 * driver API call to fail with error 709 */
-		PSMI_CUDA_CALL(cuDevicePrimaryCtxRetain, &primary_ctx, device);
-		is_cuda_primary_context_retain = 1;
-	}
 
 	/* Check if all devices support Unified Virtual Addressing. */
 	PSMI_CUDA_CALL(cuDeviceGetCount, &num_devices);
@@ -806,13 +781,6 @@ psm2_error_t __psm2_finalize(void)
 	}
 
 	psmi_hal_finalize();
-#ifdef PSM_CUDA
-	if (is_cuda_primary_context_retain) {
-		CUdevice device;
-		PSMI_CUDA_CALL(cuCtxGetDevice, &device);
-		PSMI_CUDA_CALL(cuDevicePrimaryCtxRelease, device);
-	}
-#endif
 
 	psmi_isinit = PSMI_FINALIZED;
 	PSM2_LOG_MSG("leaving");
