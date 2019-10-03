@@ -490,8 +490,10 @@ psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 	do
 	{
 		/* close previous opened unit fd before attempting open of current unit. */
-		if (psmi_hal_get_fd(context->psm_hw_ctxt) > 0)
+		if (psmi_hal_get_fd(context->psm_hw_ctxt) > 0) {
 			psmi_hal_close_context(&context->psm_hw_ctxt);
+			context->psm_hw_ctxt = 0;
+		}
 
 		/* if the unit_id is not active, go to next one. */
 		if (psmi_hal_get_unit_active(unit_id) <= 0) {

@@ -239,7 +239,7 @@ psm2_error_t psmi_shm_create(ptl_t *ptl_gen)
 	void *mapptr;
 	size_t segsz;
 	psm2_error_t err = PSM2_OK;
-	int shmfd;
+	int shmfd = -1;
 	char *amsh_keyname;
 	int iterator;
 	/* Get which kassist mode to use. */
@@ -330,7 +330,7 @@ psm2_error_t psmi_shm_create(ptl_t *ptl_gen)
 					strerror(errno));
 		goto fail;
 	}
-	close(shmfd);
+
 	memset((void *) mapptr, 0, segsz); /* touch all of my pages */
 
 	/* Our own ep's info for ptl_am resides at the start of the
@@ -341,6 +341,7 @@ psm2_error_t psmi_shm_create(ptl_t *ptl_gen)
 	ptl->self_nodeinfo->amsh_shmbase = (uintptr_t) mapptr;
 
 fail:
+	if (shmfd >= 0) close(shmfd);
 	return err;
 }
 
@@ -1973,17 +1974,27 @@ amsh_mq_rndv(ptl_t *ptl, psm2_mq_t mq, psm2_mq_req_t req,
 			PSMI_CUDA_CALL(cuIpcGetMemHandle,
 				      &req->cuda_ipc_handle,
 				      (CUdeviceptr) buf);
-			psmi_amsh_short_request(ptl, epaddr, mq_handler_hidx,
-						args, 5, (void*)&req->cuda_ipc_handle,
-						sizeof(CUipcMemHandle), 0);
+			if (req->flags_internal & PSMI_REQ_FLAG_FASTPATH) {
+				psmi_am_reqq_add(AMREQUEST_SHORT, ptl,
+						 epaddr, mq_handler_hidx,
+						 args, 5, (void*)&req->cuda_ipc_handle,
+						 sizeof(CUipcMemHandle), NULL, 0);
+			} else {
+				psmi_amsh_short_request(ptl, epaddr, mq_handler_hidx,
+							args, 5, (void*)&req->cuda_ipc_handle,
+							sizeof(CUipcMemHandle), 0);
+			}
 			req->cuda_ipc_handle_attached = 1;
 		} else
+#endif
+		if (req->flags_internal & PSMI_REQ_FLAG_FASTPATH) {
+			psmi_am_reqq_add(AMREQUEST_SHORT, ptl,
+					 epaddr, mq_handler_hidx,
+					 args, 5, NULL, 0, NULL, 0);
+		} else {
 			psmi_amsh_short_request(ptl, epaddr, mq_handler_hidx,
 						args, 5, NULL, 0, 0);
-#else
-		psmi_amsh_short_request(ptl, epaddr, mq_handler_hidx,
-					args, 5, NULL, 0, 0);
-#endif
+		}
 
 	return err;
 }
@@ -2023,8 +2034,14 @@ amsh_mq_send_inner(psm2_mq_t mq, psm2_mq_req_t req, psm2_epaddr_t epaddr,
 		args[1].u32w0 = tag->tag[1];
 		args[2].u32w1 = tag->tag[2];
 
-		psmi_amsh_short_request(epaddr->ptlctl->ptl, epaddr,
-					mq_handler_hidx, args, 3, ubuf, len, 0);
+		if (flags_internal & PSMI_REQ_FLAG_FASTPATH) {
+			psmi_am_reqq_add(AMREQUEST_SHORT, epaddr->ptlctl->ptl,
+					 epaddr, mq_handler_hidx,
+					 args, 3, (void *)ubuf, len, NULL, 0);
+		} else {
+			psmi_amsh_short_request(epaddr->ptlctl->ptl, epaddr,
+				mq_handler_hidx, args, 3, ubuf, len, 0);
+		}
 	} else if (flags_user & PSM2_MQ_FLAG_SENDSYNC)
 		goto do_rendezvous;
 	else if (len <= mq->shm_thresh_rv) {
@@ -2036,9 +2053,15 @@ amsh_mq_send_inner(psm2_mq_t mq, psm2_mq_req_t req, psm2_epaddr_t epaddr,
 		args[1].u32w1 = tag->tag[0];
 		args[1].u32w0 = tag->tag[1];
 		args[2].u32w1 = tag->tag[2];
-		psmi_amsh_short_request(epaddr->ptlctl->ptl, epaddr,
-					mq_handler_hidx, args, 3, buf,
-					bytes_this, 0);
+		if (flags_internal & PSMI_REQ_FLAG_FASTPATH) {
+			psmi_am_reqq_add(AMREQUEST_SHORT, epaddr->ptlctl->ptl,
+					 epaddr, mq_handler_hidx,
+					 args, 3, buf, bytes_this, NULL, 0);
+		} else {
+			psmi_amsh_short_request(epaddr->ptlctl->ptl, epaddr,
+						mq_handler_hidx, args, 3, buf,
+						bytes_this, 0);
+		}
 		bytes_left -= bytes_this;
 		buf += bytes_this;
 		args[2].u32w0 = 0;
@@ -2047,9 +2070,15 @@ amsh_mq_send_inner(psm2_mq_t mq, psm2_mq_req_t req, psm2_epaddr_t epaddr,
 			bytes_this = min(bytes_left, AMLONG_MTU);
 			/* Here we kind of bend the rules, and assume that shared-memory
 			 * active messages are delivered in order */
-			psmi_amsh_short_request(epaddr->ptlctl->ptl, epaddr,
-						mq_handler_data_hidx, args,
-						3, buf, bytes_this, 0);
+			if (flags_internal & PSMI_REQ_FLAG_FASTPATH) {
+				psmi_am_reqq_add(AMREQUEST_SHORT, epaddr->ptlctl->ptl,
+						 epaddr, mq_handler_data_hidx,
+						 args, 3, buf, bytes_this, NULL, 0);
+			} else {
+				psmi_amsh_short_request(epaddr->ptlctl->ptl, epaddr,
+							mq_handler_data_hidx, args,
+							3, buf, bytes_this, 0);
+			}
 			buf += bytes_this;
 			bytes_left -= bytes_this;
 		}

@@ -315,13 +315,10 @@ psm2_mq_init(psm2_ep_t ep, uint64_t tag_order_mask,
 	    const struct psm2_optkey *opts, int numopts, psm2_mq_t *mq);
 
 #define PSM2_MQ_ORDERMASK_NONE	0ULL
-	/**< Used to initialize MQ and disable all MQ message ordering
-	 * guarantees (this mask may prevent the use of MQ to maintain matched
-	 * message envelope delivery required in MPI). */
+	/**< This macro is reserved for future tag order masking support. */
 
 #define PSM2_MQ_ORDERMASK_ALL	0xffffffffffffffffULL
-	/**< Used to initialize MQ with no message ordering hints, which forces
-	 * MQ to maintain order over all messages */
+	/**< This macro is reserved for future tag order masking support. */
 
 /** @brief Finalize (close) an MQ handle
  *

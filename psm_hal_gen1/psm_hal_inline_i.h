@@ -489,29 +489,33 @@ static PSMI_HAL_INLINE int hfp_gen1_context_open(int unit,
 				 uint32_t cap_mask,
 				 unsigned retryCnt)
 {
+	int fd = -1;
+	psm2_error_t err = PSM_HAL_ERROR_OK;
 	hfp_gen1_pc_private *pc_private = psmi_malloc(ep, UNDEFINED, sizeof(hfp_gen1_pc_private));
 
-	if_pf (!pc_private)
-		return -PSM_HAL_ERROR_CANNOT_OPEN_CONTEXT;
+	if_pf (!pc_private) {
+		err = -PSM_HAL_ERROR_CANNOT_OPEN_CONTEXT;
+		goto bail;
+	}
 
 	memset(pc_private,0,sizeof(hfp_gen1_pc_private));
 
 	char dev_name[PATH_MAX];
-	int fd = hfi_context_open_ex(unit, port, open_timeout,
+	fd = hfi_context_open_ex(unit, port, open_timeout,
 					       dev_name, sizeof(dev_name));
 	if (fd < 0)
 	{
-		psmi_free(pc_private);
-		return -PSM_HAL_ERROR_CANNOT_OPEN_DEVICE;
+		err = -PSM_HAL_ERROR_CANNOT_OPEN_DEVICE;
+		goto bail;
 	}
-	psm2_error_t err = psmi_init_userinfo_params(ep,
+
+	err = psmi_init_userinfo_params(ep,
 						     unit,
 						     job_key,
 						     &pc_private->user_info);
-	if (err)
-	{
-		psmi_free(pc_private);
-		return -PSM_HAL_ERROR_GENERAL_ERROR;
+	if (err) {
+		err = -PSM_HAL_ERROR_GENERAL_ERROR;
+		goto bail;
 	}
 
 	/* attempt to assign the context via hfi_userinit() */
@@ -525,8 +529,8 @@ static PSMI_HAL_INLINE int hfp_gen1_context_open(int unit,
 
 	if (!pc_private->ctrl)
 	{
-		psmi_free(pc_private);
-		return -PSM_HAL_ERROR_CANNOT_OPEN_CONTEXT;
+		err = -PSM_HAL_ERROR_CANNOT_OPEN_CONTEXT;
+		goto bail;
 	}
 	else
 	{
@@ -737,8 +741,12 @@ static PSMI_HAL_INLINE int hfp_gen1_context_open(int unit,
 	return PSM_HAL_ERROR_OK;
 
 bail:
-	free(pc_private->ctrl);
-	psmi_free(pc_private);
+	if (fd >0) close(fd);
+	if (pc_private) {
+		if (pc_private->ctrl) free(pc_private->ctrl);
+		psmi_free(pc_private);
+	}
+
 	return -PSM_HAL_ERROR_GENERAL_ERROR;
 }
 
@@ -1771,7 +1779,17 @@ static PSMI_HAL_INLINE int hfp_gen1_spio_init(const psmi_context_t *context,
 {
 	hfp_gen1_pc_private *psm_hw_ctxt = context->psm_hw_ctxt;
 
+#ifdef PSM_AVX512
+	union psmi_envvar_val env_enable_avx512;
+	psmi_getenv("PSM2_AVX512",
+				"Enable (set envvar to 1) AVX512 code in PSM (Enabled by default)",
+				PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_INT,
+				(union psmi_envvar_val)1, &env_enable_avx512);
+	int is_avx512_enabled = env_enable_avx512.e_int;
+	int rc = ips_spio_init(context,ptl, &psm_hw_ctxt->spio_ctrl, is_avx512_enabled);
+#else
 	int rc = ips_spio_init(context,ptl, &psm_hw_ctxt->spio_ctrl);
+#endif
 	if (rc >= 0)
 	{
 		*ctrl = &psm_hw_ctxt->spio_ctrl;

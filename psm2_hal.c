@@ -331,11 +331,11 @@ void ips_ptl_non_dw_mul_sdma_init(void)
 		psmi_hal_current_hal_instance->params.cap_mask |= PSM_HAL_CAP_NON_DW_MULTIPLE_MSG_SIZE;
 }
 
-void set_sdma_req_size_in_MOCK_HAL_instance(int sdma_req_size)
+void set_sdma_ring_size_in_MOCK_HAL_instance(int sdma_ring_size)
 {
-	extern int __psm_hal_mock_sma_req_size;
+	extern int __psm_hal_mock_sdma_ring_size;
 
-	__psm_hal_mock_sma_req_size = sdma_req_size;
+	__psm_hal_mock_sdma_ring_size = sdma_ring_size;
 }
 
 void set_comp_entry(struct hfi1_sdma_comp_entry *pce)

@@ -813,7 +813,7 @@ int psmi_hal_pre_init_func(enum psmi_hal_pre_init_func_krnls k, ...);
 #define psmi_hal_get_rx_hdr_q_cnt(...)				PSMI_HAL_DISPATCH(get_rx_hdr_q_cnt,__VA_ARGS__)
 #define psmi_hal_get_rx_hdr_q_ent_size(...)			PSMI_HAL_DISPATCH(get_rx_hdr_q_ent_size,__VA_ARGS__)
 #define psmi_hal_get_sdma_req_size(...)				PSMI_HAL_DISPATCH(get_sdma_req_size,__VA_ARGS__)
-#define psmi_hal_get_sdma_ring_size(...)			PSMI_HAL_DISPATCH(get_sdma_req_size,__VA_ARGS__)
+#define psmi_hal_get_sdma_ring_size(...)			PSMI_HAL_DISPATCH(get_sdma_ring_size,__VA_ARGS__)
 #define psmi_hal_get_subctxt(...)				PSMI_HAL_DISPATCH(get_subctxt,__VA_ARGS__)
 #define psmi_hal_get_subctxt_cnt(...)				PSMI_HAL_DISPATCH(get_subctxt_cnt,__VA_ARGS__)
 #define psmi_hal_get_tid_exp_cnt(...)				PSMI_HAL_DISPATCH(get_tid_exp_cnt,__VA_ARGS__)

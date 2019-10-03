@@ -83,7 +83,11 @@ static psm2_error_t spio_credit_return_update_shared(struct ips_spio *ctrl);
 
 static PSMI_HAL_INLINE psm2_error_t
 ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
-	      struct ips_spio *ctrl)
+	      struct ips_spio *ctrl
+#ifdef PSM_AVX512
+	      , int is_avx512_enabled
+#endif
+	      )
 {
 	cpuid_t id;
 	hfp_gen1_pc_private *psm_hw_ctxt = context->psm_hw_ctxt;
@@ -170,8 +174,8 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 
 #ifdef PSM_AVX512
 	/* 64B copying supported */
-	ctrl->spio_blockcpy_large = (id.ebx & (1<<AVX512F_BIT)) ?
-		hfi_pio_blockcpy_512 : ctrl->spio_blockcpy_med;
+	ctrl->spio_blockcpy_large = (is_avx512_enabled && (id.ebx & (1<<AVX512F_BIT))) ?
+		hfi_pio_blockcpy_512 : ctrl->spio_blockcpy_large;
 
 #endif
 

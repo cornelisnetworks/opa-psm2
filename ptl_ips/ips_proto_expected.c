@@ -1153,6 +1153,7 @@ void psmi_attach_chb_to_tidsendc(struct ips_protoexp *protoexp,
 		/* were any buffers available? If not force allocate */
 		if (chb == NULL) {
 			chb = psmi_allocate_chb(window_len);
+			psmi_assert(chb);
 			chb->is_tempbuf = 1;
 		}
 		req->prefetch_send_msgoff += window_len;

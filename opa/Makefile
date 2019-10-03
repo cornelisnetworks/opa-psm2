@@ -67,13 +67,6 @@ else
 	PLATFORM_OBJ=
 endif
 
-ifeq (icc,${CC})
-	ifeq ($(PSM_DISABLE_AVX2),)
-		BASECFLAGS := $(filter-out -xATOM_SSE4.2,$(BASECFLAGS))
-		BASECFLAGS += -march=core-avx2
-	endif
-endif
-
 ${TARGLIB}-objs := opa_debug.o opa_time.o \
 	opa_service.o opa_utils.o \
 	opa_dwordcpy-$(arch).o opa_sysfs.o opa_syslog.o \

@@ -95,7 +95,7 @@ int main(int argc, char **argv)
 	libpsm2_shutdown();
 
 bail:
-	if (sock > 0)
+	if (sock >= 0)
 		close(sock);
 
 	if (info != NULL)

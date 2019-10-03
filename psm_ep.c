@@ -377,12 +377,13 @@ psmi_ep_verify_pkey(psm2_ep_t ep, uint16_t pkey, uint16_t *opkey)
 			err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
 						"Can't get a valid pkey value from pkey table\n");
 			return err;
-		} else if (ret == 0x7fff || ret == 0xffff) {
+		} else if ((ret & 0x7fff) == 0x7fff) {
 			continue;	/* management pkey, not for app traffic. */
 		}
 
-		if (pkey == (uint16_t) ret)
+		if ((pkey & 0x7fff) == (uint16_t)(ret & 0x7fff)) {
 			break;
+		}
 	}
 
 	/* if pkey does not match */
@@ -393,8 +394,15 @@ psmi_ep_verify_pkey(psm2_ep_t ep, uint16_t pkey, uint16_t *opkey)
 		return err;
 	}
 
+	if (((uint16_t)ret & 0x8000) == 0) {
+		err = psmi_handle_error(NULL, PSM2_EP_DEVICE_FAILURE,
+					"Limited Member pkey 0x%x, please use PSM2_PKEY to specify a valid pkey\n",
+					(uint16_t)ret);
+		return err;
+	}
+
 	/* return the final pkey */
-	*opkey = pkey;
+	*opkey = (uint16_t)ret;
 
 	return PSM2_OK;
 }

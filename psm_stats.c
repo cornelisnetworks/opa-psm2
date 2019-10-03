@@ -620,6 +620,10 @@ void stats_register_hfi_stats(psm2_ep_t ep)
 	}
 	psmi_stats_register_type("OPA device statistics",
 				 PSMI_STATSTYPE_DEVSTATS, entries, ns, ep);
+	// psmi_stats_register_type makes it's own copy of entries
+	// so we should free the entries buffer.
+	// The snames will be freed when we deregister the hfi.
+	psmi_free(entries);
 	return;
 
 bail:

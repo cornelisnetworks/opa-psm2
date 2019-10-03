@@ -87,7 +87,12 @@ void hfi_pio_blockcpy_64(volatile uint64_t *dest,
 
 
 static PSMI_HAL_INLINE psm2_error_t ips_spio_init(const psmi_context_t *context,
-				struct ptl *ptl, struct ips_spio *ctrl);
+				struct ptl *ptl, struct ips_spio *ctrl
+#ifdef PSM_AVX512
+	            , int is_avx512_enabled
+#endif
+);
+
 static PSMI_HAL_INLINE psm2_error_t ips_spio_fini(struct ips_spio *ctrl);
 
 static inline psm2_error_t ips_spio_transfer_frame(struct ips_proto *proto,

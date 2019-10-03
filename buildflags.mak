@@ -80,7 +80,7 @@ else
 	anerr := $(error Unknown Fortran compiler arch: ${FCARCH})
 endif # gfortran
 
-BASECFLAGS += $(BASE_FLAGS) -pthread
+BASECFLAGS := $(BASE_FLAGS) -pthread
 LDFLAGS += $(BASE_FLAGS)
 ASFLAGS += $(BASE_FLAGS)
 
@@ -109,7 +109,9 @@ BASECFLAGS +=-Wall $(WERROR)
 #
 ifeq (${CC},icc)
   ifeq ($(PSM_DISABLE_AVX2),)
-    MAVX2=-xATOM_SSE4.2 -DPSM_AVX512
+# '-axISA,ISA[,...]' allows for the program to choose an
+# alternative instruction set at run time.
+    MAVX2=-march=core-avx2 -DPSM_AVX512 -axKNL,CORE-AVX512,CORE-AVX2
   else
     MAVX2=-march=core-avx-i
   endif

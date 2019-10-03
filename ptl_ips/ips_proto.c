@@ -235,10 +235,10 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	proto->sdma_queue_size = psmi_hal_get_sdma_ring_size(context->psm_hw_ctxt);
 	/* don't use the last slot */
 
-	{
+	if (proto->sdma_queue_size > 8) {
 		/* configure sdma_avail_counter */
 		union psmi_envvar_val env_sdma_avail;
-		int tmp_queue_size = proto->sdma_queue_size - 1;
+		int tmp_queue_size = 8;
 
 		psmi_getenv("PSM2_MAX_PENDING_SDMA_REQS",
 			"PSM maximum pending SDMA requests",
@@ -246,10 +246,13 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 			(union psmi_envvar_val) tmp_queue_size,
 			&env_sdma_avail);
 
-		if ((env_sdma_avail.e_int < 8) || (env_sdma_avail.e_int > proto->sdma_queue_size - 1))
-			proto->sdma_avail_counter = proto->sdma_queue_size - 1;
+		if ((env_sdma_avail.e_int < 8) || (env_sdma_avail.e_int > (proto->sdma_queue_size - 1)))
+			proto->sdma_avail_counter = 8;
 		else
 			proto->sdma_avail_counter = env_sdma_avail.e_int;
+	} else {
+		err = PSM2_PARAM_ERR;
+		goto fail;
 	}
 
 
