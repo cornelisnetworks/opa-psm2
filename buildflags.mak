@@ -109,9 +109,7 @@ BASECFLAGS +=-Wall $(WERROR)
 #
 ifeq (${CC},icc)
   ifeq ($(PSM_DISABLE_AVX2),)
-# '-axISA,ISA[,...]' allows for the program to choose an
-# alternative instruction set at run time.
-    MAVX2=-march=core-avx2 -DPSM_AVX512 -axKNL,CORE-AVX512,CORE-AVX2
+    MAVX2=-xATOM_SSE4.2 -DPSM_AVX512
   else
     MAVX2=-march=core-avx-i
   endif

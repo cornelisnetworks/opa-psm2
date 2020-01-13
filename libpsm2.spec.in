@@ -136,7 +136,6 @@ with Intel(R) OPA PSM2, libpsm2.
 %setup -q -n @RPM_NAME@-%{version}
 
 %build
-export CFLAGS="%{optflags}"
 make %{?_smp_mflags}
 
 %install

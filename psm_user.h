@@ -387,11 +387,17 @@ _psmi_is_cuda_mem(void *ptr))
 {
 	CUresult cres;
 	CUmemorytype mt;
+	unsigned uvm = 0;
 	cres = psmi_cuPointerGetAttribute(
 		&mt, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr) ptr);
-	if ((cres == CUDA_SUCCESS) && (mt == CU_MEMORYTYPE_DEVICE))
+	if ((cres == CUDA_SUCCESS) && (mt == CU_MEMORYTYPE_DEVICE)) {
+		cres = psmi_cuPointerGetAttribute(
+			&uvm, CU_POINTER_ATTRIBUTE_IS_MANAGED, (CUdeviceptr) ptr);
+		if ((cres == CUDA_SUCCESS) && (uvm == 0))
 		return 1;
 	else
+		return 0;
+	} else
 		return 0;
 }
 
