@@ -133,11 +133,18 @@ BUILDING USING MAKEFILES
 	$ tar zxvf $BASENAME-$PRODUCT-$RELEASE.tar.gz
 2. Change directory into the untarred location:
 	$ cd $BASENAME-$PRODUCT-$RELEASE
-3. Run make on the command line. This will build the PSM2 library.
+3. Build:
+  3.1. To build with GNU C (gcc), run make on the command line:
 	$ make
-  3.1. Optionally to build PSM2 library with GPU Direct support, Run make
-       PSM_CUDA=1 instead of make on the command line.
-      $ make PSM_CUDA=1
+	- or -
+	$ make CCARCH=gcc
+  3.2 To build with Intel C (icc), specify the correct CCARCH:
+	$ make CCARCH=icc
+  3.3. To build with CUDA support, specify PSM_CUDA=1
+	on the command line along with the desired compiler:
+	$ make PSM_CUDA=1 CCARCH=gcc
+	- or -
+	$ make PSM_CUDA=1 CCARCH=icc
 
 BUILDING USING RPMBUILD
 -----------------------

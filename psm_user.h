@@ -394,9 +394,9 @@ _psmi_is_cuda_mem(void *ptr))
 		cres = psmi_cuPointerGetAttribute(
 			&uvm, CU_POINTER_ATTRIBUTE_IS_MANAGED, (CUdeviceptr) ptr);
 		if ((cres == CUDA_SUCCESS) && (uvm == 0))
-		return 1;
-	else
-		return 0;
+			return 1;
+		else
+			return 0;
 	} else
 		return 0;
 }

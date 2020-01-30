@@ -98,10 +98,10 @@ am_cuda_memhandle_mpool_init(uint32_t memcache_size)
 psm2_error_t am_cuda_memhandle_cache_map_init()
 {
 	cl_map_item_t *root, *nil_item;
-	root = (cl_map_item_t *)psmi_mpool_get(cuda_memhandle_mpool);
+	root = (cl_map_item_t *)psmi_calloc(NULL, UNDEFINED, 1, sizeof(cl_map_item_t));
 	if (root == NULL)
 		return PSM2_NO_MEMORY;
-	nil_item = (cl_map_item_t *)psmi_mpool_get(cuda_memhandle_mpool);
+	nil_item = (cl_map_item_t *)psmi_calloc(NULL, UNDEFINED, 1, sizeof(cl_map_item_t));
 	if (nil_item == NULL)
 		return PSM2_NO_MEMORY;
 	nil_item->payload.start = 0;
@@ -119,7 +119,12 @@ void am_cuda_memhandle_cache_map_fini()
 	_HFI_DBG("cache hit counter: %d\n", cache_hit_counter);
 	_HFI_DBG("cache miss counter: %d\n", cache_miss_counter);
 #endif
-	if(cuda_memhandle_cache_enabled)
+
+	if (cuda_memhandle_cachemap.nil_item)
+		psmi_free(cuda_memhandle_cachemap.nil_item);
+	if (cuda_memhandle_cachemap.root)
+		psmi_free(cuda_memhandle_cachemap.root);
+	if (cuda_memhandle_cache_enabled)
 		psmi_mpool_destroy(cuda_memhandle_mpool);
 	return;
 }
