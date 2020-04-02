@@ -85,13 +85,39 @@
 
 #include <string.h> /* for memset declaration */
 
+// RBTREE_CMP should be a comparator, i.e. RBTREE_CMP(a, b) should evaluate to
+// -1, 0, or 1 depending on if a < b, a == b, or a > b, respectively.
+#ifdef RBTREE_CMP
+
+#if defined(RBTREE_GET_LEFTMOST) || defined(RBTREE_GET_RIGHTMOST)
+#error Cannot define both RBTREE_CMP and RBTREE_GET_LEFTMOST or RBTREE_GET_RIGHTMOST
+#endif
+
+#else /* RBTREE_CMP */
+
+// Default comparison implementation: leagacy range-comparison
 #if !defined ( RBTREE_GET_LEFTMOST )       || \
 	! defined ( RBTREE_GET_RIGHTMOST ) || \
 	! defined ( RBTREE_MAP_COUNT )     || \
 	! defined ( RBTREE_ASSERT )
 #error "You must define RBTREE_GET_LEFTMOST and RBTREE_GET_RIGHTMOST and \
         RBTREE_MAP_COUNT and RBTREE_ASSERT before including rbtree.c"
-#endif
+
+#endif /* !defined ( ... */
+
+static inline int __rbtree_range_cmp(const RBTREE_MI_PL *a, const RBTREE_MI_PL *b)
+{
+	// Assume exclusive upper bounds, i.e. a.end == b.start is not overlap
+	if (RBTREE_GET_RIGHTMOST(a) <= RBTREE_GET_LEFTMOST(b))
+		return -1;
+	if (RBTREE_GET_LEFTMOST(a) >= RBTREE_GET_RIGHTMOST(b))
+		return 1;
+	return 0;
+}
+
+#define RBTREE_CMP(a, b) __rbtree_range_cmp(a, b)
+
+#endif /* RBTREE_CMP */
 
 #define IN /* nothing */
 
@@ -117,13 +143,24 @@ static void ips_cl_qmap_remove_item(
 static cl_map_item_t* ips_cl_qmap_successor(
 				IN	cl_qmap_t* const	p_map,
 				IN	const cl_map_item_t*	p_item);
+
+
+#ifndef RBTREE_NO_EMIT_IPS_CL_QMAP_PREDECESSOR
 static cl_map_item_t* ips_cl_qmap_predecessor(
 				IN	cl_qmap_t* const	p_map,
 				IN	const cl_map_item_t*	p_item);
+#endif
+
+#if defined(RBTREE_GET_LEFTMOST) || defined(RBTREE_GET_RIGHTMOST)
 static cl_map_item_t* ips_cl_qmap_search(
 				IN	cl_qmap_t* const	p_map,
 				IN	unsigned long		start,
 				IN	unsigned long		end);
+#else
+static cl_map_item_t* ips_cl_qmap_searchv(
+				cl_qmap_t* const	p_map,
+				const RBTREE_MI_PL *key);
+#endif
 
 /*
  * Get the root.
@@ -380,7 +417,7 @@ ips_cl_qmap_insert_item(
 		p_insert_at = p_comp_item;
 
 		/* Traverse the tree until the correct insertion point is found. */
-		if( RBTREE_GET_LEFTMOST(&p_item->payload) < RBTREE_GET_LEFTMOST(&p_insert_at->payload) )
+		if(RBTREE_CMP(&p_item->payload, &p_insert_at->payload) < 0)
 		{
 			p_comp_item = p_insert_at->p_left;
 			compare_res = 1;
@@ -604,6 +641,11 @@ ips_cl_qmap_successor(
 	}
 }
 
+// When includer defines RBTREE_CMP, ips_cl_qmap_search() is not emitted.
+// When this happens, ips_cl_qmap_predecessor() may not be called.
+// Combined with -Werror -Wunused-function, libpsm2 fails to build.
+// So provide macro to control emitting this function
+#ifndef RBTREE_NO_EMIT_IPS_CL_QMAP_PREDECESSOR
 static cl_map_item_t *
 ips_cl_qmap_predecessor(
 	IN	cl_qmap_t* const		p_map,
@@ -627,7 +669,9 @@ ips_cl_qmap_predecessor(
 		return p_tmp;
 	}
 }
+#endif /* RBTREE_NO_EMIT_IPS_CL_QMAP_PREDECESSOR */
 
+#if defined(RBTREE_GET_LEFTMOST) || defined(RBTREE_GET_RIGHTMOST)
 /*
  * return the first node with buffer overlapping or zero.
  */
@@ -690,3 +734,23 @@ ips_cl_qmap_search(cl_qmap_t * const p_map,
 
 	return p_item;
 }
+#else /* defined(...LEFTMOST) || defined(...RIGHTMOST) */
+static cl_map_item_t *
+ips_cl_qmap_searchv(cl_qmap_t * const p_map, const RBTREE_MI_PL *key)
+{
+	RBTREE_ASSERT( p_map );
+	cl_map_item_t *p_item = __cl_map_root(p_map);
+
+	while (p_item != p_map->nil_item) {
+		if (RBTREE_CMP(key, &p_item->payload) > 0) {
+			p_item = p_item->p_right;
+		} else if (RBTREE_CMP(key, &p_item->payload) < 0) {
+			p_item = p_item->p_left;
+		} else {
+			break;
+		}
+	}
+
+	return p_item;
+}
+#endif /* defined(...LEFTMOST) || defined(...RIGHTMOST) */
