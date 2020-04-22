@@ -490,7 +490,7 @@ static PSMI_HAL_INLINE int hfp_gen1_context_open(int unit,
 				 unsigned retryCnt)
 {
 	int fd = -1;
-	psm2_error_t err = PSM_HAL_ERROR_OK;
+	psm2_error_t err = PSM2_OK;
 	hfp_gen1_pc_private *pc_private = psmi_malloc(ep, UNDEFINED, sizeof(hfp_gen1_pc_private));
 
 	if_pf (!pc_private) {
