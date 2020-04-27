@@ -143,6 +143,7 @@ am_cuda_idleq_insert(cl_map_item_t* memcache_item)
 	INEXT(FIRST) = memcache_item;
 	IPREV(memcache_item) = FIRST;
 	FIRST = memcache_item;
+	INEXT(FIRST) = NULL;
 	return;
 }
 
@@ -155,11 +156,13 @@ am_cuda_idleq_remove_last(cl_map_item_t* memcache_item)
 	if (!INEXT(memcache_item)) {
 		LAST = NULL;
 		FIRST = NULL;
-		return;
+	} else {
+		LAST = INEXT(memcache_item);
+		IPREV(LAST) = NULL;
 	}
-	LAST = INEXT(memcache_item);
-	IPREV(LAST) = NULL;
-	return;
+	// Null-out now-removed memcache_item's next and prev pointers out of
+	// an abundance of caution
+	INEXT(memcache_item) = IPREV(memcache_item) = NULL;
 }
 
 static void
@@ -167,15 +170,16 @@ am_cuda_idleq_remove(cl_map_item_t* memcache_item)
 {
 	if (LAST == memcache_item) {
 		am_cuda_idleq_remove_last(memcache_item);
-		return;
+	} else if (FIRST == memcache_item) {
+		FIRST = IPREV(memcache_item);
+		INEXT(FIRST) = NULL;
+	} else {
+		INEXT(IPREV(memcache_item)) = INEXT(memcache_item);
+		IPREV(INEXT(memcache_item)) = IPREV(memcache_item);
 	}
-	if (INEXT(memcache_item) == NULL) {
-		INEXT(IPREV(memcache_item)) = NULL;
-		return;
-	}
-	INEXT(IPREV(memcache_item)) = INEXT(memcache_item);
-	IPREV(INEXT(memcache_item)) = IPREV(memcache_item);
-	return;
+	// Null-out now-removed memcache_item's next and prev pointers out of
+	// an abundance of caution
+	INEXT(memcache_item) = IPREV(memcache_item) = NULL;
 }
 
 static void
@@ -222,9 +226,14 @@ static void
 am_cuda_memhandle_cache_evict()
 {
 	cl_map_item_t *p_item = LAST;
+	_HFI_VDBG("Removing (epid=%lu,start=%lu,length=%u,dev_ptr=0x%llX,it=%p) from cuda_memhandle_cachemap.\n",
+		p_item->payload.epid, p_item->payload.start, p_item->payload.length,
+		p_item->payload.cuda_ipc_dev_ptr, p_item);
 	ips_cl_qmap_remove_item(&cuda_memhandle_cachemap, p_item);
 	PSMI_CUDA_CALL(cuIpcCloseMemHandle, p_item->payload.cuda_ipc_dev_ptr);
 	am_cuda_idleq_remove_last(p_item);
+	p_item->payload.start = 0;
+	p_item->payload.cuda_ipc_dev_ptr = 0;
 	psmi_mpool_put(p_item);
 	return;
 }
@@ -251,6 +260,15 @@ am_cuda_memhandle_cache_register(uintptr_t sbuf, CUipcMemHandle* handle,
 	ips_cl_qmap_insert_item(&cuda_memhandle_cachemap, memcache_item);
 	am_cuda_idleq_insert(memcache_item);
 	return PSM2_OK;
+}
+
+static void am_cuda_memhandle_cache_clear(void)
+{
+	_HFI_DBG("Closing all handles, clearing cuda_memhandle_cachemap and idleq. NELEMS=%u\n", NELEMS);
+	while (NELEMS) {
+		am_cuda_memhandle_cache_evict();
+	}
+	_HFI_DBG("Closed all handles, cleared cuda_memhandle_cachemap and idleq. NELEMS=%u\n", NELEMS);
 }
 
 /*
@@ -282,8 +300,18 @@ am_cuda_memhandle_acquire(uintptr_t sbuf, CUipcMemHandle* handle,
 #ifdef PSM_DEBUG
 		cache_miss_counter++;
 #endif
-		PSMI_CUDA_CALL(cuIpcOpenMemHandle, &cuda_ipc_dev_ptr,
-				 *handle, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
+		CUresult cudaerr;
+		PSMI_CUDA_CALL_EXCEPT(CUDA_ERROR_ALREADY_MAPPED, cuIpcOpenMemHandle,
+			&cuda_ipc_dev_ptr, *handle, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
+
+		if (cudaerr == CUDA_ERROR_ALREADY_MAPPED) {
+			// remote memory already mapped. Close all handles, clear cache,
+			// and try again
+			am_cuda_memhandle_cache_clear();
+			PSMI_CUDA_CALL(cuIpcOpenMemHandle, &cuda_ipc_dev_ptr, *handle,
+				CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
+		}
+
 		am_cuda_memhandle_cache_register(sbuf, handle,
 					       length, epid, cuda_ipc_dev_ptr);
 		return cuda_ipc_dev_ptr;
