@@ -256,15 +256,7 @@ extern "C" {
  * Matched Queue communication operations.
  *
  * @param[in] ep Endpoint over which to initialize Matched Queue
- * @param[in] tag_order_mask Order mask hint to let MQ know what bits of the
- *                           send tag are required to maintain MQ message
- *                           order.  In MPI parlance, this mask sets the bits
- *                           that store the context (or communicator ID).  The
- *                           user can choose to pass PSM2_MQ_ORDERMASK_NONE or
- *                           PSM2_MQ_ORDERMASK_ALL to tell MQ to respectively
- *                           provide no ordering guarantees or to provide
- *                           ordering over all messages by ignoring the
- *                           contexts of the send tags.
+ * @param[in] ignored
  * @param[in] opts Set of options for Matched Queue
  * @param[in] numopts Number of options passed
  * @param[out] mq User-supplied storage to return the Matched Queue handle
@@ -311,7 +303,7 @@ extern "C" {
    @endcode
  */
 psm2_error_t
-psm2_mq_init(psm2_ep_t ep, uint64_t tag_order_mask,
+psm2_mq_init(psm2_ep_t ep, uint64_t ignored,
 	    const struct psm2_optkey *opts, int numopts, psm2_mq_t *mq);
 
 #define PSM2_MQ_ORDERMASK_NONE	0ULL

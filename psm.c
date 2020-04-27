@@ -88,6 +88,8 @@ char *affinity_shm_name;
 int is_cuda_enabled;
 int is_gdr_copy_enabled;
 int device_support_gpudirect;
+int gpu_p2p_supported = 0;
+int my_gpu_device = 0;
 int cuda_lib_version;
 int is_driver_gpudirect_enabled;
 int is_cuda_primary_context_retain = 0;
@@ -169,6 +171,7 @@ int psmi_cuda_lib_load()
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuCtxSetCurrent);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuPointerGetAttribute);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuPointerSetAttribute);
+	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDeviceCanAccessPeer);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDeviceGetAttribute);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDeviceGet);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDeviceGetCount);
@@ -229,22 +232,26 @@ int psmi_cuda_initialize()
 		return err;
 	}
 
-	CUdevice device;
+	CUdevice current_device;
 	CUcontext primary_ctx;
-	PSMI_CUDA_CALL(cuCtxGetDevice, &device);
+	PSMI_CUDA_CALL(cuCtxGetDevice, &current_device);
 	int is_ctx_active;
 	unsigned ctx_flags;
-	PSMI_CUDA_CALL(cuDevicePrimaryCtxGetState, device, &ctx_flags, &is_ctx_active);
+	PSMI_CUDA_CALL(cuDevicePrimaryCtxGetState, current_device, &ctx_flags,
+			&is_ctx_active);
 	if (!is_ctx_active) {
 		/* There is an issue where certain CUDA API calls create
 		 * contexts but does not make it active which cause the
 		 * driver API call to fail with error 709 */
-		PSMI_CUDA_CALL(cuDevicePrimaryCtxRetain, &primary_ctx, device);
+		PSMI_CUDA_CALL(cuDevicePrimaryCtxRetain, &primary_ctx,
+				current_device);
 		is_cuda_primary_context_retain = 1;
 	}
 
 	/* Check if all devices support Unified Virtual Addressing. */
 	PSMI_CUDA_CALL(cuDeviceGetCount, &num_devices);
+
+	device_support_gpudirect = 1;
 
 	for (dev = 0; dev < num_devices; dev++) {
 		CUdevice device;
@@ -265,11 +272,24 @@ int psmi_cuda_initialize()
 				&major,
 				CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
 				device);
-		if (major >= 3)
-			device_support_gpudirect = 1;
-		else {
+		if (major < 3) {
 			device_support_gpudirect = 0;
-			_HFI_INFO("Device %d does not support GPUDirect RDMA (Non-fatal error) \n", dev);
+			_HFI_INFO("CUDA device %d does not support GPUDirect RDMA (Non-fatal error)\n", dev);
+		}
+
+		if (device != current_device) {
+			int canAccessPeer = 0;
+			PSMI_CUDA_CALL(cuDeviceCanAccessPeer, &canAccessPeer,
+					current_device, device);
+
+			if (canAccessPeer != 1)
+				_HFI_DBG("CUDA device %d does not support P2P from current device (Non-fatal error)\n", dev);
+			else
+				gpu_p2p_supported |= (1 << device);
+		} else {
+			/* Always support p2p on the same GPU */
+			my_gpu_device = device;
+			gpu_p2p_supported |= (1 << device);
 		}
 	}
 
@@ -363,10 +383,12 @@ psm2_error_t __psm2_init(int *major, int *minor)
 			"!!! WARNING !!! You are running an internal-only PSM *PROFILE* build.\n");
 #endif
 
+#ifdef PSM_FI
 	/* Make sure we complain if fault injection is enabled */
 	if (getenv("PSM2_FI") && !getenv("PSM2_NO_WARN"))
 		fprintf(stderr,
 			"!!! WARNING !!! You are running with fault injection enabled!\n");
+#endif /* #ifdef PSM_FI */
 
 	/* Make sure, as an internal check, that this version knows how to detect
 	 * compatibility with other library versions it may communicate with */
@@ -468,7 +490,9 @@ psm2_error_t __psm2_init(int *major, int *minor)
 
 	psmi_multi_ep_init();
 
+#ifdef PSM_FI
 	psmi_faultinj_init();
+#endif /* #ifdef PSM_FI */
 
 	psmi_epid_init();
 
@@ -604,18 +628,21 @@ psm2_error_t __psm2_info_query(psm2_info_query_t q, void *out,
 	        2, /* PSM2_INFO_QUERY_MTU               */
 		2, /* PSM2_INFO_QUERY_LINK_SPEED        */
 		1, /* PSM2_INFO_QUERY_NETWORK_TYPE      */
+		0, /* PSM2_INFO_QUERY_FEATURE_MASK      */
 	};
 	psm2_error_t rv = PSM2_INTERNAL_ERR;
 
 	if ((q < 0) ||
-	    (q >= PSM2_INFO_QUERY_LAST) ||
-	    (nargs != expected_arg_cnt[q]))
-		return rv;
+	    (q >= PSM2_INFO_QUERY_LAST))
+		return 	PSM2_IQ_INVALID_QUERY;
+
+	if (nargs != expected_arg_cnt[q])
+		return PSM2_PARAM_ERR;
 
 	switch (q)
 	{
 	case PSM2_INFO_QUERY_NUM_UNITS:
-		*((uint32_t*)out) = psmi_hal_get_num_units_(1);
+		*((uint32_t*)out) = psmi_hal_get_num_units_();
 		rv = PSM2_OK;
 		break;
 	case PSM2_INFO_QUERY_NUM_PORTS:
@@ -719,7 +746,16 @@ psm2_error_t __psm2_info_query(psm2_info_query_t q, void *out,
 				rv = PSM2_OK;
 			}
 		}
-
+		break;
+	case PSM2_INFO_QUERY_FEATURE_MASK:
+		{
+#ifdef PSM_CUDA
+		*((uint32_t*)out) = PSM2_INFO_QUERY_FEATURE_CUDA;
+#else
+		*((uint32_t*)out) = 0;
+#endif /* #ifdef PSM_CUDA */
+		}
+		rv = PSM2_OK;
 		break;
 	default:
 		break;
@@ -751,21 +787,23 @@ psm2_error_t __psm2_finalize(void)
 	GENERIC_PERF_DUMP(stderr);
 	ep = psmi_opened_endpoint;
 	while (ep != NULL) {
-		psmi_opened_endpoint = ep->user_ep_next;
+		psm2_ep_t saved_ep = ep->user_ep_next;
 		psm2_ep_close(ep, PSM2_EP_CLOSE_GRACEFUL,
 			     2 * PSMI_MIN_EP_CLOSE_TIMEOUT);
-		ep = psmi_opened_endpoint;
+		psmi_opened_endpoint = ep = saved_ep;
 	}
 
-	psmi_epid_fini();
-
+#ifdef PSM_FI
 	psmi_faultinj_fini();
+#endif /* #ifdef PSM_FI */
 
 	/* De-allocate memory for any allocated space to store hostnames */
 	psmi_epid_itor_init(&itor, PSMI_EP_HOSTNAME);
 	while ((hostname = psmi_epid_itor_next(&itor)))
 		psmi_free(hostname);
 	psmi_epid_itor_fini(&itor);
+
+	psmi_epid_fini();
 
 	/* unmap shared mem object for affinity */
 	if (psmi_affinity_shared_file_opened) {
@@ -807,15 +845,25 @@ psm2_error_t __psm2_finalize(void)
 	psmi_hal_finalize();
 #ifdef PSM_CUDA
 	if (is_cuda_primary_context_retain) {
+		/*
+		 * This code will be called during deinitialization, and if
+		 * CUDA is deinitialized before PSM, then
+		 * CUDA_ERROR_DEINITIALIZED will happen here
+		 */
 		CUdevice device;
-		PSMI_CUDA_CALL(cuCtxGetDevice, &device);
-		PSMI_CUDA_CALL(cuDevicePrimaryCtxRelease, device);
+		if (psmi_cuCtxGetDevice(&device) == CUDA_SUCCESS)
+			PSMI_CUDA_CALL(cuDevicePrimaryCtxRelease, device);
 	}
 #endif
 
 	psmi_isinit = PSMI_FINALIZED;
 	PSM2_LOG_MSG("leaving");
 	psmi_log_fini();
+
+	psmi_stats_deregister_all();
+
+	psmi_heapdebug_finalize();
+
 	return PSM2_OK;
 }
 PSMI_API_DECL(psm2_finalize)

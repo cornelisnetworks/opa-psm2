@@ -83,6 +83,8 @@
 #define PSMI_SL_MAX	31
 #define PSMI_SC_ADMIN	15
 #define PSMI_VL_ADMIN	15
+#define PSMI_SC_NBITS   5  /* Number of bits in SC */
+#define PSMI_N_SCS       (1 << PSMI_SC_NBITS)  /* The number of SC's */
 
 #define PSMI_EPID_PACK_V1(lid, context, subcontext, hfiunit, epid_version, rank) \
 	(((((uint64_t)lid)&0xffff)<<16)			|								\
@@ -175,6 +177,7 @@ struct psm2_ep {
 
 	/* All ptl data is allocated inline below */
 	uint8_t ptl_base_data[0] __attribute__ ((aligned(64)));
+	bool skip_affinity;
 };
 
 struct mqq {

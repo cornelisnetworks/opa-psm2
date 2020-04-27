@@ -53,6 +53,8 @@
 
 #include "psm_hal_gen1.h"
 
+extern size_t arrsz[MAPSIZE_MAX];
+
 static inline struct _hfp_gen1 *get_psm_gen1_hi(void)
 {
 	return (struct _hfp_gen1*) psmi_hal_current_hal_instance;
@@ -64,16 +66,16 @@ static PSMI_HAL_INLINE int hfp_gen1_initialize(psmi_hal_instance_t *phi)
 	return 0;
 }
 
-/* hfp_gen1_finalize */
-static PSMI_HAL_INLINE int hfp_gen1_finalize(void)
+/* hfp_gen1_finalize_ */
+static PSMI_HAL_INLINE int hfp_gen1_finalize_(void)
 {
 	return 0;
 }
 
 /* hfp_gen1_get_num_units */
-static PSMI_HAL_INLINE int hfp_gen1_get_num_units(int wait)
+static PSMI_HAL_INLINE int hfp_gen1_get_num_units(void)
 {
-	return hfi_get_num_units(wait);
+	return hfi_get_num_units();
 }
 
 /* hfp_gen1_get_num_ports */
@@ -120,63 +122,100 @@ static PSMI_HAL_INLINE int hfp_gen1_get_num_free_contexts(int unit)
 	return -PSM_HAL_ERROR_GENERAL_ERROR;
 }
 
+static void free_egr_buffs(hfp_gen1_pc_private *psm_hw_ctxt)
+{
+#define FREE_EGR_BUFFS_TABLE(cl_qs_arr, index)          ips_recvq_egrbuf_table_free(((cl_qs_arr)[index]).egr_buffs)
+	size_t i, index, subctxt_cnt;
+	psm_hal_gen1_cl_q_t *cl_qs;
+
+	cl_qs = psm_hw_ctxt->cl_qs;
+	index = PSM_HAL_CL_Q_RX_EGR_Q;
+	FREE_EGR_BUFFS_TABLE(cl_qs, index);
+
+	subctxt_cnt = psm_hw_ctxt->user_info.subctxt_cnt;
+	for (i = 0; i < subctxt_cnt; i++) {
+		index = PSM_HAL_GET_SC_CL_Q_RX_EGR_Q(i);
+		FREE_EGR_BUFFS_TABLE(cl_qs, index);
+	}
+#undef FREE_EGR_BUFFS_TABLE
+}
+
+static void unmap_hfi_mem(hfp_gen1_pc_private *psm_hw_ctxt)
+{
+	size_t subctxt_cnt = psm_hw_ctxt->user_info.subctxt_cnt;
+	struct _hfi_ctrl *ctrl = psm_hw_ctxt->ctrl;
+	struct hfi1_base_info *binfo = &ctrl->base_info;
+	struct hfi1_ctxt_info *cinfo = &ctrl->ctxt_info;
+
+	/* 1. Unmap the PIO credits address */
+	HFI_MUNMAP_ERRCHECK(binfo, sc_credits_addr, arrsz[SC_CREDITS]);
+
+	/* 2. Unmap the PIO buffer SOP address */
+	HFI_MUNMAP_ERRCHECK(binfo, pio_bufbase_sop, arrsz[PIO_BUFBASE_SOP]);
+
+	/* 3. Unmap the PIO buffer address */
+	HFI_MUNMAP_ERRCHECK(binfo, pio_bufbase, arrsz[PIO_BUFBASE]);
+
+	/* 4. Unmap the receive header queue */
+	HFI_MUNMAP_ERRCHECK(binfo, rcvhdr_bufbase, arrsz[RCVHDR_BUFBASE]);
+
+	/* 5. Unmap the receive eager buffer */
+	HFI_MUNMAP_ERRCHECK(binfo, rcvegr_bufbase, arrsz[RCVEGR_BUFBASE]);
+
+	/* 6. Unmap the sdma completion queue */
+	HFI_MUNMAP_ERRCHECK(binfo, sdma_comp_bufbase, arrsz[SDMA_COMP_BUFBASE]);
+
+	/* 7. Unmap RXE per-context CSRs */
+	HFI_MUNMAP_ERRCHECK(binfo, user_regbase, arrsz[USER_REGBASE]);
+	ctrl->__hfi_rcvhdrtail = NULL;
+	ctrl->__hfi_rcvhdrhead = NULL;
+	ctrl->__hfi_rcvegrtail = NULL;
+	ctrl->__hfi_rcvegrhead = NULL;
+	ctrl->__hfi_rcvofftail = NULL;
+	if (cinfo->runtime_flags & HFI1_CAP_HDRSUPP) {
+		ctrl->__hfi_rcvtidflow = NULL;
+	}
+
+	/* 8. Unmap the rcvhdrq tail register address */
+	if (cinfo->runtime_flags & HFI1_CAP_DMA_RTAIL) {
+		/* only unmap the RTAIL if it was enabled in the first place */
+		HFI_MUNMAP_ERRCHECK(binfo, rcvhdrtail_base, arrsz[RCVHDRTAIL_BASE]);
+	} else {
+		binfo->rcvhdrtail_base = 0;
+	}
+
+	/* 9. Unmap the event page */
+	HFI_MUNMAP_ERRCHECK(binfo, events_bufbase, arrsz[EVENTS_BUFBASE]);
+
+	/* 10. Unmap the status page */
+	HFI_MUNMAP_ERRCHECK(binfo, status_bufbase, arrsz[STATUS_BUFBASE]);
+
+	/* 11. If subcontext is used, unmap the buffers */
+	if (subctxt_cnt > 0) {
+		/* only unmap subcontext-related stuff it subcontexts are enabled */
+		HFI_MUNMAP_ERRCHECK(binfo, subctxt_uregbase, arrsz[SUBCTXT_UREGBASE]);
+		HFI_MUNMAP_ERRCHECK(binfo, subctxt_rcvhdrbuf, arrsz[SUBCTXT_RCVHDRBUF]);
+		HFI_MUNMAP_ERRCHECK(binfo, subctxt_rcvegrbuf, arrsz[SUBCTXT_RCVEGRBUF]);
+	}
+}
+
 /* hfp_gen1_close_context */
 static PSMI_HAL_INLINE int hfp_gen1_close_context(psmi_hal_hw_context *ctxtp)
 {
+	hfp_gen1_pc_private *psm_hw_ctxt;
+
 	if (!ctxtp || !*ctxtp)
 		return PSM_HAL_ERROR_OK;
 
-	int i;
-	hfp_gen1_pc_private *psm_hw_ctxt = *ctxtp;
+	psm_hw_ctxt = (hfp_gen1_pc_private *)(*ctxtp);
 
-	ips_recvq_egrbuf_table_free(psm_hw_ctxt->cl_qs[PSM_HAL_CL_Q_RX_EGR_Q].egr_buffs);
+	/* Free the egress buffers */
+	free_egr_buffs(psm_hw_ctxt);
 
-	for (i=0;i < psm_hw_ctxt->user_info.subctxt_cnt;i++)
-		ips_recvq_egrbuf_table_free(
-			psm_hw_ctxt->cl_qs[
-				PSM_HAL_GET_SC_CL_Q_RX_EGR_Q(i)
-				].egr_buffs);
-	struct hfi1_base_info *binfo;
-	struct hfi1_ctxt_info *cinfo;
-	int __hfi_pg_sz = sysconf(_SC_PAGESIZE);
-	struct _hfi_ctrl *ctrl = psm_hw_ctxt->ctrl;
-	binfo = &ctrl->base_info;
-	cinfo = &ctrl->ctxt_info;
+	/* Unmap the HFI memory */
+	unmap_hfi_mem(psm_hw_ctxt);
 
-	munmap((void*)PSMI_ALIGNDOWN(binfo->sc_credits_addr, __hfi_pg_sz),
-	       __hfi_pg_sz);
-	munmap((void*)PSMI_ALIGNDOWN(binfo->pio_bufbase_sop, __hfi_pg_sz),
-	       cinfo->credits * 64);
-	munmap((void*)PSMI_ALIGNDOWN(binfo->pio_bufbase, __hfi_pg_sz),
-	       cinfo->credits * 64);
-	munmap((void*)PSMI_ALIGNDOWN(binfo->rcvhdr_bufbase, __hfi_pg_sz),
-	       cinfo->rcvhdrq_cnt * cinfo->rcvhdrq_entsize);
-	munmap((void*)PSMI_ALIGNDOWN(binfo->rcvegr_bufbase, __hfi_pg_sz),
-	       cinfo->egrtids * cinfo->rcvegr_size);
-	munmap((void*)PSMI_ALIGNDOWN(binfo->sdma_comp_bufbase, __hfi_pg_sz),
-	       cinfo->sdma_ring_size * sizeof(struct hfi1_sdma_comp_entry));
-	/* only unmap the RTAIL if it was enabled in the first place */
-	if (cinfo->runtime_flags & HFI1_CAP_DMA_RTAIL) {
-		munmap((void*)PSMI_ALIGNDOWN(binfo->rcvhdrtail_base, __hfi_pg_sz),
-		       __hfi_pg_sz);
-	}
-	munmap((void*)PSMI_ALIGNDOWN(binfo->user_regbase, __hfi_pg_sz),
-	       __hfi_pg_sz);
-	munmap((void*)PSMI_ALIGNDOWN(binfo->events_bufbase, __hfi_pg_sz),
-	       __hfi_pg_sz);
-	munmap((void*)PSMI_ALIGNDOWN(binfo->status_bufbase, __hfi_pg_sz),
-	       __hfi_pg_sz);
-
-	/* only unmap subcontext-related stuff it subcontexts are enabled */
-	if (psm_hw_ctxt->user_info.subctxt_cnt > 0) {
-		munmap((void*)PSMI_ALIGNDOWN(binfo->subctxt_uregbase, __hfi_pg_sz),
-		       __hfi_pg_sz);
-		munmap((void*)PSMI_ALIGNDOWN(binfo->subctxt_rcvhdrbuf, __hfi_pg_sz),
-		       __hfi_pg_sz);
-		munmap((void*)PSMI_ALIGNDOWN(binfo->subctxt_rcvegrbuf, __hfi_pg_sz),
-		       __hfi_pg_sz);
-	}
-
+	/* Clean up the rest */
 	close(psm_hw_ctxt->ctrl->fd);
 	free(psm_hw_ctxt->ctrl);
 	psmi_free(psm_hw_ctxt);
@@ -226,7 +265,7 @@ psmi_init_userinfo_params(psm2_ep_t ep, int unit_id,
 	if (!shcontexts_enabled)
 		return err;
 
-	avail_contexts = hfi_get_num_contexts(unit_id, 0);
+	avail_contexts = hfi_get_num_contexts(unit_id);
 
 	if (avail_contexts == 0) {
 		err = psmi_handle_error(NULL, PSM2_EP_NO_DEVICE,
@@ -465,9 +504,16 @@ uint64_t get_cap_mask(uint64_t gen1_mask)
 		  { HFI1_CAP_STATIC_RATE_CTRL,	  PSM_HAL_CAP_STATIC_RATE_CTRL    },
 		  { HFI1_CAP_SDMA_HEAD_CHECK,	  PSM_HAL_CAP_SDMA_HEAD_CHECK     },
 		  { HFI1_CAP_EARLY_CREDIT_RETURN, PSM_HAL_CAP_EARLY_CREDIT_RETURN },
-#ifdef PSM_CUDA
+#ifdef HFI1_CAP_GPUDIRECT_OT
 		  { HFI1_CAP_GPUDIRECT_OT,        PSM_HAL_CAP_GPUDIRECT_OT        },
-#endif
+#else /* #ifdef HFI1_CAP_GPUDIRECT_OT */
+#ifndef PSM_CUDA
+		  /* lifted from hfi1_user.h */
+		  { (1UL << 63),                  PSM_HAL_CAP_GPUDIRECT_OT        },
+#else /* #ifndef PSM_CUDA */
+#error "Inconsistent build.  HFI1_CAP_GPUDIRECT_OT must be defined for CUDA builds."
+#endif /* #ifndef PSM_CUDA */
+#endif /* #ifdef HFI1_CAP_GPUDIRECT_OT */
 	  };
 	uint64_t rv = 0;
 	int i;
@@ -498,7 +544,7 @@ static PSMI_HAL_INLINE int hfp_gen1_context_open(int unit,
 		goto bail;
 	}
 
-	memset(pc_private,0,sizeof(hfp_gen1_pc_private));
+	memset(pc_private, 0, sizeof(hfp_gen1_pc_private));
 
 	char dev_name[PATH_MAX];
 	fd = hfi_context_open_ex(unit, port, open_timeout,
@@ -518,13 +564,14 @@ static PSMI_HAL_INLINE int hfp_gen1_context_open(int unit,
 		goto bail;
 	}
 
-	/* attempt to assign the context via hfi_userinit() */
+	/* attempt to assign the context via hfi_userinit_internal() */
 	int retry = 0;
 	do {
 		if (retry > 0)
-			_HFI_INFO("hfi_userinit: failed, trying again (%d/%d)\n",
+			_HFI_INFO("hfi_userinit_internal: failed, trying again (%d/%d)\n",
 				  retry, retryCnt);
-		pc_private->ctrl = hfi_userinit(fd, &pc_private->user_info);
+		pc_private->ctrl = hfi_userinit_internal(fd, ep->skip_affinity,
+				&pc_private->user_info);
 	} while (pc_private->ctrl == NULL && ++retry <= retryCnt);
 
 	if (!pc_private->ctrl)
@@ -781,9 +828,24 @@ static PSMI_HAL_INLINE int hfp_gen1_get_port_sl2sc(int unit, int port, int sl)
 	return hfi_get_port_sl2sc(unit, port, sl);
 }
 
-static PSMI_HAL_INLINE int hfp_gen1_get_port_sc2vl(int unit, int port, int sc)
+static PSMI_HAL_INLINE int hfp_gen1_get_sc2vl_map(struct ips_proto *proto)
 {
-	return hfi_get_port_sc2vl(unit, port, sc);
+	hfp_gen1_pc_private *psm_hw_ctxt = proto->ep->context.psm_hw_ctxt;
+	uint8_t i;
+
+	/* Get SC2VL table for unit, port */
+	for (i = 0; i < PSMI_N_SCS; i++) {
+		int ret = hfi_get_port_sc2vl(
+			psmi_hal_get_unit_id( proto->ep->context.psm_hw_ctxt),
+			psmi_hal_get_port_num(proto->ep->context.psm_hw_ctxt),
+			i);
+		if (ret < 0)
+			/* Unable to get SC2VL. Set it to default */
+			ret = PSMI_VL_DEFAULT;
+
+		psm_hw_ctxt->sc2vl[i] = (uint16_t) ret;
+	}
+	return PSM_HAL_ERROR_OK;
 }
 
 static PSMI_HAL_INLINE int hfp_gen1_set_pkey(psmi_hal_hw_context ctxt, uint16_t pkey)
@@ -1146,6 +1208,46 @@ static PSMI_HAL_INLINE int hfp_gen1_get_receive_event(psmi_hal_cl_idx head_idx, 
 	       PSM_HAL_ERROR_OK)
 		return rv;
 
+	/* If the hdrq_head is before cachedlastscan, that means that we have
+	 * already prescanned this for BECNs and FECNs, so we should not check
+	 * again
+	 */
+	if_pt((rcv_ev->proto->flags & IPS_PROTO_FLAG_CCA) &&
+	      (head_idx >= rcv_ev->recvq->state->hdrq_cachedlastscan)) {
+		/* IBTA CCA handling:
+		 * If FECN bit set handle IBTA CCA protocol. For the
+		 * flow that suffered congestion we flag it to generate
+		 * a control packet with the BECN bit set - This is
+		 * currently an unsolicited ACK.
+		 *
+		 * For all MQ packets the FECN processing/BECN
+		 * generation is done in the is_expected_or_nak
+		 * function as each eager packet is inspected there.
+		 *
+		 * For TIDFLOW/Expected data transfers the FECN
+		 * bit/BECN generation is done in protoexp_data. Since
+		 * header suppression can result in even FECN packets
+		 * being suppressed the expected protocol generated
+		 * additional BECN packets if a "large" number of
+		 * generations are swapped without progress being made
+		 * for receive. "Large" is set empirically to 4.
+		 *
+		 * FECN packets are ignored for all control messages
+		 * (except ACKs and NAKs) since they indicate
+		 * congestion on the control path which is not rate
+		 * controlled. The CCA specification allows FECN on
+		 * ACKs to be disregarded as well.
+		 */
+
+		rcv_ev->is_congested =
+			_is_cca_fecn_set(rcv_ev->
+					 p_hdr) & IPS_RECV_EVENT_FECN;
+		rcv_ev->is_congested |=
+			(_is_cca_becn_set(rcv_ev->p_hdr) <<
+			 (IPS_RECV_EVENT_BECN - 1));
+	} else
+		  rcv_ev->is_congested = 0;
+
 	return PSM_HAL_ERROR_OK;
 }
 
@@ -1265,9 +1367,10 @@ ips_proto_pbc_update(struct ips_proto *proto, struct ips_flow *flow,
 		     uint32_t isCtrlMsg, struct psm_hal_pbc *pbc, uint32_t hdrlen,
 		     uint32_t paylen))
 {
+	hfp_gen1_pc_private *psm_hw_ctxt = proto->ep->context.psm_hw_ctxt;
 	int dw = (sizeof(struct psm_hal_pbc) + hdrlen + paylen) >> BYTE2DWORD_SHIFT;
 	int sc = proto->sl2sc[flow->path->pr_sl];
-	int vl = proto->sc2vl[sc];
+	int vl = psm_hw_ctxt->sc2vl[sc];
 	uint16_t static_rate = 0;
 
 	if_pf(!isCtrlMsg && flow->path->pr_active_ipd)

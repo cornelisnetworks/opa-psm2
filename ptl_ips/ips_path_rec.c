@@ -565,13 +565,13 @@ static psm2_error_t ips_none_path_rec_init(struct ips_proto *proto)
 	return err;
 }
 
-/* (Re)load the SL2VL table */
-psm2_error_t ips_ibta_init_sl2sc2vl_table(struct ips_proto *proto)
+/* (Re)load the SL2SC table */
+psm2_error_t ips_ibta_init_sl2sc_table(struct ips_proto *proto)
 {
 	int ret, i;
 
 	/* Get SL2SC table for unit, port */
-	for (i = 0; i < 32; i++) {
+	for (i = 0; i < PSMI_N_SCS; i++) {
 		if ((ret =
 		     psmi_hal_get_port_sl2sc(psmi_hal_get_unit_id(proto->ep->context.psm_hw_ctxt),
 					psmi_hal_get_port_num(proto->ep->context.psm_hw_ctxt),
@@ -582,19 +582,7 @@ psm2_error_t ips_ibta_init_sl2sc2vl_table(struct ips_proto *proto)
 
 		proto->sl2sc[i] = (uint16_t) ret;
 	}
-	/* Get SC2VL table for unit, port */
-	for (i = 0; i < 32; i++) {
-		if ((ret =
-		     psmi_hal_get_port_sc2vl(psmi_hal_get_unit_id(proto->ep->context.psm_hw_ctxt),
-					psmi_hal_get_port_num(proto->ep->context.psm_hw_ctxt),
-					(uint8_t) i)) < 0) {
-			/* Unable to get SC2VL. Set it to default */
-			ret = PSMI_VL_DEFAULT;
-		}
-
-		proto->sc2vl[i] = (uint16_t) ret;
-	}
-
+	psmi_hal_get_sc2vl_map(proto);
 	return PSM2_OK;
 }
 
@@ -633,7 +621,7 @@ psm2_error_t ips_ibta_link_updown_event(struct ips_proto *proto)
 	proto->epinfo.ep_link_rate = ips_rate_to_enum(ret);
 
 	/* Load the SL2SC2VL table */
-	ips_ibta_init_sl2sc2vl_table(proto);
+	ips_ibta_init_sl2sc_table(proto);
 
 	/* Regenerate new IPD table for the updated link rate. */
 	ips_gen_ipd_table(proto);
@@ -691,7 +679,9 @@ MOCKABLE(ips_ibta_init)(struct ips_proto *proto)
 		char ccabuf[256];
 		uint8_t *p;
 
-		proto->flags |= IPS_PROTO_FLAG_CCA;
+		/* Start out by turning on both styles of congestion control.
+		 * Later, we will eliminate the correct one. */
+		proto->flags |= IPS_PROTO_FLAG_CCA | IPS_PROTO_FLAG_CC_REPL_BECN;
 /*
  * If user set any environment variable, use self CCA.
  */
@@ -758,15 +748,18 @@ MOCKABLE(ips_ibta_init)(struct ips_proto *proto)
 		for (i = 0; i < proto->ccti_limit; i++)
 			_HFI_CCADBG("cct[%d] = 0x%04x\n", i, (int) proto->cct[i]);
 
-
+		/* Note, here, we are leaving CC style(s):
+		   (IPS_PROTO_FLAG_CCA | IPS_PROTO_FLAG_CCA_PRESCAN) */
+		proto->flags &= ~IPS_PROTO_FLAG_CC_REPL_BECN;
 		goto finishcca;
 
 /*
  * Disable CCA.
  */
 disablecca:
-		proto->flags &= ~IPS_PROTO_FLAG_CCA;
-		proto->flags &= ~IPS_PROTO_FLAG_CCA_PRESCAN;
+		/* Note, here, we are leaving CC style:
+		   IPS_PROTO_FLAG_CC_REPL_BECN */
+		proto->flags &= ~(IPS_PROTO_FLAG_CCA | IPS_PROTO_FLAG_CCA_PRESCAN);
 	}
 
 finishcca:

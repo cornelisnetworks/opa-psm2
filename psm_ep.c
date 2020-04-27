@@ -57,6 +57,7 @@
 #include <sys/stat.h>
 #include <sched.h>		/* cpu_set */
 #include <ctype.h>		/* isalpha */
+#include <stdbool.h>
 
 #include "psm_user.h"
 #include "psm2_hal.h"
@@ -71,6 +72,8 @@
  */
 psm2_ep_t psmi_opened_endpoint = NULL;
 int psmi_opened_endpoint_count = 0;
+static uint16_t *hfi_lids;
+static uint32_t nlids;
 
 static psm2_error_t psmi_ep_open_device(const psm2_ep_t ep,
 				       const struct psm2_ep_open_opts *opts,
@@ -297,8 +300,6 @@ static psm2_error_t
 psmi_ep_devlids(uint16_t **lids, uint32_t *num_lids_o,
 		uint64_t my_gid_hi, uint64_t my_gid_lo)
 {
-	static uint16_t *hfi_lids;
-	static uint32_t nlids;
 	uint32_t num_units;
 	int i;
 	psm2_error_t err = PSM2_OK;
@@ -863,10 +864,6 @@ __psm2_ep_open_internal(psm2_uuid_t const unique_job_key, int *devid_enabled,
 		goto fail;
 	}
 
-	/* Set environment variable if PSM is not allowed to set affinity */
-	if (opts.affinity == PSM2_EP_OPEN_AFFINITY_SKIP)
-		setenv("HFI_NO_CPUAFFINITY", "1", 1);
-
 	/* Allocate end point structure storage */
 	ptl_sizes =
 	    (psmi_device_is_enabled(devid_enabled, PTL_DEVID_SELF) ?
@@ -921,6 +918,10 @@ __psm2_ep_open_internal(psm2_uuid_t const unique_job_key, int *devid_enabled,
 		    (union psmi_envvar_val)PSMI_BLOCKUNTIL_POLLS_BEFORE_YIELD,
 		    &envvar_val);
 	ep->yield_spin_cnt = envvar_val.e_uint;
+
+	/* Set skip_affinity flag if PSM is not allowed to set affinity */
+	if (opts.affinity == PSM2_EP_OPEN_AFFINITY_SKIP)
+		ep->skip_affinity = true;
 
 	ptl_sizes = 0;
 	amsh_ptl = ips_ptl = self_ptl = NULL;
@@ -1179,6 +1180,8 @@ psm2_error_t __psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout_in)
 
 	PSMI_LOCK(psmi_creation_lock);
 
+	psmi_am_fini_internal(ep);
+
 	if (psmi_opened_endpoint == NULL) {
 		err = psmi_handle_error(NULL, PSM2_EP_WAS_CLOSED,
 					"PSM Endpoint is closed or does not exist");
@@ -1322,6 +1325,7 @@ psm2_error_t __psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout_in)
 		if (psmi_ep_device_is_enabled(ep, PTL_DEVID_IPS))
 			psmi_context_close(&ep->context);
 
+		psmi_epid_remove_all(ep);
 		psmi_free(ep->epaddr);
 		psmi_free(ep->context_mylabel);
 
@@ -1332,9 +1336,17 @@ psm2_error_t __psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout_in)
 
 	} while ((err == PSM2_OK || err == PSM2_TIMEOUT) && tmp != ep);
 
-	if (mmq)
-	        err = psmi_mq_free(mmq);
+	if (mmq) {
+		psmi_destroy_lock(&(mmq->progress_lock));
+		err = psmi_mq_free(mmq);
+	}
 
+	if (hfi_lids)
+	{
+		psmi_free(hfi_lids);
+		hfi_lids = NULL;
+		nlids = 0;
+	}
 
 	PSMI_UNLOCK(psmi_creation_lock);
 
@@ -1363,7 +1375,6 @@ psmi_ep_open_device(const psm2_ep_t ep,
 	 *    option affinity skip.
 	 */
 	if (psmi_ep_device_is_enabled(ep, PTL_DEVID_IPS)) {
-		uint32_t rcvthread_flags;
 		union psmi_envvar_val env_rcvthread;
 		static int norcvthread;	/* only for first rail */
 
@@ -1394,11 +1405,10 @@ psmi_ep_open_device(const psm2_ep_t ep,
 			    (union psmi_envvar_val)(norcvthread++ ? 0 :
 						    PSMI_RCVTHREAD_FLAGS),
 			    &env_rcvthread);
-		rcvthread_flags = env_rcvthread.e_uint;
 
-		/* If enabled, use the pollurg capability to implement a receive
+		/* If enabled, use the polling capability to implement a receive
 		 * interrupt thread that can handle urg packets */
-		if (rcvthread_flags) {
+		if (env_rcvthread.e_uint) {
 			psmi_hal_add_sw_status(PSM_HAL_PSMI_RUNTIME_RTS_RX_THREAD);
 #ifdef PSMI_PLOCK_IS_NOLOCK
 			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
@@ -1406,7 +1416,6 @@ psmi_ep_open_device(const psm2_ep_t ep,
 					  "with RCVTHREAD on");
 #endif
 		}
-		context->rcvthread_flags = rcvthread_flags;
 
 		*epid = context->epid;
 	} else if (psmi_ep_device_is_enabled(ep, PTL_DEVID_AMSH)) {

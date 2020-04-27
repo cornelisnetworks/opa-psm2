@@ -72,15 +72,20 @@ static size_t sysfs_path_len;
 static char *hfifs_path;
 static long sysfs_page_size;
 
-void sysfs_init(const char *dflt_hfi_class_path)
+int sysfs_init(const char *dflt_hfi_class_path)
 {
+	int rv = 0;
+
 	if (NULL != (sysfs_path = getenv("HFI_SYSFS_PATH")))
 	{
 		char *syspath = strdup(sysfs_path);
 
 		if (!syspath)
+		{
 			_HFI_DBG("Failed to strdup(\"%s\") for syspath.\n",
 				 sysfs_path);
+			rv = -1;
+		}
 		else
 			sysfs_path = syspath;
 	}
@@ -89,7 +94,10 @@ void sysfs_init(const char *dflt_hfi_class_path)
 		char *syspath = malloc(len);
 
 		if (!syspath)
+		{
 			_HFI_DBG("Failed to alloc %u bytes for syspath.\n",len);
+			rv = -1;
+		}
 		else
 		{
 			snprintf(syspath, len, "%s_0", dflt_hfi_class_path);
@@ -104,6 +112,7 @@ void sysfs_init(const char *dflt_hfi_class_path)
 		{
 			_HFI_DBG("Did not find sysfs directory %s, using anyway\n",
 				 sysfs_path);
+			rv = -1;
 		}
 		else
 		{
@@ -125,6 +134,13 @@ void sysfs_init(const char *dflt_hfi_class_path)
 
 	if (!sysfs_page_size)
 		sysfs_page_size = sysconf(_SC_PAGESIZE);
+
+	return rv;
+}
+
+void sysfs_fini(void)
+{
+	free(sysfs_path);
 }
 
 const char *hfi_sysfs_path(void)

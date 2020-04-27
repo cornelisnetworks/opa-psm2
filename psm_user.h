@@ -64,6 +64,7 @@
 #include <numa.h>
 #include <semaphore.h>
 #include <fcntl.h>
+#include <stdbool.h>
 
 #include "psm2.h"
 #include "psm2_mq.h"
@@ -301,6 +302,8 @@ void psmi_profile_reblock(int did_no_progress) __attribute__ ((weak));
 extern int is_cuda_enabled;
 extern int is_gdr_copy_enabled;
 extern int device_support_gpudirect;
+extern int gpu_p2p_supported;
+extern int my_gpu_device;
 extern int cuda_lib_version;
 
 extern CUcontext ctxt;
@@ -312,6 +315,7 @@ CUresult (*psmi_cuCtxGetCurrent)(CUcontext *c);
 CUresult (*psmi_cuCtxSetCurrent)(CUcontext c);
 CUresult (*psmi_cuPointerGetAttribute)(void *data, CUpointer_attribute pa, CUdeviceptr p);
 CUresult (*psmi_cuPointerSetAttribute)(void *data, CUpointer_attribute pa, CUdeviceptr p);
+CUresult (*psmi_cuDeviceCanAccessPeer)(int *canAccessPeer, CUdevice dev, CUdevice peerDev);
 CUresult (*psmi_cuDeviceGet)(CUdevice* device, int  ordinal);
 CUresult (*psmi_cuDeviceGetAttribute)(int* pi, CUdevice_attribute attrib, CUdevice dev);
 CUresult (*psmi_cuDriverGetVersion)(int* driverVersion);
@@ -383,7 +387,7 @@ CUresult (*psmi_cuDevicePrimaryCtxRelease)(CUdevice device);
 
 PSMI_ALWAYS_INLINE(
 int
-_psmi_is_cuda_mem(void *ptr))
+_psmi_is_cuda_mem(const void *ptr))
 {
 	CUresult cres;
 	CUmemorytype mt;
@@ -401,14 +405,8 @@ _psmi_is_cuda_mem(void *ptr))
 		return 0;
 }
 
-PSMI_ALWAYS_INLINE(
-int
-_psmi_is_cuda_enabled())
-{
-	return is_cuda_enabled;
-}
-
-#define PSMI_IS_CUDA_ENABLED _psmi_is_cuda_enabled()
+#define PSMI_IS_CUDA_ENABLED  likely(is_cuda_enabled)
+#define PSMI_IS_CUDA_DISABLED unlikely(!is_cuda_enabled)
 
 PSMI_ALWAYS_INLINE(
 int
@@ -479,6 +477,22 @@ enum psm2_chb_match_type {
 	PSMI_CUDA_CONTINUE = 3
 };
 typedef enum psm2_chb_match_type psm2_chb_match_type_t;
+
+/*
+ * CUDA documentation dictates the use of SYNC_MEMOPS attribute
+ * when the buffer pointer received into PSM has been allocated
+ * by the application. This guarantees that all memory operations
+ * to this region of memory (used by multiple layers of the stack)
+ * always synchronize.
+ */
+static inline
+void psmi_cuda_set_attr_sync_memops(const void *ubuf)
+{
+	int true_flag = 1;
+
+	PSMI_CUDA_CALL(cuPointerSetAttribute, &true_flag,
+		       CU_POINTER_ATTRIBUTE_SYNC_MEMOPS, (CUdeviceptr) ubuf);
+}
 
 #endif /* PSM_CUDA */
 

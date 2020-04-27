@@ -84,8 +84,11 @@ int hfi_get_ctrs_port_names(int unitno, char **namep);
 /* sysfs helper routines (only those currently used are exported;
  * try to avoid using others) */
 
-/* Initializes the following sysfs helper routines. */
-void sysfs_init(const char *dflt_hfi_class_path);
+/* Initializes the following sysfs helper routines.
+   sysfs_init() returns 0 on success, non-zero on an error: */
+int sysfs_init(const char *dflt_hfi_class_path);
+/* Complementary */
+void sysfs_fini(void);
 
 /* read a string value into buff, no more than size bytes.
    returns the number of bytes read */

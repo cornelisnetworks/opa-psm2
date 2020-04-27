@@ -149,21 +149,6 @@ _get_proto_subcontext(const struct ips_message_header *p_hdr)
 		 HFI_BTH_SUBCTXT_SHIFT) & HFI_BTH_SUBCTXT_MASK);
 }
 
-/* Determine if FECN bit is set IBTA 1.2.1 CCA Annex A*/
-
-static __inline__ uint8_t
-_is_cca_fecn_set(const struct ips_message_header *p_hdr)
-{
-	return (__be32_to_cpu(p_hdr->bth[1]) >> HFI_BTH_FECN_SHIFT) & 0x1;
-}
-
-/* Detrmine if BECN bit is set IBTA 1.2.1 CCA Annex A*/
-static __inline__ uint8_t
-_is_cca_becn_set(const struct ips_message_header *p_hdr)
-{
-	return (__be32_to_cpu(p_hdr->bth[1]) >> HFI_BTH_BECN_SHIFT) & 0x1;
-}
-
 static __inline__ void _dump_invalid_pkt(struct ips_recvhdrq_event *rcv_ev)
 {
 	char *payload = ips_recvhdrq_event_payload(rcv_ev);
@@ -425,46 +410,6 @@ psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 		_HFI_VDBG
 		    ("new packet: rcv_hdr %p, rhf %" PRIx64 "\n",
 		     rcv_ev.p_hdr, rcv_ev.psm_hal_rhf.raw_rhf);
-
-		/* If the hdrq_head is before cachedlastscan, that means that we have
-		 * already prescanned this for BECNs and FECNs, so we should not check
-		 * again
-		 */
-		if_pt((recvq->proto->flags & IPS_PROTO_FLAG_CCA) &&
-				(state->hdrq_head >= state->hdrq_cachedlastscan)) {
-			/* IBTA CCA handling:
-			 * If FECN bit set handle IBTA CCA protocol. For the
-			 * flow that suffered congestion we flag it to generate
-			 * a control packet with the BECN bit set - This is
-			 * currently an unsolicited ACK.
-			 *
-			 * For all MQ packets the FECN processing/BECN
-			 * generation is done in the is_expected_or_nak
-			 * function as each eager packet is inspected there.
-			 *
-			 * For TIDFLOW/Expected data transfers the FECN
-			 * bit/BECN generation is done in protoexp_data. Since
-			 * header suppression can result in even FECN packets
-			 * being suppressed the expected protocol generated
-			 * additional BECN packets if a "large" number of
-			 * generations are swapped without progress being made
-			 * for receive. "Large" is set empirically to 4.
-			 *
-			 * FECN packets are ignored for all control messages
-			 * (except ACKs and NAKs) since they indicate
-			 * congestion on the control path which is not rate
-			 * controlled. The CCA specification allows FECN on
-			 * ACKs to be disregarded as well.
-			 */
-
-			rcv_ev.is_congested =
-			    _is_cca_fecn_set(rcv_ev.
-					     p_hdr) & IPS_RECV_EVENT_FECN;
-			rcv_ev.is_congested |=
-			    (_is_cca_becn_set(rcv_ev.p_hdr) <<
-			     (IPS_RECV_EVENT_BECN - 1));
-		} else
-			rcv_ev.is_congested = 0;
 
 #ifdef PSM_DEBUG
 		if_pf(_check_headers(&rcv_ev, psm_hal_hdr_q))

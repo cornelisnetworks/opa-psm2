@@ -660,11 +660,11 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 	gpudirect_recv_threshold = env_gpudirect_recv_thresh.e_uint;
 
 	if (env_gpudirect_rdma.e_uint && device_support_gpudirect) {
-		if (!PSMI_IS_CUDA_ENABLED ||
+		if (PSMI_IS_CUDA_DISABLED ||
 			/* All pio, No SDMA*/
 			(proto->flags & IPS_PROTO_FLAG_SPIO) ||
 			!(protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED) ||
-			!PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
+			PSMI_IS_DRIVER_GPUDIRECT_DISABLED)
 			err = psmi_handle_error(PSMI_EP_NORETURN,
 					PSM2_INTERNAL_ERR,
 					"Requires hfi1 driver with GPU-Direct feature enabled.\n");
@@ -685,7 +685,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 					&env_gpudirect_rdma_send);
 
 		if (env_gpudirect_rdma_send.e_uint && device_support_gpudirect) {
-			if (!PSMI_IS_CUDA_ENABLED ||
+			if (PSMI_IS_CUDA_DISABLED ||
 				/* All pio, No SDMA*/
 				(proto->flags & IPS_PROTO_FLAG_SPIO))
 				err = psmi_handle_error(PSMI_EP_NORETURN,
@@ -705,7 +705,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 					&env_gpudirect_rdma_recv);
 
 		if (env_gpudirect_rdma_recv.e_uint && device_support_gpudirect) {
-			if (!PSMI_IS_CUDA_ENABLED ||
+			if (PSMI_IS_CUDA_DISABLED ||
 				!(protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED))
 					err = psmi_handle_error(PSMI_EP_NORETURN,
 							PSM2_INTERNAL_ERR,
@@ -785,6 +785,9 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 	psm2_error_t err = PSM2_OK;
 	int i;
 	union psmi_envvar_val grace_intval;
+
+	/* Poll one more time to attempt to synchronize with the peer ep's. */
+	ips_ptl_poll(proto->ptl, 0);
 
 	psmi_getenv("PSM2_CLOSE_GRACE_PERIOD",
 		    "Additional grace period in seconds for closing end-point.",
@@ -900,12 +903,12 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 		uint64_t t_grace_interval_start = get_cycles();
 		int num_disconnect_requests = proto->num_disconnect_requests;
 		PSMI_BLOCKUNTIL(
-		    proto->ep, err,
-		    proto->num_connected_incoming == 0 ||
+			proto->ep, err,
+			proto->num_connected_incoming == 0 ||
 			(!psmi_cycles_left(t_start, timeout_in) &&
-			    (!psmi_cycles_left(t_grace_interval_start,
-					       t_grace_interval) ||
-			     !psmi_cycles_left(t_grace_start, t_grace_time))));
+			 (!psmi_cycles_left(t_grace_interval_start,
+					    t_grace_interval) ||
+			  !psmi_cycles_left(t_grace_start, t_grace_time))));
 		if (num_disconnect_requests == proto->num_disconnect_requests) {
 			/* nothing happened in this grace interval so break out early */
 			break;
@@ -1649,6 +1652,8 @@ fail:
 	return err;
 }
 
+#ifdef PSM_FI
+
 /*
  * Fault injection in dma sends. Since DMA through writev() is all-or-nothing,
  * we don't inject faults on a packet-per-packet basis since the code gets
@@ -1670,6 +1675,8 @@ PSMI_ALWAYS_INLINE(int dma_do_fault())
 	else
 	return 0;
 }
+
+#endif /* #ifdef PSM_FI */
 
 /*
  * Driver defines the following sdma completion error code, returned
@@ -1812,10 +1819,11 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 	uint16_t iovcnt;
 	struct iovec iovec[2];
 
+#ifdef PSM_FI
 	/* See comments above for fault injection */
 	if_pf(dma_do_fault())
 	    return PSM2_OK;
-
+#endif /* #ifdef PSM_FI */
 	/*
 	 * Check if there is a sdma queue slot.
 	 */
@@ -1873,14 +1881,14 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 		sdmahdr->ctrl = 2 |
 			(PSM_HAL_EGR << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
 			(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
-	} else {
+	} else
 #endif
+	{
 		sdmahdr->ctrl = 1 |
 			(PSM_HAL_EGR << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
 			(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
-#ifdef PSM_CUDA
 	}
-#endif
+
 	/*
 	 * Write into driver to do SDMA work.
 	 */
@@ -1991,8 +1999,10 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 	int16_t credits;
 	ssize_t ret;
 
+#ifdef PSM_FI
 	/* See comments above for fault injection */
 	if_pf(dma_do_fault()) goto fail;
+#endif /* #ifdef PSM_FI */
 
 	/* Check how many SCBs to send based on flow credits */
 	credits = flow->credits;
@@ -2144,14 +2154,14 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 				sdmahdr->ctrl = 2 |
 					(PSM_HAL_EXP << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
 					(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
-			} else {
+			} else
 #endif
+			{
+
 				sdmahdr->ctrl = 1 |
 					(PSM_HAL_EXP << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
 					(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
-#ifdef PSM_CUDA
 			}
-#endif
 			_HFI_VDBG("tid-info=%p,%d\n",
 				  iovec[vec_idx - 1].iov_base,
 				  (int)iovec[vec_idx - 1].iov_len);
@@ -2162,14 +2172,13 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 				sdmahdr->ctrl = 2 |
 					(PSM_HAL_EGR << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
 					(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
-			} else {
+			} else
 #endif
+			{
 				sdmahdr->ctrl = 1 |
 					(PSM_HAL_EGR << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
 					(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
-#ifdef PSM_CUDA
 			}
-#endif
 		}
 
 		/* Can bound the number to send by 'num' */

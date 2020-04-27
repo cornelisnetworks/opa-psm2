@@ -322,22 +322,23 @@ int memcpy_check_size(memcpy_fn_t fn, int *p, int *f, size_t n)
 	if (USE_MALLOC) {
 		src = psmi_malloc(PSMI_EP_NONE, UNDEFINED, size);
 		dst = psmi_malloc(PSMI_EP_NONE, UNDEFINED, size);
-		if (src == NULL || dst == NULL)
-			if (src)
-				psmi_free(src);
-		if (dst)
-			psmi_free(dst);
-		return -1;
-	} else {
-		void *src_p, *dst_p;
-		if (posix_memalign(&src_p, 64, size) != 0 ||
-		    posix_memalign(&dst_p, 64, size) != 0)
+		if (src == NULL || dst == NULL) {
+			if (src) psmi_free(src);
+			if (dst) psmi_free(dst);
 			return -1;
-		else {
-			src = (uint8_t *) src_p;
-			dst = (uint8_t *) dst_p;
 		}
+	} else {
+		void *src_p = NULL, *dst_p = NULL;
+		if (posix_memalign(&src_p, 64, size) != 0 ||
+		    posix_memalign(&dst_p, 64, size) != 0) {
+			if (src_p) free(src_p);
+			if (dst_p) free(dst_p);
+			return -1;
+		}
+		src = (uint8_t *) src_p;
+		dst = (uint8_t *) dst_p;
 	}
+
 	int src_align, dst_align;
 	for (src_align = 0; src_align < num_aligns; src_align++) {
 		for (dst_align = 0; dst_align < num_aligns; dst_align++) {
@@ -356,7 +357,12 @@ int memcpy_check_size(memcpy_fn_t fn, int *p, int *f, size_t n)
 			}
 		}
 	}
-	psmi_free(src);
-	psmi_free(dst);
+	if (USE_MALLOC) {
+		psmi_free(src);
+		psmi_free(dst);
+	} else {
+		free(src);
+		free(dst);
+	}
 	return 0;
 }

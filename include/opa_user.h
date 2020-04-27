@@ -133,14 +133,8 @@
 #ifdef PSM_CUDA
 extern int is_driver_gpudirect_enabled;
 
-static __inline__ int _psmi_is_driver_gpudirect_enabled() __attribute__((always_inline));
-
-static __inline__ int
-_psmi_is_driver_gpudirect_enabled()
-{
-	return is_driver_gpudirect_enabled;
-}
-#define PSMI_IS_DRIVER_GPUDIRECT_ENABLED _psmi_is_driver_gpudirect_enabled()
+#define PSMI_IS_DRIVER_GPUDIRECT_ENABLED  likely(is_driver_gpudirect_enabled)
+#define PSMI_IS_DRIVER_GPUDIRECT_DISABLED unlikely(!is_driver_gpudirect_enabled)
 #endif
 
 /* hfi kdeth header format */

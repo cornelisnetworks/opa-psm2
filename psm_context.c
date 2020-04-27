@@ -223,8 +223,12 @@ psmi_create_and_open_affinity_shm(psm2_uuid_t const job_key)
 	}
 
 	ret = ftruncate(shm_fd, AFFINITY_SHMEMSIZE);
-	if ( ret < 0 )
+	if ( ret < 0 ) {
+		_HFI_VDBG("Cannot truncate affinity shared mem fd:%s, errno=%d\n",
+			affinity_shm_name, errno);
+		if (shm_fd >= 0) close(shm_fd);
 		return ret;
+	}
 
 	shared_affinity_ptr = (uint64_t *) mmap(NULL, AFFINITY_SHMEMSIZE, PROT_READ | PROT_WRITE,
 					MAP_SHARED, shm_fd, 0);
@@ -529,10 +533,20 @@ psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 
 	context->ep = (psm2_ep_t) ep;
 
-#ifdef PSM_CUDA
 	/* Check backward compatibility bits here and save the info */
 	if (psmi_hal_has_cap(PSM_HAL_CAP_GPUDIRECT_OT))
+	{
+#ifdef PSM_CUDA
 		is_driver_gpudirect_enabled = 1;
+#else
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR, "FATAL ERROR: "
+				  "CUDA version of hfi1 driver is loaded with non-CUDA version of "
+				  "psm2 library.\n");
+#endif
+	}
+#ifdef PSM_CUDA
+	else
+		fprintf(stderr,"WARNING: running CUDA version of libpsm2 with non CUDA version of hfi1 driver.\n");
 #endif
 	_HFI_VDBG("hfi_userinit() passed.\n");
 

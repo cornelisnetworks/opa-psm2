@@ -640,7 +640,7 @@ ips_spio_process_events(const struct ptl *ptl_gen)
 
 	if (event_mask & PSM_HAL_HFI_EVENT_SL2VL_CHANGE) {
 		_HFI_INFO("SL2VL mapping changed for port.\n");
-		ips_ibta_init_sl2sc2vl_table(&((struct ptl_ips *)(ctrl->ptl))->proto);
+		ips_ibta_init_sl2sc_table(&((struct ptl_ips *)(ctrl->ptl))->proto);
 	}
 
 	return PSM2_OK;
@@ -686,6 +686,7 @@ ips_spio_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 	if (do_lock)
 		pthread_spin_lock(&ctrl->spio_lock);
 
+#ifdef PSM_FI
 	if_pf(PSMI_FAULTINJ_ENABLED()) {
 		PSMI_FAULTINJ_STATIC_DECL(fi_lost, "piosend", 1,
 					  IPS_FAULTINJ_PIOLOST);
@@ -699,6 +700,7 @@ ips_spio_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 			goto fi_busy;
 		/* else fall through normal processing path, i.e. no faults */
 	}
+#endif /* #ifdef PSM_FI */
 
 	psmi_assert((length & 0x3) == 0);
 	paylen = length + (cksum_valid ? PSM_CRC_SIZE_IN_BYTES : 0);
@@ -709,7 +711,9 @@ ips_spio_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 
 		if_pf(spio_ctrl->spio_available_blocks < nblks) {
 			/* Check unit status */
+#ifdef PSM_FI
 fi_busy:
+#endif /* #ifdef PSM_FI */
 			if ((err =
 			     psmi_context_check_status(ctrl->context)) ==
 			    PSM2_OK) {

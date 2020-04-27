@@ -766,13 +766,13 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 
 	PSM2_LOG_MSG("entering");
 	psmi_assert(MQE_TYPE_IS_RECV(req->type));
+	psmi_mtucpy_fn_t psmi_mtucpy_fn = psmi_mq_mtucpy;
 #ifdef PSM_CUDA
-	psmi_mtucpy_fn_t psmi_mtucpy_fn;
-	if (req->is_buf_gpu_mem)
-		psmi_mtucpy_fn = psmi_mq_mtucpy;
-	else
+	if (!req->is_buf_gpu_mem)
 		psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
 #endif
+
+	_HFI_VDBG("(req=%p) buf=%p len=%u req.state=%u\n", req, buf, len, req->state);
 
 	switch (req->state) {
 	case MQ_STATE_COMPLETE:
@@ -786,10 +786,8 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 								    mq->ep->epaddr->proto);
 				psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
 			}
-			psmi_mtucpy_fn(ubuf, (const void *)req->req_data.buf, copysz);
-#else
-			psmi_mq_mtucpy(ubuf, (const void *)req->req_data.buf, copysz);
 #endif
+			psmi_mtucpy_fn(ubuf, (const void *)req->req_data.buf, copysz);
 			psmi_mq_sysbuf_free(mq, req->req_data.buf);
 		}
 		req->req_data.buf = buf;
@@ -814,12 +812,7 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 #endif
 
 		if (req->recv_msgoff) {
-#ifdef PSM_CUDA
-			psmi_mtucpy_fn
-#else
-			psmi_mq_mtucpy
-#endif
-				(buf, (const void *)req->req_data.buf,
+			psmi_mtucpy_fn(buf, (const void *)req->req_data.buf,
 				       req->recv_msgoff);
 		}
 		psmi_mq_sysbuf_free(mq, req->req_data.buf);
@@ -836,12 +829,7 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 		 */
 		req->recv_msgoff = min(req->recv_msgoff, copysz);
 		if (req->recv_msgoff) {
-#ifdef PSM_CUDA
-			psmi_mtucpy_fn
-#else
-			psmi_mq_mtucpy
-#endif
-				(buf, (const void *)req->req_data.buf,
+			psmi_mtucpy_fn(buf, (const void *)req->req_data.buf,
 				       req->recv_msgoff);
 		}
 		if (req->send_msgoff) {
@@ -895,17 +883,10 @@ __psm2_mq_fp_msg(psm2_ep_t ep, psm2_mq_t mq, psm2_epaddr_t addr, psm2_mq_tag_t *
 #ifdef PSM_CUDA
 		int gpu_mem = 0;
 		void *gpu_user_buffer = NULL;
-		/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
-		 * when the buffer pointer received into PSM has been allocated
-		 * by the application. This guarantees the all memory operations
-		 * to this region of memory (used by multiple layers of the stack)
-		 * always synchronize
-		 */
-		if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)buf)) {
-			int trueflag = 1;
-			PSMI_CUDA_CALL(cuPointerSetAttribute, &trueflag,
-					   CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
-					  (CUdeviceptr)buf);
+
+		if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM(buf)) {
+			psmi_cuda_set_attr_sync_memops(buf);
+
 			gpu_mem = 1;
 			gpu_user_buffer = buf;
 		}
@@ -980,21 +961,13 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 	psm2_mq_req_t req;
 
 #ifdef PSM_CUDA
-	int gpu_mem;
-	/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
-	 * when the buffer pointer received into PSM has been allocated
-	 * by the application. This guarantees the all memory operations
-	 * to this region of memory (used by multiple layers of the stack)
-	 * always synchronize
-	 */
-	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)buf)) {
-		int trueflag = 1;
-		PSMI_CUDA_CALL(cuPointerSetAttribute, &trueflag,
-			       CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
-			      (CUdeviceptr)buf);
+	int gpu_mem = 0;
+
+	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM(buf)) {
+		psmi_cuda_set_attr_sync_memops(buf);
+
 		gpu_mem = 1;
-	} else
-		gpu_mem = 0;
+	}
 #endif
 
 	PSM2_LOG_MSG("entering");
@@ -1111,20 +1084,12 @@ __psm2_mq_imrecv(psm2_mq_t mq, uint32_t flags, void *buf, uint32_t len,
 		req->req_data.context = context;
 
 #ifdef PSM_CUDA
-	/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
-	 * when the buffer pointer received into PSM has been allocated
-	 * by the application. This guarantees the all memory operations
-	 * to this region of memory (used by multiple layers of the stack)
-	 * always synchronize
-	 */
-	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)buf)) {
-		int trueflag = 1;
-		PSMI_CUDA_CALL(cuPointerSetAttribute, &trueflag,
-			       CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
-			      (CUdeviceptr)buf);
-		req->is_buf_gpu_mem = 1;
-	} else
-		req->is_buf_gpu_mem = 0;
+		if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM(buf)) {
+			psmi_cuda_set_attr_sync_memops(buf);
+			req->is_buf_gpu_mem = 1;
+		} else {
+			req->is_buf_gpu_mem = 0;
+		}
 #endif
 
 		PSMI_LOCK(mq->progress_lock);
@@ -1451,7 +1416,7 @@ psmi_mq_print_stats_finalize(psm2_mq_t mq)
  * the user can set options after obtaining an endpoint
  */
 psm2_error_t
-__psm2_mq_init(psm2_ep_t ep, uint64_t tag_order_mask,
+__psm2_mq_init(psm2_ep_t ep, uint64_t ignored,
 	      const struct psm2_optkey *opts, int numopts, psm2_mq_t *mqo)
 {
 	psm2_error_t err = PSM2_OK;

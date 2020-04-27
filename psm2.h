@@ -277,9 +277,9 @@ typedef struct psm2_mq *psm2_mq_t;
 /*! @defgroup init PSM2 Initialization and Maintenance
  * @{
  */
-#define PSM2_VERNO       0x0201	/*!< Header-defined Version number */
+#define PSM2_VERNO       0x0202	/*!< Header-defined Version number */
 #define PSM2_VERNO_MAJOR 0x02	/*!< Header-defined Major Version Number */
-#define PSM2_VERNO_MINOR 0x01	/*!< Header-defined Minor Version Number */
+#define PSM2_VERNO_MINOR 0x02	/*!< Header-defined Minor Version Number */
 #define PSM2_VERNO_COMPAT_MAJOR 0x01    /*!<Minimum PSM1 Major Version Number for Compatibility */
 
 /*! @brief PSM2 Error type
@@ -364,6 +364,9 @@ enum psm2_error {
 
 	/*! AM reply error */
 	PSM2_AM_INVALID_REPLY = 70,
+
+	/*! Info query invalid query error */
+	PSM2_IQ_INVALID_QUERY = 71,
 
     /*! Reserved Value to indicate highest ENUM value */
     PSM2_ERROR_LAST = 80
@@ -759,7 +762,7 @@ struct psm2_ep_open_opts {
  *                   option can be controlled to either disable (@ref
  *                   PSM2_EP_OPEN_AFFINITY_SKIP) or enable the affinity setting
  *                   only if it is already unset (@ref
- *                   PSM2_EP_OPEN_AFFINITY_SET) or regardless of affinity begin
+ *                   PSM2_EP_OPEN_AFFINITY_SET) or regardless of affinity being
  *                   set or not (@ref PSM2_EP_OPEN_AFFINITY_FORCE).
  *                   If @c HFI_NO_CPUAFFINITY is set in the environment, this
  *                   setting is ignored.
@@ -1633,6 +1636,12 @@ typedef enum psm2_info_query_et
        the network type (use: psm2_info_query_arg_t.length).
        Output parameter: char*, description: the network type. */
 	PSM2_INFO_QUERY_NETWORK_TYPE,
+
+/*! Required input arguments 0
+    Output parameter: uint32_t*, description: a bit mask of the features in libpsm2.
+    See psm2_info_query_feature_mask below for bit mask definition. */
+	PSM2_INFO_QUERY_FEATURE_MASK,
+
 	PSM2_INFO_QUERY_LAST, /* must appear last, and the info query
 				 constants are used as an index. */
 } psm2_info_query_t;
@@ -1705,6 +1714,15 @@ enum psm2_info_query_thresh_et
 
 	PSM2_INFO_QUERY_THRESH_SELF_START,
 	PSM2_INFO_QUERY_THRESH_SELF_END = PSM2_INFO_QUERY_THRESH_SELF_START,
+};
+
+enum psm2_info_query_feature_mask
+{
+	/*! The following bit means that the libpsm2 _can_ support cuda.
+	    If the PSM2_INFO_QUERY_FEATURE_MASK request is made and
+	    the PSM2_INFO_QUERY_FEATURE_CUDA bit is not present, thne cuda
+            is not supported. */
+	PSM2_INFO_QUERY_FEATURE_CUDA      = (1 << 0),
 };
 
 /** @brief Union for info query arg type

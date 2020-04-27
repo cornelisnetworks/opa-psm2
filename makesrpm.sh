@@ -80,7 +80,7 @@ function usage()
     echo "     -d <path>, -dir <path>"
     echo "           Optionally sets output folder for rpmbuild to use"
     echo "     -h <hal_gen>, -hal_gen <hal_gen>"
-    echo "           Optional, default is includes all HAL generations"
+    echo "           Optional, default is to build gen1"
     echo "           Sets hal generations for rpmbuild to use"
     echo "     Examples:"
     echo "           $0 b"
@@ -142,7 +142,7 @@ while [ "$1" != "" ]; do
 done
 
 if [ "$HAL_GENS" = "" ]; then
-    HAL_GENS="*"
+    HAL_GENS="gen1"
 fi
 
 # Generic cleanup, build, and tmp folder creation

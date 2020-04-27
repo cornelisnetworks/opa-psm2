@@ -72,7 +72,218 @@
 
 #include <sched.h>
 
-#define ALIGN(x, a) (((x)+(a)-1)&~((a)-1))
+size_t arrsz[MAPSIZE_MAX] = { 0 };
+
+static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
+{
+#define CREDITS_NUM     64
+	struct hfi1_ctxt_info *cinfo = &ctrl->ctxt_info;
+	struct hfi1_base_info *binfo = &ctrl->base_info;
+	size_t sz;
+	__u64 off;
+	void *maddr;
+
+
+	/* 1. Map the PIO credits address */
+	off = binfo->sc_credits_addr &~ HFI_MMAP_PGMASK;
+
+	sz = HFI_MMAP_PGSIZE;
+	maddr = HFI_MMAP_ERRCHECK(fd, binfo, sc_credits_addr, sz, PROT_READ);
+	hfi_touch_mmap(maddr, sz);
+	arrsz[SC_CREDITS] = sz;
+
+	binfo->sc_credits_addr |= off;
+
+
+	/* 2. Map the PIO buffer SOP address
+	 * Skipping the cast of cinfo->credits to size_t. This causes the outcome of the multiplication
+	 * to be sign-extended in the event of too large input values. This results in a very large product
+	 * when treated as unsigned which in turn will make the HFI_MMAP_ERRCHECK() macro fail and give an
+	 * adequate error report. TODO: Consider sanitizing the credits value explicitly
+	 */
+	sz = cinfo->credits * CREDITS_NUM;
+	HFI_MMAP_ERRCHECK(fd, binfo, pio_bufbase_sop, sz, PROT_WRITE);
+	arrsz[PIO_BUFBASE_SOP] = sz;
+
+
+	/* 3. Map the PIO buffer address */
+	sz = cinfo->credits * CREDITS_NUM;
+	HFI_MMAP_ERRCHECK(fd, binfo, pio_bufbase, sz, PROT_WRITE);
+	arrsz[PIO_BUFBASE] = sz;
+
+
+	/* 4. Map the receive header queue
+	 * (u16 * u16 -> max value 0xfffe0001)
+	 */
+	sz = (size_t)cinfo->rcvhdrq_cnt * cinfo->rcvhdrq_entsize;
+	maddr = HFI_MMAP_ERRCHECK(fd, binfo, rcvhdr_bufbase, sz, PROT_READ);
+	hfi_touch_mmap(maddr, sz);
+	arrsz[RCVHDR_BUFBASE] = sz;
+
+
+	/* 5. Map the receive eager buffer
+	 * (u16 * u32. Assuming size_t's precision is 64 bits - no overflow)
+	 */
+	sz = (size_t)cinfo->egrtids * cinfo->rcvegr_size;
+	maddr = HFI_MMAP_ERRCHECK(fd, binfo, rcvegr_bufbase, sz, PROT_READ);
+	hfi_touch_mmap(maddr, sz);
+	arrsz[RCVEGR_BUFBASE] = sz;
+
+
+	/* 6. Map the sdma completion queue */
+	if (cinfo->runtime_flags & HFI1_CAP_SDMA) {
+		sz = cinfo->sdma_ring_size * sizeof(struct hfi1_sdma_comp_entry);
+		HFI_MMAP_ERRCHECK(fd, binfo, sdma_comp_bufbase, sz, PROT_READ);
+	} else {
+		sz = 0;
+		binfo->sdma_comp_bufbase = (__u64)0;
+	}
+	arrsz[SDMA_COMP_BUFBASE] = sz;
+
+
+	/* 7. Map RXE per-context CSRs */
+	sz = HFI_MMAP_PGSIZE;
+	HFI_MMAP_ERRCHECK(fd, binfo, user_regbase, sz, PROT_WRITE|PROT_READ);
+	arrsz[USER_REGBASE] = sz;
+	/* Set up addresses for optimized register writeback routines.
+ 	 * This is for the real onchip registers, shared context or not
+ 	 */
+	uint64_t *regbasep = (uint64_t *)binfo->user_regbase;
+	ctrl->__hfi_rcvhdrtail = (volatile __le64 *)(regbasep + ur_rcvhdrtail);
+	ctrl->__hfi_rcvhdrhead = (volatile __le64 *)(regbasep + ur_rcvhdrhead);
+	ctrl->__hfi_rcvegrtail = (volatile __le64 *)(regbasep + ur_rcvegrindextail);
+	ctrl->__hfi_rcvegrhead = (volatile __le64 *)(regbasep + ur_rcvegrindexhead);
+	ctrl->__hfi_rcvofftail = (volatile __le64 *)(regbasep + ur_rcvegroffsettail);
+
+	if (cinfo->runtime_flags & HFI1_CAP_HDRSUPP) {
+		ctrl->__hfi_rcvtidflow = (volatile __le64 *)(regbasep + ur_rcvtidflowtable);
+		ctrl->__hfi_tfvalid = 1;
+	} else {
+		ctrl->__hfi_rcvtidflow = ctrl->regs;
+		ctrl->__hfi_tfvalid = 0;
+	}
+
+
+	/* 8. Map the rcvhdrq tail register address */
+	if (cinfo->runtime_flags & HFI1_CAP_DMA_RTAIL) {
+		sz = HFI_MMAP_PGSIZE;
+		HFI_MMAP_ERRCHECK(fd, binfo, rcvhdrtail_base, sz, PROT_READ);
+	} else {
+		/* We don't use receive header queue tail register to detect new packets,
+ 		 * but here we save the address for false-eager-full recovery
+ 		 */
+		sz = 0;
+		/* This points inside the previously established mapping (user_rehbase). Don't munmap()! */
+		binfo->rcvhdrtail_base = (uint64_t) (uintptr_t) ctrl->__hfi_rcvhdrtail;
+	}
+	ctrl->__hfi_rcvtail = (__le64 *)binfo->rcvhdrtail_base;
+	arrsz[RCVHDRTAIL_BASE] = sz;
+
+
+	/* 9. Map the event page */
+	off = binfo->events_bufbase &~ HFI_MMAP_PGMASK;
+
+	sz = HFI_MMAP_PGSIZE;
+	HFI_MMAP_ERRCHECK(fd, binfo, events_bufbase, sz, PROT_READ);
+	arrsz[EVENTS_BUFBASE] = sz;
+	/* keep the offset in the address */
+	binfo->events_bufbase |= off;
+
+
+	/* 10. Map the status page */
+	sz = HFI_MMAP_PGSIZE;
+	HFI_MMAP_ERRCHECK(fd, binfo, status_bufbase, sz, PROT_READ);
+	arrsz[STATUS_BUFBASE] = sz;
+
+
+	if (!subctxt_cnt)
+		return 0;
+
+	/* 11. If subcontext is used, map the buffers */
+	const char *errstr = "Incorrect input values for the subcontext";
+	size_t factor;
+
+	/* 11a) subctxt_uregbase */
+	sz = HFI_MMAP_PGSIZE;
+	maddr = HFI_MMAP_ERRCHECK(fd, binfo, subctxt_uregbase, sz, PROT_READ|PROT_WRITE);
+	hfi_touch_mmap(maddr, sz);
+	arrsz[SUBCTXT_UREGBASE] = sz;
+
+
+	/* 11b) subctxt_rcvhdrbuf
+	 * u16 * u16. Prevent promotion to int through an explicit cast to size_t
+	 */
+	factor = (size_t)cinfo->rcvhdrq_cnt * cinfo->rcvhdrq_entsize;
+	factor = ALIGN(factor, HFI_MMAP_PGSIZE);
+	sz = factor * subctxt_cnt;
+	maddr = HFI_MMAP_ERRCHECK(fd, binfo, subctxt_rcvhdrbuf, sz, PROT_READ|PROT_WRITE);
+	hfi_touch_mmap(maddr, sz);
+	arrsz[SUBCTXT_RCVHDRBUF] = sz;
+
+
+	/* 11c) subctxt_rcvegrbuf
+	 * u16 * u32. Assuming size_t's precision to be 64 bits (no overflow)
+	 */
+	factor = (size_t)cinfo->egrtids * cinfo->rcvegr_size;
+	factor = ALIGN(factor, HFI_MMAP_PGSIZE);
+	sz = factor * subctxt_cnt;
+	if (sz / subctxt_cnt != factor) {
+		_HFI_INFO("%s (rcvegrbuf)\n", errstr);
+		goto err_int_overflow_subctxt_rcvegrbuf;
+	}
+	maddr = HFI_MMAP_ERRCHECK(fd, binfo, subctxt_rcvegrbuf, sz, PROT_READ|PROT_WRITE);
+	hfi_touch_mmap(maddr, sz);
+	arrsz[SUBCTXT_RCVEGRBUF] = sz;
+
+	return 0;
+
+err_int_overflow_subctxt_rcvegrbuf:
+err_mmap_subctxt_rcvegrbuf:
+	/* if we got here, subctxt_cnt must be != 0 */
+	HFI_MUNMAP_ERRCHECK(binfo, subctxt_rcvhdrbuf, arrsz[SUBCTXT_RCVHDRBUF]);
+
+err_mmap_subctxt_rcvhdrbuf:
+	/* if we got it here, subctxt_cnt must be != 0 */
+	HFI_MUNMAP_ERRCHECK(binfo, subctxt_uregbase, arrsz[SUBCTXT_UREGBASE]);
+
+err_mmap_subctxt_uregbase:
+	HFI_MUNMAP_ERRCHECK(binfo, status_bufbase, arrsz[STATUS_BUFBASE]);
+
+err_mmap_status_bufbase:
+	HFI_MUNMAP_ERRCHECK(binfo, events_bufbase, arrsz[EVENTS_BUFBASE]);
+
+err_mmap_events_bufbase:
+	if(cinfo->runtime_flags & HFI1_CAP_DMA_RTAIL) {
+		HFI_MUNMAP_ERRCHECK(binfo, rcvhdrtail_base, arrsz[RCVHDRTAIL_BASE]);
+	}
+
+err_mmap_rcvhdrtail_base:
+	HFI_MUNMAP_ERRCHECK(binfo, user_regbase, arrsz[USER_REGBASE]);
+
+err_mmap_user_regbase:
+	/* the condition could be: if(cinfo->runtime_flags & HFI1_CAP_SDMA) too */
+	if(binfo->sdma_comp_bufbase != 0) {
+		HFI_MUNMAP_ERRCHECK(binfo, sdma_comp_bufbase, arrsz[SDMA_COMP_BUFBASE]);
+	}
+
+err_mmap_sdma_comp_bufbase:
+	HFI_MUNMAP_ERRCHECK(binfo, rcvegr_bufbase, arrsz[RCVEGR_BUFBASE]);
+
+err_mmap_rcvegr_bufbase:
+	HFI_MUNMAP_ERRCHECK(binfo, rcvhdr_bufbase, arrsz[RCVHDR_BUFBASE]);
+
+err_mmap_rcvhdr_bufbase:
+	HFI_MUNMAP_ERRCHECK(binfo, pio_bufbase, arrsz[PIO_BUFBASE]);
+
+err_mmap_pio_bufbase:
+	HFI_MUNMAP_ERRCHECK(binfo, pio_bufbase_sop, arrsz[PIO_BUFBASE_SOP]);
+
+err_mmap_pio_bufbase_sop:
+	HFI_MUNMAP_ERRCHECK(binfo, sc_credits_addr, arrsz[SC_CREDITS]);
+
+err_mmap_sc_credits_addr:
+	return -1;
+}
 
 /* It is allowed to have multiple devices (and of different types)
    simultaneously opened and initialized, although this (still! Oct 07)
@@ -82,15 +293,13 @@
    struct _hfi_ctrl *.  The struct _hfi_ctrl * used for everything
    else is returned as part of hfi1_base_info.
 */
-struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
+struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
+		struct hfi1_user_info_dep *uinfo)
 {
 	struct _hfi_ctrl *spctrl = NULL;
 	struct hfi1_ctxt_info *cinfo;
 	struct hfi1_base_info *binfo;
-	void *tmp;
-	uint64_t *tmp64;
 	struct hfi1_cmd c;
-	uintptr_t pg_mask;
 	int __hfi_pg_sz;
 #ifdef PSM2_SUPPORT_IW_CMD_API
 	/* for major version 6 of driver, we will use uinfo_new.  See below for details. */
@@ -99,12 +308,11 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 
 	/* First get the page size */
 	__hfi_pg_sz = sysconf(_SC_PAGESIZE);
-	pg_mask = ~(intptr_t) (__hfi_pg_sz - 1);
 
 	if (!(spctrl = calloc(1, sizeof(struct _hfi_ctrl)))) {
 		_HFI_INFO("can't allocate memory for hfi_ctrl: %s\n",
 			  strerror(errno));
-		goto err;
+		goto err_calloc_hfi_ctrl;
 	}
 	cinfo = &spctrl->ctxt_info;
 	binfo = &spctrl->base_info;
@@ -157,7 +365,7 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 			_HFI_INFO("assign_context command failed: %s\n",
 				  strerror(errno));
 		}
-		goto err;
+		goto err_hfi_cmd_assign_ctxt;
 	}
 
 #ifdef PSM2_SUPPORT_IW_CMD_API
@@ -180,37 +388,37 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 
 	if (hfi_cmd_write(fd, &c, sizeof(c)) == -1) {
 		_HFI_INFO("CTXT_INFO command failed: %s\n", strerror(errno));
-		goto err;
+		goto err_hfi_cmd_ctxt_info;
 	}
 
 	/* sanity checking... */
 	if (cinfo->rcvtids%8) {
 		_HFI_INFO("rcvtids not 8 multiple: %d\n", cinfo->rcvtids);
-		goto err;
+		goto err_sanity_check;
 	}
 	if (cinfo->egrtids%8) {
 		_HFI_INFO("egrtids not 8 multiple: %d\n", cinfo->egrtids);
-		goto err;
+		goto err_sanity_check;
 	}
 	if (cinfo->rcvtids < cinfo->egrtids) {
 		_HFI_INFO("rcvtids(%d) < egrtids(%d)\n",
 				cinfo->rcvtids, cinfo->egrtids);
-		goto err;
+		goto err_sanity_check;
 	}
 	if (cinfo->rcvhdrq_cnt%32) {
 		_HFI_INFO("rcvhdrq_cnt not 32 multiple: %d\n",
 				cinfo->rcvhdrq_cnt);
-		goto err;
+		goto err_sanity_check;
 	}
 	if (cinfo->rcvhdrq_entsize%64) {
 		_HFI_INFO("rcvhdrq_entsize not 64 multiple: %d\n",
 				cinfo->rcvhdrq_entsize);
-		goto err;
+		goto err_sanity_check;
 	}
 	if (cinfo->rcvegr_size%__hfi_pg_sz) {
 		_HFI_INFO("rcvegr_size not page multiple: %d\n",
 				cinfo->rcvegr_size);
-		goto err;
+		goto err_sanity_check;
 	}
 
 	_HFI_VDBG("ctxtinfo: runtime_flags %llx, rcvegr_size %d\n",
@@ -227,8 +435,10 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 		  cinfo->egrtids, cinfo->sdma_ring_size);
 
 	/* if affinity has not been setup, set it */
-	if ((!getenv("HFI_NO_CPUAFFINITY") && cinfo->rec_cpu != (__u16) -1) ||
-		getenv("HFI_FORCE_CPUAFFINITY")) {
+	if (getenv("HFI_FORCE_CPUAFFINITY") ||
+		(cinfo->rec_cpu != (__u16) -1 &&
+		!(getenv("HFI_NO_CPUAFFINITY") || skip_affinity)))
+	{
 		cpu_set_t cpuset;
 		CPU_ZERO(&cpuset);
 		CPU_SET(cinfo->rec_cpu, &cpuset);
@@ -240,7 +450,6 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 		}
 	}
 
-
 	/* 4. Get user base info from driver */
 	c.type = PSMI_HFI_CMD_USER_INFO;
 	c.len = sizeof(*binfo);
@@ -248,7 +457,7 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 
 	if (hfi_cmd_write(fd, &c, sizeof(c)) == -1) {
 		_HFI_INFO("BASE_INFO command failed: %s\n", strerror(errno));
-		goto err;
+		goto err_hfi_cmd_user_info;
 	}
 
 	hfi_set_user_version(binfo->sw_version);
@@ -276,272 +485,15 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 		    ("User major version 0x%x not same as driver major 0x%x\n",
 		     hfi_get_user_major_version(), binfo->sw_version >> HFI1_SWMAJOR_SHIFT);
 		if ((binfo->sw_version >> HFI1_SWMAJOR_SHIFT) < hfi_get_user_major_version())
-			goto err;	/* else assume driver knows how to be compatible */
+			goto err_version_mismatch;	/* else assume driver knows how to be compatible */
 	} else if ((binfo->sw_version & 0xffff) != HFI1_USER_SWMINOR) {
 		_HFI_PRDBG
 		    ("User minor version 0x%x not same as driver minor 0x%x\n",
 		     HFI1_USER_SWMINOR, binfo->sw_version & 0xffff);
 	}
 
-	/* Map the PIO credits address */
-	if ((tmp = hfi_mmap64(0, __hfi_pg_sz,
-			      PROT_READ, MAP_SHARED | MAP_LOCKED, fd,
-			      (__off64_t) binfo->sc_credits_addr &
-			      pg_mask)) == MAP_FAILED) {
-		_HFI_INFO("mmap of sc_credits_addr (%llx) failed: %s\n",
-			  (unsigned long long)binfo->sc_credits_addr,
-			  strerror(errno));
-		goto err;
-	} else {
-		hfi_touch_mmap(tmp, __hfi_pg_sz);
-		binfo->sc_credits_addr = (uint64_t) (uintptr_t) tmp |
-		    (binfo->sc_credits_addr & ~pg_mask);
-		_HFI_VDBG("sc_credits_addr %llx\n",
-			  binfo->sc_credits_addr);
-	}
-
-	/* Map the PIO buffer SOP address */
-	if ((tmp = hfi_mmap64(0, cinfo->credits * 64,
-			      PROT_WRITE, MAP_SHARED | MAP_LOCKED, fd,
-			      (__off64_t) binfo->pio_bufbase_sop & pg_mask))
-	    == MAP_FAILED) {
-		_HFI_INFO("mmap of pio buffer sop at %llx failed: %s\n",
-			  (unsigned long long)binfo->pio_bufbase_sop,
-			  strerror(errno));
-		goto err;
-	} else {
-		/* Do not try to read the PIO buffers; they are mapped write */
-		/* only.  We'll fault them in as we write to them. */
-		binfo->pio_bufbase_sop = (uintptr_t) tmp;
-		_HFI_VDBG("pio_bufbase_sop %llx\n",
-			  binfo->pio_bufbase_sop);
-	}
-
-	/* Map the PIO buffer address */
-	if ((tmp = hfi_mmap64(0, cinfo->credits * 64,
-			      PROT_WRITE, MAP_SHARED | MAP_LOCKED, fd,
-			      (__off64_t) binfo->pio_bufbase & pg_mask)) ==
-	    MAP_FAILED) {
-		_HFI_INFO("mmap of pio buffer at %llx failed: %s\n",
-			  (unsigned long long)binfo->pio_bufbase,
-			  strerror(errno));
-		goto err;
-	} else {
-		/* Do not try to read the PIO buffers; they are mapped write */
-		/* only.  We'll fault them in as we write to them. */
-		binfo->pio_bufbase = (uintptr_t) tmp;
-		_HFI_VDBG("sendpio_bufbase %llx\n", binfo->pio_bufbase);
-	}
-
-	/* Map the receive header queue */
-	if ((tmp =
-	     hfi_mmap64(0, cinfo->rcvhdrq_cnt * cinfo->rcvhdrq_entsize,
-			PROT_READ, MAP_SHARED | MAP_LOCKED, fd,
-			(__off64_t) binfo->rcvhdr_bufbase & pg_mask)) ==
-	    MAP_FAILED) {
-		_HFI_INFO("mmap of rcvhdrq at %llx failed: %s\n",
-			  (unsigned long long)binfo->rcvhdr_bufbase,
-			  strerror(errno));
-		goto err;
-	} else {
-		/* for use in protocol code */
-		hfi_touch_mmap(tmp,
-			       cinfo->rcvhdrq_cnt * cinfo->rcvhdrq_entsize);
-		binfo->rcvhdr_bufbase = (uintptr_t) tmp;	/* set to mapped address */
-		_HFI_VDBG("rcvhdr_bufbase %llx\n", binfo->rcvhdr_bufbase);
-	}
-
-	/* Map the receive eager buffer */
-	if ((tmp =
-	     hfi_mmap64(0, cinfo->egrtids * cinfo->rcvegr_size,
-			PROT_READ, MAP_SHARED | MAP_LOCKED, fd,
-			(__off64_t) binfo->rcvegr_bufbase & pg_mask)) ==
-	    MAP_FAILED) {
-		_HFI_INFO("mmap of rcvegrq bufs from %llx failed: %s\n",
-			  (unsigned long long)binfo->rcvegr_bufbase,
-			  strerror(errno));
-		goto err;
-	} else {
-		hfi_touch_mmap(tmp, cinfo->egrtids * cinfo->rcvegr_size);
-		binfo->rcvegr_bufbase = (uint64_t) (uintptr_t) tmp;
-		_HFI_VDBG("rcvegr_bufbase %llx\n", binfo->rcvegr_bufbase);
-	}
-
-	/* Map the sdma completion queue */
-	if (!(cinfo->runtime_flags & HFI1_CAP_SDMA)) {
-		binfo->sdma_comp_bufbase = 0;
-	} else
-	    if ((tmp =
-		 hfi_mmap64(0, cinfo->sdma_ring_size *
-				sizeof(struct hfi1_sdma_comp_entry),
-			    PROT_READ, MAP_SHARED | MAP_LOCKED, fd,
-			    (__off64_t) binfo->sdma_comp_bufbase & pg_mask)) ==
-		MAP_FAILED) {
-		_HFI_INFO
-		    ("mmap of sdma completion queue from %llx failed: %s\n",
-		     (unsigned long long)binfo->sdma_comp_bufbase,
-		     strerror(errno));
-		goto err;
-	} else {
-		binfo->sdma_comp_bufbase = (uint64_t) (uintptr_t) tmp;
-	}
-	_HFI_VDBG("sdma_comp_bufbase %llx\n", binfo->sdma_comp_bufbase);
-
-	/* Map RXE per-context CSRs */
-	if ((tmp = hfi_mmap64(0, __hfi_pg_sz,
-			      PROT_WRITE | PROT_READ, MAP_SHARED | MAP_LOCKED,
-			      fd,
-			      (__off64_t) binfo->user_regbase & pg_mask)) ==
-	    MAP_FAILED) {
-		_HFI_INFO("mmap of user registers at %llx failed: %s\n",
-			  (unsigned long long)binfo->user_regbase,
-			  strerror(errno));
-		goto err;
-	} else {
-		/* we don't try to fault these in, no need */
-		binfo->user_regbase = (uint64_t) (uintptr_t) tmp;
-		_HFI_VDBG("user_regbase %llx\n", binfo->user_regbase);
-	}
-
-	/*
-	 * Set up addresses for optimized register writeback routines.
-	 * This is for the real onchip registers, shared context or not
-	 */
-	tmp64 = (uint64_t *) tmp;
-	spctrl->__hfi_rcvhdrtail = (volatile __le64 *)&tmp64[ur_rcvhdrtail];
-	spctrl->__hfi_rcvhdrhead = (volatile __le64 *)&tmp64[ur_rcvhdrhead];
-	spctrl->__hfi_rcvegrtail =
-	    (volatile __le64 *)&tmp64[ur_rcvegrindextail];
-	spctrl->__hfi_rcvegrhead =
-	    (volatile __le64 *)&tmp64[ur_rcvegrindexhead];
-	spctrl->__hfi_rcvofftail =
-	    (volatile __le64 *)&tmp64[ur_rcvegroffsettail];
-
-	if (!(cinfo->runtime_flags & HFI1_CAP_HDRSUPP)) {
-		spctrl->__hfi_rcvtidflow = spctrl->regs;
-		spctrl->__hfi_tfvalid = 0;
-	} else {
-		spctrl->__hfi_rcvtidflow =
-		    (volatile __le64 *)&tmp64[ur_rcvtidflowtable];
-		spctrl->__hfi_tfvalid = 1;
-	}
-
-	/* Map the rcvhdrq tail register address */
-	if (!(cinfo->runtime_flags & HFI1_CAP_DMA_RTAIL)) {
-		/*
-		 * We don't use receive header queue tail register to detect
-		 * new packets, but here we save the address for
-		 * false-eager-full recovery.
-		 */
-		binfo->rcvhdrtail_base =
-		    (uint64_t) (uintptr_t) spctrl->__hfi_rcvhdrtail;
-		spctrl->__hfi_rcvtail = (__le64 *) binfo->rcvhdrtail_base;
-	} else
-	    if ((tmp = hfi_mmap64(0, __hfi_pg_sz,
-				  PROT_READ, MAP_SHARED | MAP_LOCKED, fd,
-				  (__off64_t) binfo->rcvhdrtail_base &
-				  pg_mask)) == MAP_FAILED) {
-		_HFI_INFO("mmap of rcvhdrq tail addr %llx failed: %s\n",
-			  (unsigned long long)binfo->rcvhdrtail_base,
-			  strerror(errno));
-		goto err;
-	} else {
-		hfi_touch_mmap(tmp, __hfi_pg_sz);
-		binfo->rcvhdrtail_base = (uint64_t) (uintptr_t) tmp;
-		spctrl->__hfi_rcvtail = (__le64 *) binfo->rcvhdrtail_base;
-	}
-	_HFI_VDBG("rcvhdr_tail_addr %llx\n", binfo->rcvhdrtail_base);
-
-	/* Map the event page */
-	if ((tmp = hfi_mmap64(0, __hfi_pg_sz,
-			      PROT_READ, MAP_SHARED | MAP_LOCKED, fd,
-			      (__off64_t) binfo->events_bufbase & pg_mask)) ==
-	    MAP_FAILED) {
-		_HFI_INFO("mmap of status page at %llx failed: %s\n",
-			  (unsigned long long)binfo->events_bufbase,
-			  strerror(errno));
-		goto err;
-	} else {
-		binfo->events_bufbase = (uint64_t) (uintptr_t) tmp |
-		    (binfo->events_bufbase & ~pg_mask);
-		_HFI_VDBG("events_bufbase %llx\n", binfo->events_bufbase);
-	}
-
-	/* Map the status page */
-	if ((tmp = hfi_mmap64(0, __hfi_pg_sz,
-			      PROT_READ, MAP_SHARED | MAP_LOCKED, fd,
-			      (__off64_t) binfo->status_bufbase & pg_mask)) ==
-	    MAP_FAILED) {
-		_HFI_INFO("mmap of status page (%llx) failed: %s\n",
-			  (unsigned long long)binfo->status_bufbase,
-			  strerror(errno));
-		goto err;
-	} else {
-		binfo->status_bufbase = (uintptr_t) tmp;
-		_HFI_VDBG("status_bufbase %llx\n", binfo->status_bufbase);
-	}
-
-	/* If subcontext is used, map the buffers */
-	if (uinfo->subctxt_cnt) {
-		unsigned num_subcontexts = uinfo->subctxt_cnt;
-		size_t size;
-
-		size = __hfi_pg_sz;
-		if ((tmp = hfi_mmap64(0, size,
-				      PROT_READ | PROT_WRITE,
-				      MAP_SHARED | MAP_LOCKED, fd,
-				      (__off64_t) binfo->subctxt_uregbase &
-				      pg_mask)) == MAP_FAILED) {
-			_HFI_INFO
-			    ("mmap of subcontext uregbase array (%llx) failed: %s\n",
-			     (unsigned long long)binfo->subctxt_uregbase,
-			     strerror(errno));
-			goto err;
-		} else {
-			hfi_touch_mmap(tmp, size);
-			binfo->subctxt_uregbase = (uint64_t) (uintptr_t) tmp;
-			_HFI_VDBG("subctxt_uregbase %llx\n",
-				  binfo->subctxt_uregbase);
-		}
-
-		size = ALIGN(cinfo->rcvhdrq_cnt * cinfo->rcvhdrq_entsize,
-			     __hfi_pg_sz) * num_subcontexts;
-		if ((tmp = hfi_mmap64(0, size,
-				      PROT_READ | PROT_WRITE,
-				      MAP_SHARED | MAP_LOCKED, fd,
-				      (__off64_t) binfo->subctxt_rcvhdrbuf &
-				      pg_mask)) == MAP_FAILED) {
-			_HFI_INFO
-			    ("mmap of subcontext rcvhdr_base array (%llx) failed: %s\n",
-			     (unsigned long long)binfo->subctxt_rcvhdrbuf,
-			     strerror(errno));
-			goto err;
-		} else {
-			hfi_touch_mmap(tmp, size);
-			binfo->subctxt_rcvhdrbuf = (uint64_t) (uintptr_t) tmp;
-			_HFI_VDBG("subctxt_rcvhdrbuf %llx\n",
-				  binfo->subctxt_rcvhdrbuf);
-		}
-
-		size = ALIGN(cinfo->egrtids * cinfo->rcvegr_size,
-			     __hfi_pg_sz) * num_subcontexts;
-		if ((tmp = hfi_mmap64(0, size,
-				      PROT_READ | PROT_WRITE,
-				      MAP_SHARED | MAP_LOCKED, fd,
-				      (__off64_t) binfo->subctxt_rcvegrbuf &
-				      pg_mask)) == MAP_FAILED) {
-			_HFI_INFO
-			    ("mmap of subcontext rcvegrbuf array (%llx) failed: %s\n",
-			     (unsigned long long)binfo->subctxt_rcvegrbuf,
-			     strerror(errno));
-			goto err;
-		} else {
-			hfi_touch_mmap(tmp, size);
-			binfo->subctxt_rcvegrbuf = (uint64_t) (uintptr_t) tmp;
-			_HFI_VDBG("subctxt_rcvegrbuf %llx\n",
-				  binfo->subctxt_rcvegrbuf);
-		}
-	}
+	if (map_hfi_mem(fd, spctrl, uinfo->subctxt_cnt) == -1)
+		goto err_map_hfi_mem;
 
 	/* Save some info. */
 	spctrl->fd = fd;
@@ -560,8 +512,32 @@ struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 
 	return spctrl;
 
-err:
-	if (spctrl)
-		free(spctrl);
+err_map_hfi_mem:
+err_version_mismatch:
+err_hfi_cmd_user_info:
+	/* TODO: restore the original CPU affinity? */
+
+err_sanity_check:
+err_hfi_cmd_ctxt_info:
+	/* TODO: ioctl de-assign context here? */
+	// without de-assigning the context, all subsequent hfi_userinit_internal()
+	// calls are going to fail
+	_HFI_ERROR("An unrecoverable error occurred while communicating with the driver\n");
+	abort(); /* TODO: or do we want to include psm_user.h to use psmi_handle_error()? */
+	// no recovery here
+
+	/* if we failed to allocate memory or to assign the context, we might still recover from this.
+ 	 * Returning NULL will cause the function to be reinvoked n times. Do we really want this
+ 	 * behavior?
+	*/
+err_hfi_cmd_assign_ctxt:
+	free(spctrl);
+
+err_calloc_hfi_ctrl:
 	return NULL;
+}
+
+struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
+{
+	return hfi_userinit_internal(fd, false, uinfo);
 }

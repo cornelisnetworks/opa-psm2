@@ -77,6 +77,7 @@
 #include <sys/mman.h>
 #include <sys/user.h>
 #include <syslog.h>
+#include <stdbool.h>
 #include "opa_intf.h"
 #include "opa_common_gen1.h"
 #include "opa_byteorder.h"
@@ -149,6 +150,82 @@ struct hfi_pbc {
 	__u16 fill1;
 };
 
+typedef enum mapsize
+{	SC_CREDITS,
+	PIO_BUFBASE_SOP,
+	PIO_BUFBASE,
+	RCVHDR_BUFBASE,
+	RCVEGR_BUFBASE,
+	SDMA_COMP_BUFBASE,
+	USER_REGBASE,
+	RCVHDRTAIL_BASE,
+	EVENTS_BUFBASE,
+	STATUS_BUFBASE,
+	SUBCTXT_UREGBASE,
+	SUBCTXT_RCVHDRBUF,
+	SUBCTXT_RCVEGRBUF,
+	MAPSIZE_MAX
+} mapsize_t;
+
+/* TODO: consider casting in the ALIGN() macro */
+#define ALIGN(x, a)				(((x)+(a)-1)&~((a)-1))
+#define ALIGNDOWN_PTR(x, a)			((void*)(((uintptr_t)(x))&~((uintptr_t)((a)-1))))
+
+/* using the same flags for all the mappings */
+#define HFI_MMAP_FLAGS				(MAP_SHARED|MAP_LOCKED)
+#define HFI_MMAP_PGSIZE				sysconf(_SC_PAGESIZE)
+/* cast to uintptr_t as opposed to intptr_t which evaluates to a signed type
+ *  * on which one should not perform bitwise operations (undefined behavior)
+ *   */
+#define HFI_MMAP_PGMASK				(~(uintptr_t)(HFI_MMAP_PGSIZE-1))
+
+/* this is only an auxiliary macro for HFI_MMAP_ERRCHECK()
+ * @off expected to be unsigned in order to AND with the page mask and avoid undefined behavior
+ */
+#define U64_TO_OFF64_PGMASK(off)		((__off64_t)((off) & HFI_MMAP_PGMASK))
+
+#define HFI_MMAP_ALIGNOFF(fd, off, size, prot)	hfi_mmap64(0,(size),(prot),HFI_MMAP_FLAGS,(fd),U64_TO_OFF64_PGMASK((off)))
+/* complementary */
+#define HFI_MUNMAP(addr, size)			munmap((addr), (size))
+
+/* make sure uintmax_t can hold the result of unsigned int multiplication */
+#if UINT_MAX > (UINTMAX_MAX / UINT_MAX)
+#error We cannot safely multiply unsigned integers on this platform
+#endif
+
+/* @member assumed to be of type u64 and validated to be so */
+#define HFI_MMAP_ERRCHECK(fd, binfo, member, size, prot) ({						\
+		typeof((binfo)->member) *__tptr = (__u64 *)NULL;					\
+		(void)__tptr;										\
+		void *__maddr = HFI_MMAP_ALIGNOFF((fd), (binfo)->member, (size), (prot));		\
+		do {											\
+			if (unlikely(__maddr == MAP_FAILED)) {						\
+				uintmax_t outval = (uintmax_t)((binfo)->member);			\
+				_HFI_INFO("mmap of " #member " (0x%jx) size %zu failed: %s\n",		\
+					outval, size, strerror(errno));					\
+				goto err_mmap_##member;							\
+			}										\
+			(binfo)->member = (__u64)__maddr;						\
+			_HFI_VDBG(#member "mmap %jx successful\n", (uintmax_t)((binfo)->member));	\
+		} while(0);										\
+		__maddr;										\
+})
+
+/* assigns 0 to the member after unmapping */
+#define HFI_MUNMAP_ERRCHECK(binfo, member, size)						\
+		do {	typeof((binfo)->member) *__tptr = (__u64 *)NULL;			\
+			(void)__tptr;								\
+			void *__addr = ALIGNDOWN_PTR((binfo)->member, HFI_MMAP_PGSIZE);		\
+			if (unlikely( __addr == NULL || (munmap(__addr, (size)) == -1))) {	\
+				_HFI_INFO("unmap of " #member " (%p) failed: %s\n",		\
+					__addr, strerror(errno));				\
+			}									\
+			else {									\
+				_HFI_VDBG("unmap of " #member "(%p) succeeded\n", __addr);	\
+				(binfo)->member = 0;						\
+			}									\
+		} while(0)
+
 #define HFI_PCB_SIZE_IN_BYTES 8
 
 /* Usable bytes in header (hdrsize - lrh - bth) */
@@ -199,7 +276,7 @@ struct _hfi_ctrl {
 	struct hfi1_base_info base_info;
 
 	/* some local storages in some condition: */
-	/* as storage of __hfi_rcvtidflow in hfi_userinit(). */
+	/* as storage of __hfi_rcvtidflow in hfi_userinit_internal(). */
 	__le64 regs[HFI_TF_NFLOWS];
 
 	/* location to which OPA writes the rcvhdrtail register whenever
@@ -236,8 +313,12 @@ struct _hfi_ctrl {
    struct _hfi_ctrl *.  The struct _hfi_ctrl * used for everything
    else is returned by this routine.
 */
-
 struct _hfi_ctrl *hfi_userinit(int32_t, struct hfi1_user_info_dep *);
+
+/* Internal function extends API, while original remains for backwards
+   compatibility with external code
+*/
+struct _hfi_ctrl *hfi_userinit_internal(int32_t, bool, struct hfi1_user_info_dep *);
 
 /* don't inline these; it's all init code, and not inlining makes the */
 /* overall code shorter and easier to debug */
@@ -477,10 +558,9 @@ static __inline__ int32_t hfi_update_tid(struct _hfi_ctrl *ctrl,
 					 uint64_t tidlist, uint32_t *tidcnt, uint16_t flags)
 {
 	struct hfi1_cmd cmd;
-#ifdef PSM_CUDA
-	struct hfi1_tid_info_v2 tidinfo;
-#else
 	struct hfi1_tid_info tidinfo;
+#ifdef PSM_CUDA
+	struct hfi1_tid_info_v2 tidinfov2;
 #endif
 	int err;
 
@@ -491,23 +571,30 @@ static __inline__ int32_t hfi_update_tid(struct _hfi_ctrl *ctrl,
 	tidinfo.tidcnt = 0;		/* clear to zero */
 
 	cmd.type = PSMI_HFI_CMD_TID_UPDATE;
-#ifdef PSM_CUDA
-	cmd.type = PSMI_HFI_CMD_TID_UPDATE_V2;
-
-	if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
-		tidinfo.flags = flags;
-	else
-		tidinfo.flags = 0;
-#endif
-
 	cmd.len = sizeof(tidinfo);
 	cmd.addr = (__u64) &tidinfo;
+#ifdef PSM_CUDA
+	if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED) {
+		/* Copy values to v2 struct */
+		tidinfov2.vaddr   = tidinfo.vaddr;
+		tidinfov2.length  = tidinfo.length;
+		tidinfov2.tidlist = tidinfo.tidlist;
+		tidinfov2.tidcnt  = tidinfo.tidcnt;
+		tidinfov2.flags   = flags;
+
+		cmd.type = PSMI_HFI_CMD_TID_UPDATE_V2;
+		cmd.len = sizeof(tidinfov2);
+		cmd.addr = (__u64) &tidinfov2;
+	}
+#endif
 
 	err = hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd));
 
 	if (err != -1) {
-		*length = tidinfo.length;
-		*tidcnt = tidinfo.tidcnt;
+		struct hfi1_tid_info *rettidinfo =
+			(struct hfi1_tid_info *)cmd.addr;
+		*length = rettidinfo->length;
+		*tidcnt = rettidinfo->tidcnt;
 	}
 
 	return err;

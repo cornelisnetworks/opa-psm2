@@ -586,6 +586,10 @@ void stats_register_hfi_counters(psm2_ep_t ep)
 	psmi_stats_register_type("OPA device counters",
 				 PSMI_STATSTYPE_DEVCOUNTERS,
 				 entries, nc + npc, ep);
+	// psmi_stats_register_type makes it's own copy of entries
+	// so we should free the entries buffer.
+	// The snames will be freed when we deregister the hfi.
+	psmi_free(entries);
 	return;
 
 bail:
@@ -605,7 +609,7 @@ void stats_register_hfi_stats(psm2_ep_t ep)
 	struct psmi_stats_entry *entries = NULL;
 
 	ns = hfi_get_stats_names(&snames);
-	if (ns == -1 || snames == NULL)
+	if (ns <= 0 || snames == NULL)
 		goto bail;
 	entries = psmi_calloc(ep, STATS, ns, sizeof(struct psmi_stats_entry));
 	if (entries == NULL)

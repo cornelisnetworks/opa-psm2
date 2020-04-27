@@ -82,7 +82,6 @@ struct psmi_context {
 
 	psm2_ep_t ep;		/* psm ep handle */
 	psm2_epid_t epid;	/* psm integral ep id */
-	uint32_t rcvthread_flags;
 	psm2_error_t status_lasterr;
 	time_t networkLostTime;
 } psmi_context_t;

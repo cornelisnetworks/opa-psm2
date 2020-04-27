@@ -91,7 +91,7 @@ struct ips_epstate_entry *
 ips_epstate_lookup(const struct ips_epstate *eps, ips_epstate_idx idx))
 {
 	idx = (idx + eps->eps_base_idx) & (IPS_EPSTATE_CONNIDX_MAX-1);
-	if (idx < eps->eps_tabsize)
+	if (idx < (ips_epstate_idx)eps->eps_tabsize)
 		return &eps->eps_tab[idx];
 	else
 		return NULL;

@@ -130,6 +130,13 @@ psm2_error_t psmi_am_init_internal(psm2_ep_t ep)
 
 }
 
+void psmi_am_fini_internal(psm2_ep_t ep)
+{
+	if(ep->am_htable != NULL) {
+		psmi_free(ep->am_htable);
+	}
+}
+
 psm2_error_t
 __psm2_am_register_handlers(psm2_ep_t ep,
 			   const psm2_am_handler_fn_t *handlers,

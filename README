@@ -67,6 +67,7 @@ Contains the following sections:
 - INSTALLING
   * INSTALLING USING MAKEFILE
   * INSTALLING USING EITHER YUM OR DNF
+- TESTING
 - RELATED SOFTWARE TO PSM2
 - SUPPORTING DOCUMENTATION
 
@@ -180,6 +181,10 @@ BUILDING USING RPMBUILD
   	libpsm2-2-10.3.7-1.x86_64.rpm
 
   Other supporting RPM package names will be as listed above.
+
+2. To build rpm files from the srpm file with Intel C (icc), specify the
+  correct CCARCH in the rpmbuild environment:
+ 	$ env CCARCH=icc rpmbuild --rebuild SRPMS/libpsm2-10.3.7-1.src.rpm
 
 INSTALLING
 ==========

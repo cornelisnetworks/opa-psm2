@@ -53,6 +53,10 @@
 
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
+#ifdef __CET__
+#include <cet.h>
+#endif
+
  	.globl hfi_dwordcpy
 	.file	"opa_dword32cpy.S"
 	.text
@@ -61,6 +65,9 @@ hfi_dwordcpy:
 	// standard C calling convention, args on stack
         // does not return any value
 	.type	hfi_dwordcpy, @function
+#ifdef _CET_ENDBR
+	_CET_ENDBR
+#endif
 	// save caller-saved regs
 	mov    %edi,%eax
 	mov    %esi,%edx

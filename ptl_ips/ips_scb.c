@@ -201,6 +201,12 @@ psm2_error_t ips_scbctrl_fini(struct ips_scbctrl *scbc)
 	if (scbc->sbuf_buf_alloc) {
 		psmi_free(scbc->sbuf_buf_alloc);
 	}
+	if (scbc->timers != NULL) {
+		psmi_free(scbc->timers);
+	}
+	if (scbc->scb_imm_buf) {
+		psmi_free(scbc->scb_imm_buf);
+	}
 	return PSM2_OK;
 }
 

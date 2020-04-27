@@ -196,6 +196,30 @@ void *psmi_epid_remove(psm2_ep_t ep, psm2_epid_t epid)
 	return psmi_epid_lookup_inner(ep, epid, 1);
 }
 
+void psmi_epid_remove_all(psm2_ep_t ep)
+{
+	size_t i;
+	struct psmi_epid_tabentry *e;
+
+	pthread_mutex_lock(&psmi_epid_table.tablock);
+
+	for (i = 0; i < psmi_epid_table.tabsize; i++) {
+		e = &psmi_epid_table.table[i];
+
+		if (e->entry == NULL || e->entry == EPADDR_DELETED)
+			continue;
+
+		if (e->ep == ep) {
+			/* unspecified fields implicitly zeroed */
+			*e = (struct psmi_epid_tabentry) {
+				.entry = EPADDR_DELETED
+			};
+		}
+	}
+
+	pthread_mutex_unlock(&psmi_epid_table.tablock);
+}
+
 psm2_error_t psmi_epid_add(psm2_ep_t ep, psm2_epid_t epid, void *entry)
 {
 	uint64_t key;
@@ -262,17 +286,29 @@ fail:
 	return err;
 }
 
+static psmi_lock_t psmi_gethostname_lock;
+
+static void __attribute__ ((constructor)) __psmi_gethostname_lock_constructor(void)
+{
+	psmi_init_lock(&psmi_gethostname_lock);
+}
+
 char *psmi_gethostname(void)
 {
-	/* XXX this will need a lock in a multi-threaded environment */
 	static char hostname[80] = { '\0' };
 	char *c;
 
 	if (hostname[0] == '\0') {
-		gethostname(hostname, sizeof(hostname));
-		hostname[sizeof(hostname) - 1] = '\0';	/* no guarantee of nul termination */
-		if ((c = strchr(hostname, '.')))
-			*c = '\0';
+		PSMI_LOCK(psmi_gethostname_lock);
+		/* CRITICAL SECTION START */
+		if (hostname[0] == '\0') {
+			gethostname(hostname, sizeof(hostname));
+			hostname[sizeof(hostname) - 1] = '\0';	/* no guarantee of nul termination */
+			if ((c = strchr(hostname, '.')))
+				*c = '\0';
+		}
+		PSMI_UNLOCK(psmi_gethostname_lock);
+		/* CRITICAL SECTION END */
 	}
 
 	return hostname;
@@ -817,6 +853,8 @@ void psmi_multi_ep_init()
 	psmi_multi_ep_enabled = env_fi.e_uint;
 }
 
+#ifdef PSM_FI
+
 int psmi_faultinj_enabled = 0;
 int psmi_faultinj_verbose = 0;
 char *psmi_faultinj_outfile = NULL;
@@ -983,6 +1021,8 @@ int psmi_faultinj_is_fault(struct psmi_faultinj_spec *fi)
 	} else
 		return 0;
 }
+
+#endif /* #ifdef PSM_FI */
 
 /* For memory allocation, we kind of break the PSM error handling rules.
  * If the caller gets NULL, it has to assume that the error has been handled
@@ -1237,6 +1277,35 @@ void _psmi_heapdebug_val_heapallocs(const char *curloc)
 	}
 }
 
+/* psmi_heapdebug_finalize() validates the heap and then emits all of the allocations to stdout.
+   to help debug heap memory leaks. */
+void psmi_heapdebug_finalize(void)
+{
+	/* First validate the existing heap allocations: */
+
+	psmi_heapdebug_val_heapallocs();
+
+	printf("orphaned heap allocations: %d\n", n_allocations);
+
+	if (n_allocations > 0)
+	{
+		/* Now, emit all of the alloations to stdout. */
+
+		HD_Header_Type *p = HD_root_of_list;
+
+		while (p)
+		{
+			printf("orphaned heap allocation: %p allocated at: %s, size: %lu\n",
+			       p, p->allocLoc, p->sizeOfAlloc);
+
+			p = p->nextHD_header;
+		}
+		fflush(0);
+		/* Abort if any allocations still exist: */
+		abort();
+	}
+}
+
 /* hd_est_hdr_trlr() establishes the new allocation to the singly linked list, and adds
  * the header and trailer to the allocation.  Lastly, it validates the existing singly-linked
  * list for integrity. */
@@ -1246,15 +1315,9 @@ static void hd_est_hdr_trlr(HD_Header_Type *hd_alloc,
 			    uint64_t actualSize,
 			    const char *curloc)
 {
-#if 0
-	/* if we use this block of code, psm hangs running mpistress.  See JIRA STL-5244.  */
+	/* First, write HD_NO_MANS_LAND to the entire allocation: */
 	memset(systemAlloc,HD_NO_MANS_LAND,systemSize);
-#else
-	/* write HD_NO_MANS_LAND to the area between the system allocation and the start of the hd header. */
-	signed char *pchr = systemAlloc;
-	for (;pchr < (signed char*) hd_alloc;pchr++)
-		*pchr = (signed char) HD_NO_MANS_LAND;
-#endif
+
 	/* Write the HD header info: */
 	memcpy(hd_alloc->magic1,HD_HDR_MGC_1,sizeof(HD_HDR_MGC_1));
 	hd_alloc->allocLoc = curloc;

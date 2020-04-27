@@ -522,6 +522,7 @@ ips_proto_process_packet(const struct ips_recvhdrq_event *rcv_ev))
 {
 	uint32_t index;
 
+#ifdef PSM_FI
 	/* NOTE: Fault injection will currently not work with hardware
 	 * suppression. See note below for reason why as we currently
 	 * do not update the hardware tidflow table if FI is dropping
@@ -545,7 +546,7 @@ ips_proto_process_packet(const struct ips_recvhdrq_event *rcv_ev))
 		if (psmi_faultinj_is_fault(fi_recv))
 			return IPS_RECVHDRQ_CONTINUE;
 	}
-
+#endif /* #ifdef PSM_FI */
 	/* see file ips_proto_header.h for details */
 	index = _get_proto_hfi_opcode(rcv_ev->p_hdr) - OPCODE_RESERVED;
 	if (index >= (OPCODE_FUTURE_FROM - OPCODE_RESERVED))

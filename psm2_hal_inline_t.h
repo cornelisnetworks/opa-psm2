@@ -56,10 +56,10 @@
 
 static PSMI_HAL_INLINE int PSMI_HAL_CAT_INL_SYM(initialize)
 				(psmi_hal_instance_t *);
-static PSMI_HAL_INLINE int PSMI_HAL_CAT_INL_SYM(finalize)
+static PSMI_HAL_INLINE int PSMI_HAL_CAT_INL_SYM(finalize_)
 				(void);
 static PSMI_HAL_INLINE int PSMI_HAL_CAT_INL_SYM(get_num_units)
-				(int wait);
+				(void);
 static PSMI_HAL_INLINE int PSMI_HAL_CAT_INL_SYM(get_num_ports)
 				(void);
 static PSMI_HAL_INLINE int PSMI_HAL_CAT_INL_SYM(get_unit_active)
@@ -95,8 +95,8 @@ static PSMI_HAL_INLINE int PSMI_HAL_CAT_INL_SYM(get_port_rate)
 				(int unit, int port);
 static PSMI_HAL_INLINE int PSMI_HAL_CAT_INL_SYM(get_port_sl2sc)
 				(int unit, int port, int sl);
-static PSMI_HAL_INLINE int PSMI_HAL_CAT_INL_SYM(get_port_sc2vl)
-				(int unit, int port, int sc);
+static PSMI_HAL_INLINE int PSMI_HAL_CAT_INL_SYM(get_sc2vl_map)
+				(struct ips_proto *proto);
 static PSMI_HAL_INLINE int PSMI_HAL_CAT_INL_SYM(set_pkey)
 				(psmi_hal_hw_context, uint16_t);
 static PSMI_HAL_INLINE int PSMI_HAL_CAT_INL_SYM(poll_type)

@@ -173,21 +173,16 @@ int hfi_get_port_index2pkey(int unit, int port, int index);
 
 /* Get the number of units supported by the driver.  Does not guarantee
    that a working chip has been found for each possible unit #.
-   When the parameter 'wait' is non-zero, the code will wait briefly as
-   the driver may be coming up.  If 'wait' is zero, the function does not wait.
    Returns -1 with errno set, or number of units >=0 (0 means none found). */
-int hfi_get_num_units(int wait);
+int hfi_get_num_units();
 
 /* Given a unit number, returns 1 if any port on the unit is active.
    returns 0 if no port on the unit is active.
    returns -1 when an error occurred. */
 int hfi_get_unit_active(int unit);
 
-/* get the number of contexts from the unit id.
-   When the parameter 'wait' is non-zero, the code will wait briefly as
-   the driver may be coming up.  If 'wait' is zero, the function does not wait.
-   Returns 0 if no unit or no match. */
-int hfi_get_num_contexts(int unit, int wait);
+/* get the number of contexts from the unit id. */
+int hfi_get_num_contexts(int unit);
 
 /* Open hfi device file, return -1 on error. */
 int hfi_context_open(int unit, int port, uint64_t open_timeout);
@@ -242,9 +237,6 @@ int hfi_get_ctrs_port_names(int unitno, char **namep);
 /* sysfs helper routines (only those currently used are exported;
  * try to avoid using others) */
 
-/* Initializes the following sysfs helper routines. */
-void sysfs_init(const char *dflt_hfi_class_path);
-
 const char *hfi_sysfs_path(void);
 
 /* read a string value */
@@ -284,10 +276,6 @@ int hfi_hfifs_rd(const char *, void *, int);
 int hfi_hfifs_unit_rd(uint32_t unit, const char *, void *, int);
 
 int hfi_hfifs_open(const char *relname, int flags);
-
-/* wait for device special file to show up. timeout is in
- *    milliseconds, 0 is "callee knows best", < 0 is infinite. */
-int hfi_wait_for_device(const char *path, long timeout);
 
 int hfi_cmd_wait_for_packet(int fd);
 

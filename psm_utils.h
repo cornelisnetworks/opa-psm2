@@ -87,6 +87,7 @@ psm2_error_t psmi_epid_init();
 psm2_error_t psmi_epid_fini();
 void *psmi_epid_lookup(psm2_ep_t ep, psm2_epid_t epid);
 void *psmi_epid_remove(psm2_ep_t ep, psm2_epid_t epid);
+void psmi_epid_remove_all(psm2_ep_t ep);
 psm2_error_t psmi_epid_add(psm2_ep_t ep, psm2_epid_t epid, void *entry);
 #define PSMI_EP_HOSTNAME    ((psm2_ep_t) -1)	/* Special endpoint handle we use
 						 * to register hostnames */
@@ -182,9 +183,17 @@ void _psmi_heapdebug_val_heapallocs(const char *curloc);
 
 #define psmi_heapdebug_val_heapallocs() _psmi_heapdebug_val_heapallocs(PSMI_CURLOC)
 
+/* Finialize the heapdebug functionality after tear down of the psm
+   session when you are certain that all heap allocations have been
+   freed. psmi_heapdebug_finalize() will emit all of the extant
+   heap allocations and abort if there are any.  This is to aid
+   in debug of heap leaks. */
+void psmi_heapdebug_finalize(void);
+
 #else
 
 #define psmi_heapdebug_val_heapallocs() /* nothing */
+#define psmi_heapdebug_finalize() /* nothing */
 
 #endif
 
@@ -333,6 +342,7 @@ int psmi_diags(void);
 extern int psmi_multi_ep_enabled;
 void psmi_multi_ep_init();
 
+#ifdef PSM_FI
 /*
  * Fault injection
  */
@@ -354,6 +364,7 @@ struct psmi_faultinj_spec *psmi_faultinj_getspec(char *spec_name,
 	    (var) = psmi_faultinj_getspec((spec_name), (num), (denom));
 int psmi_faultinj_is_fault(struct psmi_faultinj_spec *spec);
 
+#endif /* #ifdef PSM_FI */
 /*
  * PSM core component set/get options
  */

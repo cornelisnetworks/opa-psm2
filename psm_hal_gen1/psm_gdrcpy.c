@@ -175,6 +175,9 @@ gdr_convert_gpu_to_host_addr(int gdr_fd, unsigned long buf,
 					   ((buf + size - 1) & GPU_PAGE_MASK) -
 					   pageaddr);
 
+	_HFI_VDBG("buf=%p size=%zu pageaddr=%p pagelen=%u flags=0x%x proto=%p\n",
+		(void *)buf, size, (void *)pageaddr, pagelen, flags, proto);
+
 	query_params.query_params_in.gpu_buf_addr = pageaddr;
 	query_params.query_params_in.gpu_buf_size = pagelen;
  retry:
@@ -186,7 +189,7 @@ gdr_convert_gpu_to_host_addr(int gdr_fd, unsigned long buf,
 			if (!handle_out_of_bar_space(proto)) {
 				/* Fatal error */
 				psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
-								  "Unable to PIN GPU pages(Out of BAR1 space)\n");
+						  "Unable to PIN GPU pages(Out of BAR1 space) (errno: %d)\n", errno);
 				return NULL;
 			} else {
 				goto retry;

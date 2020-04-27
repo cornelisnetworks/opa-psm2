@@ -242,11 +242,11 @@ psm_mq_setopt(psm2_mq_t mq, int key, const void *value)
 }
 
 psm2_error_t
-psm_mq_init(psm2_ep_t ep, uint64_t tag_order_mask,
+psm_mq_init(psm2_ep_t ep, uint64_t ignored,
       const struct psm2_optkey *opts,
       int numopts, psm2_mq_t *mqo)
 {
-  return psm2_mq_init(ep, tag_order_mask, opts, numopts, mqo);
+  return psm2_mq_init(ep, ignored, opts, numopts, mqo);
 }
 
 psm2_error_t

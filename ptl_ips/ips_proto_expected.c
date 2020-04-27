@@ -1919,20 +1919,15 @@ ips_tid_recv_alloc_frag(struct ips_protoexp *protoexp,
 			  ((bufptr + size - 1) & page_mask) -
 			  (bufptr & page_mask));
 		tidoff = pageoff = (uint32_t) (bufptr & page_offset_mask);
-	} else {
+	} else
+#endif
+	{
 		pageaddr = bufptr & protoexp->tid_page_mask;
 		pagelen = (uint32_t) (PSMI_PAGESIZE +
 			  ((bufptr + size - 1) & protoexp->tid_page_mask) -
 			  (bufptr & protoexp->tid_page_mask));
 		tidoff = pageoff = (uint32_t) (bufptr & protoexp->tid_page_offset_mask);
 	}
-#else
-	pageaddr = bufptr & protoexp->tid_page_mask;
-	pagelen = (uint32_t) (PSMI_PAGESIZE +
-			     ((bufptr + size - 1) & protoexp->tid_page_mask) -
-			     (bufptr & protoexp->tid_page_mask));
-	tidoff = pageoff = (uint32_t) (bufptr & protoexp->tid_page_offset_mask);
-#endif
 
 	reglen = pagelen;
 	if (protoexp->tidc.tid_array) {
@@ -2298,8 +2293,9 @@ ipsaddr_next:
 					getreq->tidgr_offset + nbytes_this;
 				nbytes_this -= pageoff & (PSMI_GPU_PAGESIZE - 1);
 			}
-		} else {
+		} else
 #endif
+		{
 			if ((getreq->tidgr_offset + nbytes_this) <
 					getreq->tidgr_length &&
 					nbytes_this > PSMI_PAGESIZE) {
@@ -2309,9 +2305,7 @@ ipsaddr_next:
 					getreq->tidgr_offset + nbytes_this;
 				nbytes_this -= pageoff & (PSMI_PAGESIZE - 1);
 			}
-#ifdef PSM_CUDA
 		}
-#endif
 
 		psmi_assert(nbytes_this >= 4);
 		psmi_assert(nbytes_this <= PSM_TID_WINSIZE);

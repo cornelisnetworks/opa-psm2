@@ -89,84 +89,6 @@ static sw_version_t sw_version =
 	}
 };
 
-/*
- * This function is necessary in a udev-based world.  There can be an
- * arbitrarily long (but typically less than one second) delay between
- * a driver getting loaded and any dynamic special files turning up.
- *
- * The timeout is in milliseconds.  A value of zero means "callee
- * decides timeout".  Negative is infinite.
- *
- * Returns 0 on success, -1 on error or timeout.  Check errno to see
- * whether there was a timeout (ETIMEDOUT) or an error (any other
- * non-zero value).
- */
-int hfi_wait_for_device(const char *path, long timeout)
-{
-	int saved_errno;
-	struct stat st;
-	long elapsed;
-	int ret;
-
-	if (timeout == 0)
-		timeout = 15000;
-
-	elapsed = 0;
-
-	while (1) {
-		static const long default_ms = 250;
-		struct timespec req = { 0 };
-		long ms;
-
-		ret = stat(path, &st);
-		saved_errno = errno;
-
-		if (ret == 0 || (ret == -1 && errno != ENOENT))
-			break;
-
-		if ((timeout > 0) && ((timeout - elapsed) <= 0)) {
-			saved_errno = ETIMEDOUT;
-			break;
-		}
-
-		if (elapsed == 0) {
-			if (timeout < 0)
-				_HFI_DBG
-				    ("Device file %s not present on first check; "
-				     "waiting indefinitely...\n", path);
-			else
-				_HFI_DBG
-				    ("Device file %s not present on first check; "
-				     "waiting up to %.1f seconds...\n", path,
-				     timeout / 1e3);
-		}
-
-		if (timeout < 0 || timeout - elapsed >= default_ms)
-			ms = default_ms;
-		else
-			ms = timeout;
-
-		elapsed += ms;
-		req.tv_nsec = ms * 1000000;
-
-		ret = nanosleep(&req, NULL);
-		saved_errno = errno;
-
-		if (ret == -1)
-			break;
-	}
-
-	if (ret == 0)
-		_HFI_DBG("Found %s after %.1f seconds\n", path, elapsed / 1e3);
-	else
-		_HFI_INFO
-		    ("The %s device failed to appear after %.1f seconds: %s\n",
-		     path, elapsed / 1e3, strerror(saved_errno));
-
-	errno = saved_errno;
-	return ret;
-}
-
 /* fwd declaration */
 ustatic int _hfi_cmd_write(int fd, struct hfi1_cmd *cmd, size_t count);
 
@@ -222,13 +144,6 @@ int hfi_context_open_ex(int unit, int port, uint64_t open_timeout,
 	else
 		snprintf(dev_name, dev_name_len, "%s_%u", HFI_DEVICE_PATH_GEN1,
 			 0);
-
-	if (hfi_wait_for_device(dev_name, (long)open_timeout) == -1) {
-		_HFI_DBG("Could not find an HFI Unit on device "
-			 "%s (%lds elapsed)", dev_name,
-			 (long)open_timeout / 1000);
-		return -1;
-	}
 
 	if ((fd = open(dev_name, O_RDWR)) == -1) {
 		_HFI_DBG("(host:Can't open %s for reading and writing",
@@ -397,7 +312,7 @@ void *hfi_mmap64(void *addr, size_t length, int prot, int flags, int fd,
 /* that a working chip has been found for each possible unit #. */
 /* number of units >=0 (0 means none found). */
 /* formerly used sysfs file "num_units" */
-int hfi_get_num_units(int wait)
+int hfi_get_num_units(void)
 {
 	int ret;
 
@@ -407,12 +322,7 @@ int hfi_get_num_units(int wait)
 		int r;
 
 		snprintf(pathname, sizeof(pathname), HFI_DEVICE_PATH_GEN1 "_%d", ret);
-		if (wait && (ret == 0))
-			/* We only wait for the first device to come up.  Not
-			   on subsequent devices in order to save time. */
-			r = hfi_wait_for_device(pathname, 0);
-		else
-			r = stat(pathname, &st);
+		r = stat(pathname, &st);
 		if (!r)
 			continue;
 		else
@@ -443,14 +353,14 @@ int hfi_get_unit_active(int unit)
 
 /* get the number of contexts from the unit id. */
 /* Returns 0 if no unit or no match. */
-int hfi_get_num_contexts(int unit_id, int wait)
+int hfi_get_num_contexts(int unit_id)
 {
 	int n = 0;
 	int units;
 	int64_t val;
 	uint32_t p = HFI_MIN_PORT;
 
-	units = hfi_get_num_units(wait);
+	units = hfi_get_num_units();
 
 	if_pf(units <=  0)
 		return 0;

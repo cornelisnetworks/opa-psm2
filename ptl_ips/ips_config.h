@@ -78,6 +78,8 @@
  */
 #define IPS_PROTOEXP_MIN_MTU		2048
 
+#ifdef PSM_FI
+
 /* Fault injection, becomes parameters to psmi_faultinj_getspec so
  * a comma-delimited list of
  *   "spec_name", num, denom
@@ -95,6 +97,7 @@
 #define IPS_FAULTINJ_PIOBUSY	10	/* 1 every 10 pio sends get busy */
 #define IPS_FAULTINJ_RECVLOST	200	/* 1 every 200 pkts dropped at recv */
 
+#endif /* #ifdef PSM_FI */
 
 /* TID */
 

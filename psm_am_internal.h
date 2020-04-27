@@ -103,5 +103,6 @@ PSMI_ALWAYS_INLINE(struct psm2_ep_am_handle_entry *
 
 /* PSM internal initialization */
 psm2_error_t psmi_am_init_internal(psm2_ep_t ep);
+void psmi_am_fini_internal(psm2_ep_t ep);
 
 #endif

@@ -143,17 +143,8 @@ self_mq_isend(psm2_mq_t mq, psm2_epaddr_t epaddr, uint32_t flags_user,
 	    return PSM2_NO_MEMORY;
 
 #ifdef PSM_CUDA
-	/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
-	 * when the buffer pointer received into PSM has been allocated
-	 * by the application. This guarantees the all memory operations
-	 * to this region of memory (used by multiple layers of the stack)
-	 * always synchronize
-	 */
-	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)ubuf)) {
-		int trueflag = 1;
-		PSMI_CUDA_CALL(cuPointerSetAttribute, &trueflag,
-			       CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
-			      (CUdeviceptr)ubuf);
+	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM(ubuf)) {
+		psmi_cuda_set_attr_sync_memops(ubuf);
 		send_req->is_buf_gpu_mem = 1;
 	} else
 		send_req->is_buf_gpu_mem = 0;

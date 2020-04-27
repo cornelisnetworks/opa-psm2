@@ -214,8 +214,10 @@
 #define IPS_PROTO_FLAG_PPOLICY_STATIC 0x1c00
 
 /* IBTA CCA Protocol support */
-#define IPS_PROTO_FLAG_CCA 0x2000
+#define IPS_PROTO_FLAG_CCA 0x2000		/* Enables full-fledged CCA */
 #define IPS_PROTO_FLAG_CCA_PRESCAN 0x4000	/* Enable RAPID CCA prescanning */
+#define IPS_PROTO_FLAG_CC_REPL_BECN  0x8000	/* A simple congestion control scheme */
+						/* that simply replies a BECN on rx FECN. */
 
 #ifdef PSM_CUDA
 /* Use RNDV (TID) for all message sizes */

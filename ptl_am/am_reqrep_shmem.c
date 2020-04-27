@@ -144,23 +144,38 @@ static inline uintptr_t am_ctl_sizeof_block()
 
 #undef _PA
 
+static uint32_t create_extra_ep_data()
+{
+	uint32_t ret = getpid();
+
+#ifdef PSM_CUDA
+	/* PID is at maximum 22 bits */
+	ret |= my_gpu_device << 22;
+#endif
+
+	return ret;
+}
+
+static void read_extra_ep_data(uint32_t data, uint32_t *pid, uint32_t *gpu)
+{
+	uint32_t pid_mask = (1 << 22) - 1;
+
+	*pid = data & pid_mask;
+	*gpu = (data & ~pid_mask) >> 22;
+}
+
 static void am_update_directory(struct am_ctl_nodeinfo *);
 
 static
 void amsh_atexit()
 {
-	static pthread_mutex_t mutex_once = PTHREAD_MUTEX_INITIALIZER;
-	static int atexit_once;
+	static ips_atomic_t atexit_once = { 0 };
 	psm2_ep_t ep;
 	struct ptl_am *ptl;
 
-	pthread_mutex_lock(&mutex_once);
-	if (atexit_once) {
-		pthread_mutex_unlock(&mutex_once);
+	/* bail out if previous value is non-zero */
+	if (ips_atomic_cmpxchg(&atexit_once, 0, 1) != 0)
 		return;
-	} else
-		atexit_once = 1;
-	pthread_mutex_unlock(&mutex_once);
 
 	ep = psmi_opened_endpoint;
 	while (ep) {
@@ -240,7 +255,7 @@ psm2_error_t psmi_shm_create(ptl_t *ptl_gen)
 	size_t segsz;
 	psm2_error_t err = PSM2_OK;
 	int shmfd = -1;
-	char *amsh_keyname;
+	char *amsh_keyname = NULL;
 	int iterator;
 	/* Get which kassist mode to use. */
 	ptl->psmi_kassist_mode = psmi_get_kassist_mode();
@@ -269,6 +284,8 @@ psm2_error_t psmi_shm_create(ptl_t *ptl_gen)
 		shmfd =
 		    shm_open(amsh_keyname, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 		if (shmfd < 0) {
+			psmi_free(amsh_keyname);
+			amsh_keyname = NULL;
 			if (errno == EACCES && iterator < INT_MAX)
 				continue;
 			else {
@@ -301,6 +318,7 @@ psm2_error_t psmi_shm_create(ptl_t *ptl_gen)
 		}
 	}
 	if (err) {
+		if (amsh_keyname) psmi_free(amsh_keyname);
 		err = psmi_handle_error(NULL,
 					PSM2_SHMEM_SEGMENT_ERR,
 					"Error creating shared memory object "
@@ -328,6 +346,7 @@ psm2_error_t psmi_shm_create(ptl_t *ptl_gen)
 		err = psmi_handle_error(NULL, PSM2_SHMEM_SEGMENT_ERR,
 					"Error mmapping shared memory: %s",
 					strerror(errno));
+		psmi_free(amsh_keyname);
 		goto fail;
 	}
 
@@ -454,6 +473,7 @@ psm2_error_t psmi_shm_map_remote(ptl_t *ptl_gen, psm2_epid_t epid, uint16_t *shm
 							"shared memory object "
 							"with fstat: %s",
 							strerror(errno));
+				close(dest_shmfd);
 				goto fail;
 			}
 			if (getuid() == st.st_uid) {
@@ -480,6 +500,7 @@ psm2_error_t psmi_shm_map_remote(ptl_t *ptl_gen, psm2_epid_t epid, uint16_t *shm
 		err = psmi_handle_error(NULL, PSM2_SHMEM_SEGMENT_ERR,
 					"Error mmapping remote shared memory: %s",
 					strerror(errno));
+		close(dest_shmfd);
 		goto fail;
 	}
 	close(dest_shmfd);
@@ -560,7 +581,8 @@ psm2_error_t psmi_shm_map_remote(ptl_t *ptl_gen, psm2_epid_t epid, uint16_t *shm
 
 	if (shmidx == (uint16_t)-1)
 		err = psmi_handle_error(NULL, PSM2_SHMEM_SEGMENT_ERR,
-					"Could not connect to local endpoint");	fail:
+					"Could not connect to local endpoint");
+fail:
 	return err;
 }
 
@@ -593,9 +615,10 @@ static psm2_error_t amsh_init_segment(ptl_t *ptl_gen)
 
 	/* We core dump right after here if we don't check the mmap */
 
-	struct sigaction act;
-	act.sa_sigaction = amsh_mmap_fault;
-	act.sa_flags = SA_SIGINFO;
+	struct sigaction act = {
+		.sa_sigaction = amsh_mmap_fault,
+		.sa_flags = SA_SIGINFO
+	};
 
 	sigaction(SIGSEGV, &act, &action_stash.SIGSEGV_old_act);
 	sigaction(SIGBUS, &act, &action_stash.SIGBUS_old_act);
@@ -1014,7 +1037,7 @@ amsh_ep_connreq_poll(ptl_t *ptl_gen, struct ptl_connection_req *req)
 				req->args[0].u32w1 = ptl->connect_phase;
 				req->args[1].u64w0 = (uint64_t) ptl->epid;
 				psmi_assert(shmidx != (uint16_t)-1);
-				req->args[2].u32w0 = getpid();
+				req->args[2].u32w0 = create_extra_ep_data();
 				req->args[2].u32w1 = PSM2_OK;
 				req->args[3].u64w0 =
 				    (uint64_t) (uintptr_t) &req->errors[i];
@@ -1154,7 +1177,7 @@ amsh_ep_connreq_poll(ptl_t *ptl_gen, struct ptl_connection_req *req)
 				req->args[0].u16w1 = shmidx;
 				req->args[0].u32w1 = ptl->connect_phase;
 				req->args[1].u64w0 = (uint64_t) ptl->epid;
-				req->args[2].u32w0 = getpid();
+				req->args[2].u32w0 = create_extra_ep_data();
 				req->args[2].u32w1 = PSM2_OK;
 				req->args[3].u64w0 =
 				    (uint64_t) (uintptr_t) &req->errors[i];
@@ -1958,45 +1981,107 @@ amsh_mq_rndv(ptl_t *ptl, psm2_mq_t mq, psm2_mq_req_t req,
 	req->send_msgoff = 0;
 
 #ifdef PSM_CUDA
-		/* If the send buffer is on gpu, we create a cuda IPC
-		 * handle and send it as payload in the RTS
-		 */
-		if (req->is_buf_gpu_mem) {
-			CUdeviceptr buf_base_ptr;
-			PSMI_CUDA_CALL(cuMemGetAddressRange, &buf_base_ptr, NULL, (CUdeviceptr)buf);
+	/* If the send buffer is on gpu, we create a cuda IPC
+	 * handle and send it as payload in the RTS */
+	if (req->is_buf_gpu_mem) {
+		CUdeviceptr buf_base_ptr;
+		PSMI_CUDA_CALL(cuMemGetAddressRange, &buf_base_ptr, NULL, (CUdeviceptr)buf);
 
-			/* Offset in GPU buffer from which we copy data, we have to
-			 * send it separetly because this offset is lost
-			 * when cuIpcGetMemHandle  is called */
-			req->cuda_ipc_offset = buf - (void*)buf_base_ptr;
-			args[2].u32w0 = (uint32_t)req->cuda_ipc_offset;
+		/* Offset in GPU buffer from which we copy data, we have to
+			* send it separetly because this offset is lost
+			* when cuIpcGetMemHandle  is called */
+		req->cuda_ipc_offset = buf - (void*)buf_base_ptr;
+		args[2].u32w0 = (uint32_t)req->cuda_ipc_offset;
 
-			PSMI_CUDA_CALL(cuIpcGetMemHandle,
-				      &req->cuda_ipc_handle,
-				      (CUdeviceptr) buf);
-			if (req->flags_internal & PSMI_REQ_FLAG_FASTPATH) {
-				psmi_am_reqq_add(AMREQUEST_SHORT, ptl,
-						 epaddr, mq_handler_hidx,
-						 args, 5, (void*)&req->cuda_ipc_handle,
-						 sizeof(CUipcMemHandle), NULL, 0);
-			} else {
-				psmi_amsh_short_request(ptl, epaddr, mq_handler_hidx,
-							args, 5, (void*)&req->cuda_ipc_handle,
-							sizeof(CUipcMemHandle), 0);
-			}
-			req->cuda_ipc_handle_attached = 1;
-		} else
-#endif
+		PSMI_CUDA_CALL(cuIpcGetMemHandle,
+				&req->cuda_ipc_handle,
+				(CUdeviceptr) buf);
 		if (req->flags_internal & PSMI_REQ_FLAG_FASTPATH) {
 			psmi_am_reqq_add(AMREQUEST_SHORT, ptl,
-					 epaddr, mq_handler_hidx,
-					 args, 5, NULL, 0, NULL, 0);
+						epaddr, mq_handler_hidx,
+						args, 5, (void*)&req->cuda_ipc_handle,
+						sizeof(CUipcMemHandle), NULL, 0);
 		} else {
 			psmi_amsh_short_request(ptl, epaddr, mq_handler_hidx,
-						args, 5, NULL, 0, 0);
+						args, 5, (void*)&req->cuda_ipc_handle,
+						sizeof(CUipcMemHandle), 0);
 		}
+		req->cuda_ipc_handle_attached = 1;
+	} else
+#endif
+	if (req->flags_internal & PSMI_REQ_FLAG_FASTPATH) {
+		psmi_am_reqq_add(AMREQUEST_SHORT, ptl, epaddr, mq_handler_hidx,
+					args, 5, NULL, 0, NULL, 0);
+	} else {
+		psmi_amsh_short_request(ptl, epaddr, mq_handler_hidx,
+					args, 5, NULL, 0, 0);
+	}
+
+	mq->stats.tx_num++;
+	mq->stats.tx_shm_num++;
+	mq->stats.tx_rndv_num++;
+	mq->stats.tx_rndv_bytes += len;
 
 	return err;
+}
+
+PSMI_ALWAYS_INLINE(
+psm2_error_t
+amsh_mq_send_inner_eager(psm2_mq_t mq, psm2_mq_req_t req, psm2_epaddr_t epaddr,
+			psm2_amarg_t *args, uint32_t flags_user, uint32_t flags_internal,
+			psm2_mq_tag_t *tag, const void *ubuf, uint32_t len))
+{
+	uint32_t bytes_left = len;
+	uint32_t bytes_this = 0;
+
+	psm2_handler_t handler = mq_handler_hidx;
+
+	args[1].u32w1 = tag->tag[0];
+	args[1].u32w0 = tag->tag[1];
+	args[2].u32w1 = tag->tag[2];
+	args[2].u32w0 = 0;
+
+	if (!flags_user && len <= AMLONG_MTU) {
+		if (len <= 32)
+			args[0].u32w0 = MQ_MSG_TINY;
+		else
+			args[0].u32w0 = MQ_MSG_SHORT;
+	} else {
+		args[0].u32w0 = MQ_MSG_EAGER;
+		args[0].u32w1 = len;
+	}
+
+	do {
+		args[2].u32w0 += bytes_this;
+		bytes_this = min(bytes_left, AMLONG_MTU);
+
+		/* Assume that shared-memory active messages are delivered in order */
+		if (flags_internal & PSMI_REQ_FLAG_FASTPATH) {
+			psmi_am_reqq_add(AMREQUEST_SHORT, epaddr->ptlctl->ptl,
+					epaddr, handler, args, 3, (void *)ubuf,
+					bytes_this, NULL, 0);
+		} else {
+			psmi_amsh_short_request(epaddr->ptlctl->ptl, epaddr,
+						handler, args, 3, ubuf, bytes_this, 0);
+		}
+
+		ubuf += bytes_this;
+		bytes_left -= bytes_this;
+		handler = mq_handler_data_hidx;
+	} while(bytes_left);
+
+	/* All eager async sends are always "all done" */
+	if (req != NULL) {
+		req->state = MQ_STATE_COMPLETE;
+		mq_qq_append(&mq->completed_q, req);
+	}
+
+	mq->stats.tx_num++;
+	mq->stats.tx_shm_num++;
+	mq->stats.tx_eager_num++;
+	mq->stats.tx_eager_bytes += len;
+
+	return PSM2_OK;
 }
 
 /*
@@ -2013,127 +2098,80 @@ amsh_mq_send_inner(psm2_mq_t mq, psm2_mq_req_t req, psm2_epaddr_t epaddr,
 	int is_blocking = (req == NULL);
 
 #ifdef PSM_CUDA
-	int gpu_mem;
-	/* All sends from  a gpu buffer use the rendezvous protocol */
-	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM((void*)ubuf)) {
-		if (!PSMI_IS_CUDA_ENABLED)
-			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
-				 " Please enable PSM CUDA support when using GPU buffer \n");
+	int gpu_mem = 0;
+	int ep_supports_p2p = (1 << ((am_epaddr_t *) epaddr)->gpuid) & gpu_p2p_supported;
+
+	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM(ubuf)) {
 		gpu_mem = 1;
-		goto do_rendezvous;
-	} else
-		gpu_mem = 0;
-#endif
 
-	if (!flags_user && len <= AMLONG_MTU) {
-		if (len <= 32)
-			args[0].u32w0 = MQ_MSG_TINY;
-		else
-			args[0].u32w0 = MQ_MSG_SHORT;
-		args[1].u32w1 = tag->tag[0];
-		args[1].u32w0 = tag->tag[1];
-		args[2].u32w1 = tag->tag[2];
+		/* All sends from a gpu buffer use the rendezvous protocol if p2p is supported */
+		if (ep_supports_p2p) {
+			goto do_rendezvous;
+		}
 
-		if (flags_internal & PSMI_REQ_FLAG_FASTPATH) {
-			psmi_am_reqq_add(AMREQUEST_SHORT, epaddr->ptlctl->ptl,
-					 epaddr, mq_handler_hidx,
-					 args, 3, (void *)ubuf, len, NULL, 0);
-		} else {
-			psmi_amsh_short_request(epaddr->ptlctl->ptl, epaddr,
-				mq_handler_hidx, args, 3, ubuf, len, 0);
-		}
-	} else if (flags_user & PSM2_MQ_FLAG_SENDSYNC)
-		goto do_rendezvous;
-	else if (len <= mq->shm_thresh_rv) {
-		uint32_t bytes_left = len;
-		uint32_t bytes_this = min(bytes_left, AMLONG_MTU);
-		uint8_t *buf = (uint8_t *) ubuf;
-		args[0].u32w0 = MQ_MSG_EAGER;
-		args[0].u32w1 = len;
-		args[1].u32w1 = tag->tag[0];
-		args[1].u32w0 = tag->tag[1];
-		args[2].u32w1 = tag->tag[2];
-		if (flags_internal & PSMI_REQ_FLAG_FASTPATH) {
-			psmi_am_reqq_add(AMREQUEST_SHORT, epaddr->ptlctl->ptl,
-					 epaddr, mq_handler_hidx,
-					 args, 3, buf, bytes_this, NULL, 0);
-		} else {
-			psmi_amsh_short_request(epaddr->ptlctl->ptl, epaddr,
-						mq_handler_hidx, args, 3, buf,
-						bytes_this, 0);
-		}
-		bytes_left -= bytes_this;
-		buf += bytes_this;
-		args[2].u32w0 = 0;
-		while (bytes_left) {
-			args[2].u32w0 += bytes_this;
-			bytes_this = min(bytes_left, AMLONG_MTU);
-			/* Here we kind of bend the rules, and assume that shared-memory
-			 * active messages are delivered in order */
-			if (flags_internal & PSMI_REQ_FLAG_FASTPATH) {
-				psmi_am_reqq_add(AMREQUEST_SHORT, epaddr->ptlctl->ptl,
-						 epaddr, mq_handler_data_hidx,
-						 args, 3, buf, bytes_this, NULL, 0);
-			} else {
-				psmi_amsh_short_request(epaddr->ptlctl->ptl, epaddr,
-							mq_handler_data_hidx, args,
-							3, buf, bytes_this, 0);
-			}
-			buf += bytes_this;
-			bytes_left -= bytes_this;
-		}
-	} else {
-do_rendezvous:
-		if (is_blocking) {
-			req = psmi_mq_req_alloc(mq, MQE_TYPE_SEND);
-			if_pf(req == NULL)
-			    return PSM2_NO_MEMORY;
-			req->req_data.send_msglen = len;
-			req->req_data.tag = *tag;
-
-			/* Since SEND command is blocking, this request is
-			 * entirely internal and we will not be exposed to user.
-			 * Setting as internal so it will not be added to
-			 * mq->completed_q */
-			req->flags_internal |= (flags_internal | PSMI_REQ_FLAG_IS_INTERNAL);
-		}
-#ifdef PSM_CUDA
-		/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
-		 * when the buffer pointer received into PSM has been allocated
-		 * by the application. This guarantees the all memory operations
-		 * to this region of memory (used by multiple layers of the stack)
-		 * always synchronize
+		/*
+		 * Use eager messages if P2P is unsupported between endpoints.
+		 * Potentially use rendezvous with blocking requests only.
 		 */
-		if (gpu_mem) {
-			int trueflag = 1;
-			PSMI_CUDA_CALL(cuPointerSetAttribute, &trueflag,
-				       CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
-				      (CUdeviceptr)ubuf);
-			req->is_buf_gpu_mem = 1;
-		} else
+		if (!is_blocking)
+			goto do_eager;
+	}
+#endif
+	if (flags_user & PSM2_MQ_FLAG_SENDSYNC)
+		goto do_rendezvous;
+
+	if (len <= mq->shm_thresh_rv)
+#ifdef PSM_CUDA
+do_eager:
+#endif
+		return amsh_mq_send_inner_eager(mq, req, epaddr, args, flags_user,
+						flags_internal, tag, ubuf, len);
+do_rendezvous:
+	if (is_blocking) {
+		req = psmi_mq_req_alloc(mq, MQE_TYPE_SEND);
+		if_pf(req == NULL)
+			return PSM2_NO_MEMORY;
+		req->req_data.send_msglen = len;
+		req->req_data.tag = *tag;
+
+		/* Since SEND command is blocking, this request is
+		 * entirely internal and we will not be exposed to user.
+		 * Setting as internal so it will not be added to
+		 * mq->completed_q */
+		req->flags_internal |= (flags_internal | PSMI_REQ_FLAG_IS_INTERNAL);
+	}
+#ifdef PSM_CUDA
+	void *host_buf = NULL;
+
+	req->is_buf_gpu_mem = gpu_mem;
+	if (req->is_buf_gpu_mem) {
+		psmi_cuda_set_attr_sync_memops(ubuf);
+
+		/* Use host buffer for blocking requests if GPU P2P is
+		 * unsupported between endpoints.
+		 * This will be only used with blocking requests. */
+		if (!ep_supports_p2p) {
+			host_buf = psmi_malloc(epaddr->ptlctl->ep, UNDEFINED, len);
+			PSMI_CUDA_CALL(cuMemcpyDtoH, host_buf, (CUdeviceptr)ubuf, len);
+
+			/* Reset is_buf_gpu_mem since host buffer is being used
+			 * instead of one from GPU. */
+			ubuf = host_buf;
 			req->is_buf_gpu_mem = 0;
+		}
+	}
 #endif
 
-		err =
-		    amsh_mq_rndv(epaddr->ptlctl->ptl, mq, req, epaddr, tag,
-				 ubuf, len);
+	err = amsh_mq_rndv(epaddr->ptlctl->ptl, mq, req, epaddr, tag, ubuf, len);
 
-		if (err == PSM2_OK && is_blocking) {	/* wait... */
-			err = psmi_mq_wait_internal(&req);
-		}
-		return err;	/* skip eager accounting below */
+	if (err == PSM2_OK && is_blocking) {	/* wait... */
+		err = psmi_mq_wait_internal(&req);
 	}
 
-	/* All eager async sends are always "all done" */
-	if (req != NULL) {
-		req->state = MQ_STATE_COMPLETE;
-		mq_qq_append(&mq->completed_q, req);
-	}
-
-	mq->stats.tx_num++;
-	mq->stats.tx_shm_num++;
-	mq->stats.tx_eager_num++;
-	mq->stats.tx_eager_bytes += len;
+#ifdef PSM_CUDA
+	if (err == PSM2_OK && host_buf)
+		psmi_free(host_buf);
+#endif
 
 	return err;
 }
@@ -2205,11 +2243,9 @@ const char *psmi_kassist_getmode(int mode)
 static
 int psmi_get_kassist_mode()
 {
-	int mode = PSMI_KASSIST_MODE_DEFAULT;
-	/* Cuda PSM only supports KASSIST_CMA_GET */
-#ifdef PSM_CUDA
-	mode = PSMI_KASSIST_CMA_GET;
-#else
+	/* Cuda PSM2 supports only KASSIST_CMA_GET */
+	int mode = PSMI_KASSIST_CMA_GET;
+#ifndef PSM_CUDA
 	union psmi_envvar_val env_kassist;
 
 	if (!psmi_getenv("PSM2_KASSIST_MODE",
@@ -2225,11 +2261,6 @@ int psmi_get_kassist_mode()
 			mode = PSMI_KASSIST_CMA_GET;
 		else
 			mode = PSMI_KASSIST_OFF;
-	} else {
-		/* cma-get is the fastest, so it's the default.
-		   Availability of CMA is checked in psmi_shm_create();
-		   if CMA is not available it falls back to 'none' there. */
-		mode = PSMI_KASSIST_CMA_GET;
 	}
 #endif
 	return mode;
@@ -2253,7 +2284,8 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 	int16_t return_shmidx = args[0].u16w1;
 	psm2_error_t err = (psm2_error_t) args[2].u32w1;
 	psm2_error_t *perr = (psm2_error_t *) (uintptr_t) args[3].u64w0;
-	int pid = args[2].u32w0;
+	unsigned int pid;
+	unsigned int gpuid;
 	int force_remap = 0;
 
 	psm2_epaddr_t epaddr;
@@ -2266,6 +2298,7 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 
 	/* We do this because it's an assumption below */
 	psmi_assert_always(buf == NULL && len == 0);
+	read_extra_ep_data(args[2].u32w0, &pid, &gpuid);
 
 	_HFI_VDBG("Conn op=%d, phase=%d, epid=%llx, err=%d\n",
 		  op, phase, (unsigned long long)epid, err);
@@ -2279,6 +2312,7 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			/* If old pid is unknown consider new pid the correct one */
 			if (((am_epaddr_t *) epaddr)->pid == AMSH_PID_UNKNOWN) {
 				((am_epaddr_t *) epaddr)->pid = pid;
+				((am_epaddr_t *) epaddr)->gpuid = gpuid;
 			} else {
 				psmi_epid_remove(ptl->ep, epid);
 				epaddr = NULL;
@@ -2312,6 +2346,7 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 					     args_segoff);
 
 			((am_epaddr_t *) epaddr)->pid = pid;
+			((am_epaddr_t *) epaddr)->gpuid = gpuid;
 		}
 
 		/* Rewrite args */
@@ -2320,7 +2355,7 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 		/* and return our shmidx for the connecting process */
 		args[0].u16w1 = shmidx;
 		args[1].u64w0 = (psm2_epid_t) ptl->epid;
-		args[2].u32w0 = getpid();
+		args[2].u32w0 = create_extra_ep_data();
 		args[2].u32w1 = PSM2_OK;
 		((am_epaddr_t *) epaddr)->cstate_incoming =
 			AMSH_CSTATE_INCOMING_ESTABLISHED;
@@ -2640,6 +2675,10 @@ static psm2_error_t amsh_fini(ptl_t *ptl_gen, int force, uint64_t timeout_ns)
 	 * deallocated to reference memory that disappeared */
 	ptl->repH.head = &ptl->amsh_empty_shortpkt;
 	ptl->reqH.head = &ptl->amsh_empty_shortpkt;
+
+	if (ptl->am_ep)
+		psmi_free(ptl->am_ep);
+
 #ifdef PSM_CUDA
 	if (PSMI_IS_CUDA_ENABLED)
 		am_cuda_memhandle_cache_map_fini();

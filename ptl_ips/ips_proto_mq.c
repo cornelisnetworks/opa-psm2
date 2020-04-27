@@ -565,22 +565,6 @@ int psmi_cuda_is_buffer_gpu_mem(void *ubuf)
 	return (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM(ubuf));
 }
 
-/*
- * CUDA documentation dictates the use of SYNC_MEMOPS attribute
- * when the buffer pointer received into PSM has been allocated
- * by the application. This guarantees that all memory operations
- * to this region of memory (used by multiple layers of the stack)
- * always synchronize.
- */
-static inline
-void psmi_cuda_set_attr_sync_memops(void *ubuf)
-{
-	int trueflag = 1;
-
-	PSMI_CUDA_CALL(cuPointerSetAttribute, &trueflag,
-		       CU_POINTER_ATTRIBUTE_SYNC_MEMOPS, (CUdeviceptr) ubuf);
-}
-
 static inline
 int psmi_cuda_is_needed_rendezvous(struct ips_proto *proto, uint32_t len)
 {
@@ -691,6 +675,8 @@ ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags_user,
 	if_pf(req == NULL)
 		return PSM2_NO_MEMORY;
 
+	_HFI_VDBG("(req=%p) ubuf=%p len=%u\n", req, ubuf, len);
+
 	req->flags_user = flags_user;
 	req->flags_internal = flags_internal;
 	ipsaddr = ((ips_epaddr_t *) mepaddr)->msgctl->ipsaddr_next;
@@ -704,8 +690,9 @@ ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags_user,
 
 #ifdef PSM_CUDA
 	req->is_buf_gpu_mem = psmi_cuda_is_buffer_gpu_mem((void*)ubuf);
+	req->cuda_hostbuf_used = 0;
 	if (req->is_buf_gpu_mem) {
-		psmi_cuda_set_attr_sync_memops((void*)ubuf);
+		psmi_cuda_set_attr_sync_memops(ubuf);
 		if (psmi_cuda_is_needed_rendezvous(proto, len))
 			goto do_rendezvous;
 	}
@@ -882,6 +869,8 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 	ips_scb_t *scb;
 	int gpu_mem = 0;
 
+	_HFI_VDBG("ubuf=%p len=%u\n", ubuf, len);
+
 	ipsaddr = ((ips_epaddr_t *) mepaddr)->msgctl->ipsaddr_next;
 	ipsaddr->msgctl->ipsaddr_next = ipsaddr->next;
 	proto = ((psm2_epaddr_t) ipsaddr)->proto;
@@ -891,7 +880,7 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 #ifdef PSM_CUDA
 	gpu_mem = psmi_cuda_is_buffer_gpu_mem((void*)ubuf);
 	if (gpu_mem) {
-		psmi_cuda_set_attr_sync_memops((void*)ubuf);
+		psmi_cuda_set_attr_sync_memops(ubuf);
 		if (psmi_cuda_is_needed_rendezvous(proto, len))
 			goto do_rendezvous;
 	}
@@ -1031,6 +1020,7 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 			return err;
 
 #ifdef PSM_CUDA
+		req->cuda_hostbuf_used = 0;
 		if (gpu_mem) {
 			req->is_buf_gpu_mem = 1;
 		} else
@@ -1069,12 +1059,6 @@ do_rendezvous:
 		req->flags_internal |= PSMI_REQ_FLAG_IS_INTERNAL;
 
 #ifdef PSM_CUDA
-		/* CUDA documentation dictates the use of SYNC_MEMOPS attribute
-		 * when the buffer pointer received into PSM has been allocated
-		 * by the application. This guarantees the all memory operations
-		 * to this region of memory (used by multiple layers of the stack)
-		 * always synchronize
-		 */
 		if (gpu_mem) {
 			req->is_buf_gpu_mem = 1;
 		} else

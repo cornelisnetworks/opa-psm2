@@ -374,8 +374,6 @@ struct ips_proto {
 
 	/* SL2SC and SC2VL table for protocol */
 	uint16_t sl2sc[32];
-	uint16_t sc2vl[32];
-
 	/* CCA per port */
 	uint16_t *cct;		/* cct table */
 	uint16_t ccti_size;	/* ccti table size */
@@ -690,8 +688,8 @@ typedef int (*ips_packet_service_fn_t)(struct ips_recvhdrq_event *rcv_ev);
 extern ips_packet_service_fn_t
 	ips_packet_service_routine[OPCODE_FUTURE_FROM-OPCODE_RESERVED];
 
-/* IBTA feature related functions (path record, sl2sc2vl etc.) */
-psm2_error_t ips_ibta_init_sl2sc2vl_table(struct ips_proto *proto);
+/* IBTA feature related functions (path record, sl2sc etc.) */
+psm2_error_t ips_ibta_init_sl2sc_table(struct ips_proto *proto);
 psm2_error_t ips_ibta_link_updown_event(struct ips_proto *proto);
 
 psm2_error_t
@@ -706,15 +704,15 @@ psmi_get_sdma_req_info(struct ips_scb *scb, size_t *extra))
 {
 	*extra = 0;
 #ifdef PSM_CUDA
-	if (!PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
-		return (void *)(((char *)&scb->pbc) -
+	if (PSMI_IS_DRIVER_GPUDIRECT_DISABLED)
+		return (struct psm_hal_sdma_req_info *)(((char *)&scb->pbc) -
 				(sizeof(struct psm_hal_sdma_req_info) -
 				 PSM_HAL_CUDA_SDMA_REQ_INFO_EXTRA));
 
 	*extra = PSM_HAL_CUDA_SDMA_REQ_INFO_EXTRA;
 #endif
 
-	return (void *)(((char *)&scb->pbc) - (sizeof(struct psm_hal_sdma_req_info)));
+	return (struct psm_hal_sdma_req_info *)(((char *)&scb->pbc) - (sizeof(struct psm_hal_sdma_req_info)));
 }
 
 #ifdef PSM_CUDA
@@ -729,5 +727,20 @@ uint32_t ips_cuda_next_window(uint32_t max_window, uint32_t offset,
 	return window_len;
 }
 #endif
+
+/* Determine if FECN bit is set IBTA 1.2.1 CCA Annex A*/
+
+static __inline__ uint8_t
+_is_cca_fecn_set(const struct ips_message_header *p_hdr)
+{
+	return (__be32_to_cpu(p_hdr->bth[1]) >> HFI_BTH_FECN_SHIFT) & 0x1;
+}
+
+/* Detrmine if BECN bit is set IBTA 1.2.1 CCA Annex A*/
+static __inline__ uint8_t
+_is_cca_becn_set(const struct ips_message_header *p_hdr)
+{
+	return (__be32_to_cpu(p_hdr->bth[1]) >> HFI_BTH_BECN_SHIFT) & 0x1;
+}
 
 #endif /* _IPS_PROTO_H */

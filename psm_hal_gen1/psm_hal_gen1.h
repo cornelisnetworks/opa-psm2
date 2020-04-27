@@ -89,6 +89,7 @@ typedef struct _hfp_gen1_pc_private
 	struct ips_subcontext_ureg *subcontext_ureg[HFI1_MAX_SHARED_CTXTS];
 	struct ips_spio		    spio_ctrl;
 	struct hfi1_user_info_dep   user_info;
+	uint16_t                    sc2vl[PSMI_N_SCS];
 } hfp_gen1_pc_private;
 
 /* At the end of each scb struct, we have space reserved to accommodate

@@ -72,9 +72,15 @@ struct am_epaddr {
 	uint16_t shmidx;
 	uint16_t return_shmidx;
 
-	uint32_t cstate_outgoing:4;
-	uint32_t cstate_incoming:4;
+	uint32_t cstate_outgoing:3;
+	uint32_t cstate_incoming:3;
 	uint32_t pid:22;
+	/*
+	 * Device number of GPU used by given EP, only used when CUDA is
+	 * enabled. There is no gain from #ifdefing it out, since it does not
+	 * use any extra space.
+	 */
+	uint32_t gpuid:4;
 } am_epaddr_t;
 
 /* Up to NSHORT_ARGS are supported via am_pkt_short_t; the remaining

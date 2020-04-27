@@ -342,9 +342,11 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 {
 	psm2_mq_req_t req;
 	uint32_t msglen;
+	psmi_mtucpy_fn_t psmi_mtucpy_fn;
 
 	if (msgorder && (req = mq_req_match(mq, src, tag, 1))) {
 		/* we have a match */
+		void *user_buffer = req->req_data.buf;
 		psmi_assert(MQE_TYPE_IS_RECV(req->type));
 		req->req_data.peer = src;
 		req->req_data.tag = *tag;
@@ -356,29 +358,17 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 			  tag->tag[0], tag->tag[1], tag->tag[2], msglen,
 			  paylen);
 
-		void* user_buffer = NULL;
-
 		switch (opcode) {
 		case MQ_MSG_TINY:
 			/* mq_copy_tiny() can handle zero byte */
-
 #ifdef PSM_CUDA
 			if (PSMI_USE_GDR_COPY(req, msglen)) {
-				void* mmaped_host = gdr_convert_gpu_to_host_addr(GDR_FD,
+				user_buffer = gdr_convert_gpu_to_host_addr(GDR_FD,
 								(unsigned long)req->req_data.buf,
 								msglen, 1, src->proto);
-				mq_copy_tiny((uint32_t *) mmaped_host,
-							 (uint32_t *) payload, msglen);
 			}
-			else {
-				mq_copy_tiny((uint32_t *) req->req_data.buf,
-							 (uint32_t *) payload, msglen);
-			}
-#else
-
-			mq_copy_tiny((uint32_t *) req->req_data.buf,
-						 (uint32_t *) payload, msglen);
 #endif
+			mq_copy_tiny((uint32_t *) user_buffer, (uint32_t *) payload, msglen);
 
 			req->state = MQ_STATE_COMPLETE;
 			ips_barrier();
@@ -386,9 +376,8 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 			break;
 
 		case MQ_MSG_SHORT:	/* message fits in 1 payload */
-			user_buffer = req->req_data.buf;
+			psmi_mtucpy_fn = psmi_mq_mtucpy;
 #ifdef PSM_CUDA
-			psmi_mtucpy_fn_t psmi_mtucpy_fn = psmi_mq_mtucpy;
 			if (PSMI_USE_GDR_COPY(req, msglen)) {
 				user_buffer = gdr_convert_gpu_to_host_addr(GDR_FD,
 							(unsigned long)req->req_data.buf,
@@ -397,18 +386,10 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 			}
 #endif
 			if (msglen <= paylen) {
-#ifdef PSM_CUDA
 				psmi_mtucpy_fn(user_buffer, payload, msglen);
-#else
-				psmi_mq_mtucpy(user_buffer, payload, msglen);
-#endif
 			} else {
 				psmi_assert((msglen & ~0x3) == paylen);
-#ifdef PSM_CUDA
 				psmi_mtucpy_fn(user_buffer, payload, paylen);
-#else
-				psmi_mq_mtucpy(user_buffer, payload, paylen);
-#endif
 				/*
 				 * there are nonDW bytes attached in header,
 				 * copy after the DW payload.

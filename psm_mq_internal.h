@@ -306,11 +306,6 @@ mq_copy_tiny(uint32_t *dest, uint32_t *src, uint8_t len))
 {
 #ifdef PSM_CUDA
 	if (PSMI_IS_CUDA_ENABLED && (PSMI_IS_CUDA_MEM(dest) || PSMI_IS_CUDA_MEM(src))) {
-		if (!PSMI_IS_CUDA_ENABLED) {
-			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
-				 "Please enable PSM CUDA support when using GPU buffer \n");
-			return;
-		}
 		PSMI_CUDA_CALL(cuMemcpy, (CUdeviceptr)dest, (CUdeviceptr)src, len);
 		return;
 	}
@@ -347,8 +342,8 @@ mq_copy_tiny(uint32_t *dest, uint32_t *src, uint8_t len))
 	}
 }
 
-#ifdef PSM_CUDA
 typedef void (*psmi_mtucpy_fn_t)(void *dest, const void *src, uint32_t len);
+#ifdef PSM_CUDA
 
 PSMI_ALWAYS_INLINE(
 void
@@ -409,7 +404,7 @@ mq_status_copy(psm2_mq_req_t req, psm2_mq_status_t *status))
 	status->msg_tag = *((uint64_t *) req->req_data.tag.tag);
 	status->msg_length = req->req_data.send_msglen;
 	status->nbytes = req->req_data.recv_msglen;
-	status->error_code = req->req_data.error_code;
+	status->error_code = (psm2_error_t)req->req_data.error_code;
 	status->context = req->req_data.context;
 }
 
@@ -421,7 +416,7 @@ mq_status2_copy(psm2_mq_req_t req, psm2_mq_status2_t *status))
 	status->msg_tag = req->req_data.tag;
 	status->msg_length = req->req_data.send_msglen;
 	status->nbytes = req->req_data.recv_msglen;
-	status->error_code = req->req_data.error_code;
+	status->error_code = (psm2_error_t)req->req_data.error_code;
 	status->context = req->req_data.context;
 }
 

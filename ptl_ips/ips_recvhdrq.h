@@ -169,12 +169,13 @@ void *
 ips_recvhdrq_event_payload(const struct ips_recvhdrq_event *rcv_ev))
 {
 	if (psmi_hal_rhf_get_use_egr_buff(rcv_ev->psm_hal_rhf))
-		return psmi_hal_get_egr_buff(
+		return (char*)(psmi_hal_get_egr_buff(
 			psmi_hal_rhf_get_egr_buff_index(rcv_ev->psm_hal_rhf),
-			rcv_ev->psm_hal_hdr_q + 1 /* The circular list q (cl_q) for the
-						     egr buff for any rx hdrq event is
-						     always one more than the hdrq cl q */,
-			rcv_ev->recvq->context->psm_hw_ctxt)+
+			(psmi_hal_cl_q)(rcv_ev->psm_hal_hdr_q + 1) /* The circular list q
+						     (cl_q) for the egr buff for any rx
+						     hdrq event is always one more than
+						     the hdrq cl q */,
+			rcv_ev->recvq->context->psm_hw_ctxt))+
 			(psmi_hal_rhf_get_egr_buff_offset(rcv_ev->psm_hal_rhf)*64);
 	else
 		return NULL;

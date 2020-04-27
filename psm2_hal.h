@@ -166,6 +166,10 @@ typedef enum
 	PSM_HAL_PSMI_RUNTIME_INTR_ENABLED       = (1UL <<  2),
 	/* Header suppression is enabled: */
 	PSM_HAL_HDRSUPP_ENABLED                 = (1UL <<  3),
+	PSM_HAL_PARAMS_VALID_NUM_UNITS          = (1UL <<  4),
+	PSM_HAL_PARAMS_VALID_NUM_PORTS          = (1UL <<  5),
+	PSM_HAL_PARAMS_VALID_DEFAULT_PKEY       = (1UL <<  6),
+
 } psmi_hal_sw_status;
 
 /* The _psmi_hal_params structure stores values that remain constant for the entire life of
@@ -173,11 +177,16 @@ typedef enum
    The values are settled after the context is opened. */
 typedef struct _psmi_hal_params
 {
-	uint16_t   num_units;
-	uint16_t   num_ports;
 	uint32_t   cap_mask;
 	uint32_t   sw_status;
+	/* start cached members */
+	uint16_t   num_units;
+	uint16_t   num_ports;
 	uint16_t   default_pkey;
+	uint8_t    *unit_active,*unit_active_valid;
+	uint8_t    *port_active,*port_active_valid;
+	uint16_t   *num_contexts,*num_contexts_valid;
+	uint16_t   *num_free_contexts,*num_free_contexts_valid;
 } psmi_hal_params_t;
 
 /* HAL assumes that the rx hdr q and the egr buff q are circular lists
@@ -403,12 +412,12 @@ struct _psmi_hal_instance
 	/* Initialize the HAL INSTANCE. */
 	int (*hfp_initialize)(psmi_hal_instance_t *);
 	/* Finalize the HAL INSTANCE. */
-	int (*hfp_finalize)(void);
+	int (*hfp_finalize_)(void);
 
 	/* Returns the number of hfi units installed on ths host:
 	   NOTE: hfp_get_num_units is a function that must
 	   be callable before the hal instance is initialized. */
-	int (*hfp_get_num_units)(int wait);
+	int (*hfp_get_num_units)(void);
 
 	/* Returns the number of ports on each hfi unit installed.
 	   on ths host.
@@ -458,7 +467,7 @@ struct _psmi_hal_instance
 	int (*hfp_get_port_lmc)(int unit, int port);
 	int (*hfp_get_port_rate)(int unit, int port);
 	int (*hfp_get_port_sl2sc)(int unit, int port,int sl);
-	int (*hfp_get_port_sc2vl)(int unit, int port,int sc);
+	int (*hfp_get_sc2vl_map)(struct ips_proto *proto);
 	int (*hfp_set_pkey)(psmi_hal_hw_context, uint16_t);
 	int (*hfp_poll_type)(uint16_t poll_type, psmi_hal_hw_context);
 	int (*hfp_get_port_lid)(int unit, int port);
@@ -693,48 +702,42 @@ void psmi_hal_register_instance(psmi_hal_instance_t *);
     another failure has occured during initialization. */
 int psmi_hal_initialize(void);
 
-/* note that:
-
-int psmi_hal_get_num_units(void);
-
-Is intentionally left out as it is called during initialization,
-and the results are cached in the hw params.
-*/
+int psmi_hal_finalize(void);
 
 #include "psm2_hal_inlines_d.h"
+
+enum psmi_hal_pre_init_cache_func_krnls
+{
+	psmi_hal_pre_init_cache_func_get_num_units,
+	psmi_hal_pre_init_cache_func_get_num_ports,
+	psmi_hal_pre_init_cache_func_get_unit_active,
+	psmi_hal_pre_init_cache_func_get_port_active,
+	psmi_hal_pre_init_cache_func_get_num_contexts,
+	psmi_hal_pre_init_cache_func_get_num_free_contexts,
+	psmi_hal_pre_init_cache_func_get_default_pkey,
+};
+
+int psmi_hal_pre_init_cache_func(enum psmi_hal_pre_init_cache_func_krnls k, ...);
+
+#define PSMI_HAL_DISPATCH_PI(KERNEL,...) ( psmi_hal_pre_init_cache_func(psmi_hal_pre_init_cache_func_ ## KERNEL , ##__VA_ARGS__ ) )
 
 #if PSMI_HAL_INST_CNT == 1
 
 #define PSMI_HAL_DISPATCH(KERNEL,...)    ( PSMI_HAL_CAT_INL_SYM(KERNEL) ( __VA_ARGS__ ) )
 
-#define PSMI_HAL_DISPATCH_PI(KERNEL,...) PSMI_HAL_DISPATCH(KERNEL , ##__VA_ARGS__ )
-
 #else
-
-enum psmi_hal_pre_init_func_krnls
-{
-	psmi_hal_pre_init_func_get_num_units,
-	psmi_hal_pre_init_func_get_num_ports,
-	psmi_hal_pre_init_func_get_unit_active,
-	psmi_hal_pre_init_func_get_port_active,
-	psmi_hal_pre_init_func_get_num_contexts,
-	psmi_hal_pre_init_func_get_num_free_contexts,
-};
-
-int psmi_hal_pre_init_func(enum psmi_hal_pre_init_func_krnls k, ...);
 
 #define PSMI_HAL_DISPATCH(KERNEL,...)    ( psmi_hal_current_hal_instance->hfp_ ## KERNEL ( __VA_ARGS__ ))
 
-#define PSMI_HAL_DISPATCH_PI(KERNEL,...) ( psmi_hal_pre_init_func(psmi_hal_pre_init_func_ ## KERNEL , ##__VA_ARGS__ ) )
-
 #endif
 
-#define psmi_hal_get_num_units_(...)				PSMI_HAL_DISPATCH_PI(get_num_units,__VA_ARGS__)
-#define psmi_hal_get_num_ports_(...)				PSMI_HAL_DISPATCH_PI(get_num_ports,##__VA_ARGS__)
-#define psmi_hal_get_unit_active(...)				PSMI_HAL_DISPATCH_PI(get_unit_active,__VA_ARGS__)
-#define psmi_hal_get_port_active(...)				PSMI_HAL_DISPATCH_PI(get_port_active,__VA_ARGS__)
-#define psmi_hal_get_num_contexts(...)				PSMI_HAL_DISPATCH_PI(get_num_contexts,__VA_ARGS__)
-#define psmi_hal_get_num_free_contexts(...)			PSMI_HAL_DISPATCH_PI(get_num_free_contexts,__VA_ARGS__)
+#define psmi_hal_get_num_units_(...)                           PSMI_HAL_DISPATCH_PI(get_num_units,##__VA_ARGS__)
+#define psmi_hal_get_num_ports_(...)                           PSMI_HAL_DISPATCH_PI(get_num_ports,##__VA_ARGS__)
+#define psmi_hal_get_unit_active(...)                          PSMI_HAL_DISPATCH_PI(get_unit_active,__VA_ARGS__)
+#define psmi_hal_get_port_active(...)                          PSMI_HAL_DISPATCH_PI(get_port_active,__VA_ARGS__)
+#define psmi_hal_get_num_contexts(...)                         PSMI_HAL_DISPATCH_PI(get_num_contexts,__VA_ARGS__)
+#define psmi_hal_get_num_free_contexts(...)                    PSMI_HAL_DISPATCH_PI(get_num_free_contexts,__VA_ARGS__)
+#define psmi_hal_get_default_pkey(...)			       PSMI_HAL_DISPATCH_PI(get_default_pkey,##__VA_ARGS__)
 #define psmi_hal_context_open(...)				PSMI_HAL_DISPATCH(context_open,__VA_ARGS__)
 #define psmi_hal_close_context(...)				PSMI_HAL_DISPATCH(close_context,__VA_ARGS__)
 #define psmi_hal_get_port_index2pkey(...)			PSMI_HAL_DISPATCH(get_port_index2pkey,__VA_ARGS__)
@@ -743,7 +746,7 @@ int psmi_hal_pre_init_func(enum psmi_hal_pre_init_func_krnls k, ...);
 #define psmi_hal_get_port_lmc(...)				PSMI_HAL_DISPATCH(get_port_lmc,__VA_ARGS__)
 #define psmi_hal_get_port_rate(...)				PSMI_HAL_DISPATCH(get_port_rate,__VA_ARGS__)
 #define psmi_hal_get_port_sl2sc(...)				PSMI_HAL_DISPATCH(get_port_sl2sc,__VA_ARGS__)
-#define psmi_hal_get_port_sc2vl(...)				PSMI_HAL_DISPATCH(get_port_sc2vl,__VA_ARGS__)
+#define psmi_hal_get_sc2vl_map(...)				PSMI_HAL_DISPATCH(get_sc2vl_map, __VA_ARGS__)
 #define psmi_hal_set_pkey(...)					PSMI_HAL_DISPATCH(set_pkey,__VA_ARGS__)
 #define psmi_hal_poll_type(...)					PSMI_HAL_DISPATCH(poll_type,__VA_ARGS__)
 #define psmi_hal_get_port_lid(...)				PSMI_HAL_DISPATCH(get_port_lid,__VA_ARGS__)
@@ -782,7 +785,7 @@ int psmi_hal_pre_init_func(enum psmi_hal_pre_init_func_krnls k, ...);
 #define psmi_hal_tidflow_get_genmismatch(...)			PSMI_HAL_DISPATCH(tidflow_get_genmismatch,__VA_ARGS__)
 #define psmi_hal_forward_packet_to_subcontext(...)		PSMI_HAL_DISPATCH(forward_packet_to_subcontext,__VA_ARGS__)
 #define psmi_hal_subcontext_ureg_get(...)			PSMI_HAL_DISPATCH(subcontext_ureg_get,__VA_ARGS__)
-#define psmi_hal_finalize(...)					PSMI_HAL_DISPATCH(finalize,__VA_ARGS__)
+#define psmi_hal_finalize_(...)                                 PSMI_HAL_DISPATCH(finalize_,__VA_ARGS__)
 #define psmi_hal_get_hfi_event_bits(...)			PSMI_HAL_DISPATCH(get_hfi_event_bits,__VA_ARGS__)
 #define psmi_hal_ack_hfi_event(...)				PSMI_HAL_DISPATCH(ack_hfi_event,__VA_ARGS__)
 #define psmi_hal_hfi_reset_context(...)				PSMI_HAL_DISPATCH(hfi_reset_context,__VA_ARGS__)
@@ -863,7 +866,6 @@ int psmi_hal_pre_init_func(enum psmi_hal_pre_init_func_krnls k, ...);
 #define psmi_hal_get_hfi_name()					psmi_hal_current_hal_instance->hfi_name
 #define psmi_hal_get_num_units()				psmi_hal_current_hal_instance->params.num_units
 #define psmi_hal_get_num_ports()				psmi_hal_current_hal_instance->params.num_ports
-#define psmi_hal_get_default_pkey()				psmi_hal_current_hal_instance->params.default_pkey
 #define psmi_hal_get_cap_mask()					psmi_hal_current_hal_instance->params.cap_mask
 #define psmi_hal_set_cap_mask(NEW_MASK)				(psmi_hal_current_hal_instance->params.cap_mask = (NEW_MASK))
 #define psmi_hal_add_cap(CAP)					(psmi_hal_current_hal_instance->params.cap_mask |= (CAP))
