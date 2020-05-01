@@ -56,11 +56,58 @@
 #ifndef _AM_CUDA_MEMHANDLE_CACHE_H
 #define _AM_CUDA_MEMHANDLE_CACHE_H
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
+#include <unistd.h>
 
+struct _cl_map_item;
+
+typedef struct
+{
+	unsigned long		start;		 /* start virtual address */
+	CUipcMemHandle		cuda_ipc_handle; /* cuda ipc mem handle */
+	CUdeviceptr		cuda_ipc_dev_ptr;/* Cuda device pointer */
+	uint16_t		length;	 /* length*/
+	psm2_epid_t             epid;
+	struct _cl_map_item*	i_prev;	 /* idle queue previous */
+	struct _cl_map_item*	i_next;	 /* idle queue next */
+}__attribute__ ((aligned (128))) rbtree_cuda_memhandle_cache_mapitem_pl_t;
+
+typedef struct {
+	uint32_t		nelems;	/* number of elements in the cache */
+} rbtree_cuda_memhandle_cache_map_pl_t;
+
+#define RBTREE_MI_PL  rbtree_cuda_memhandle_cache_mapitem_pl_t
+#define RBTREE_MAP_PL rbtree_cuda_memhandle_cache_map_pl_t
+
+#include "rbtree.h"
+
+cl_qmap_t cuda_memhandle_cachemap; /* Global cache */
+uint8_t cuda_memhandle_cache_enabled;
+mpool_t cuda_memhandle_mpool;
+uint32_t cuda_memhandle_cache_size;
 #define CUDA_MEMHANDLE_CACHE_SIZE 64
 
-psm2_error_t am_cuda_memhandle_cache_init(uint32_t memcache_size);
+/*
+ * Macro definition for easy programming.
+ */
+
+#define NELEMS			cuda_memhandle_cachemap.payload.nelems
+
+/*
+ * Macro for idle queue management.
+ */
+#define IHEAD			cuda_memhandle_cachemap.root
+#define LAST			IHEAD->payload.i_prev
+#define FIRST			IHEAD->payload.i_next
+#define INEXT(x)		x->payload.i_next
+#define IPREV(x)		x->payload.i_prev
+
+
+psm2_error_t am_cuda_memhandle_mpool_init(uint32_t memcache_size);
+
+psm2_error_t am_cuda_memhandle_cache_map_init();
 
 CUdeviceptr
 am_cuda_memhandle_acquire(uintptr_t sbuf, CUipcMemHandle* handle,
@@ -68,8 +115,10 @@ am_cuda_memhandle_acquire(uintptr_t sbuf, CUipcMemHandle* handle,
 void
 am_cuda_memhandle_release(CUdeviceptr cuda_ipc_dev_ptr);
 
+void psmi_cuda_memhandle_cache_alloc_func(int is_alloc, void* context, void* obj);
+
 void am_cuda_memhandle_cache_map_fini();
 
-#endif /* _AM_CUDA_MEMHANDLE_CACHE_H */
+#endif
 
-#endif /* PSM_CUDA */
+#endif
