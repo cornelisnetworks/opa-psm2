@@ -215,6 +215,7 @@ am_cuda_memhandle_cache_validate(cl_map_item_t* memcache_item,
 	PSMI_CUDA_CALL(cuIpcCloseMemHandle,
 		       memcache_item->payload.cuda_ipc_dev_ptr);
 	am_cuda_idleq_remove(memcache_item);
+	memset(memcache_item, 0, sizeof(*memcache_item));
 	psmi_mpool_put(memcache_item);
 	return PSM2_OK_NO_PROGRESS;
 }
@@ -232,8 +233,7 @@ am_cuda_memhandle_cache_evict()
 	ips_cl_qmap_remove_item(&cuda_memhandle_cachemap, p_item);
 	PSMI_CUDA_CALL(cuIpcCloseMemHandle, p_item->payload.cuda_ipc_dev_ptr);
 	am_cuda_idleq_remove_last(p_item);
-	p_item->payload.start = 0;
-	p_item->payload.cuda_ipc_dev_ptr = 0;
+	memset(p_item, 0, sizeof(*p_item));
 	psmi_mpool_put(p_item);
 	return;
 }
@@ -281,45 +281,60 @@ am_cuda_memhandle_acquire(uintptr_t sbuf, CUipcMemHandle* handle,
 				uint32_t length, psm2_epid_t epid)
 {
 	CUdeviceptr cuda_ipc_dev_ptr;
-	if(cuda_memhandle_cache_enabled) {
-		cl_qmap_t *p_map = &cuda_memhandle_cachemap;
-		cl_map_item_t *p_item;
-		unsigned long start = (unsigned long)sbuf;
-		unsigned long end = start + length;
-		p_item = ips_cl_qmap_search(p_map, start, end);
-		if (p_item->payload.start) {
-			if (am_cuda_memhandle_cache_validate(p_item, sbuf,
-					       handle, length, epid) == PSM2_OK) {
-#ifdef PSM_DEBUG
-				cache_hit_counter++;
-#endif
-				am_cuda_idleq_reorder(p_item);
-				return p_item->payload.cuda_ipc_dev_ptr;
-			}
-		}
-#ifdef PSM_DEBUG
-		cache_miss_counter++;
-#endif
-		CUresult cudaerr;
-		PSMI_CUDA_CALL_EXCEPT(CUDA_ERROR_ALREADY_MAPPED, cuIpcOpenMemHandle,
-			&cuda_ipc_dev_ptr, *handle, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
-
-		if (cudaerr == CUDA_ERROR_ALREADY_MAPPED) {
-			// remote memory already mapped. Close all handles, clear cache,
-			// and try again
-			am_cuda_memhandle_cache_clear();
-			PSMI_CUDA_CALL(cuIpcOpenMemHandle, &cuda_ipc_dev_ptr, *handle,
-				CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
-		}
-
-		am_cuda_memhandle_cache_register(sbuf, handle,
-					       length, epid, cuda_ipc_dev_ptr);
-		return cuda_ipc_dev_ptr;
-	} else {
+	if(!cuda_memhandle_cache_enabled) {
 		PSMI_CUDA_CALL(cuIpcOpenMemHandle, &cuda_ipc_dev_ptr,
 				 *handle, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
 		return cuda_ipc_dev_ptr;
 	}
+
+	cl_qmap_t *p_map = &cuda_memhandle_cachemap;
+	cl_map_item_t *p_item;
+	unsigned long start = (unsigned long)sbuf;
+	unsigned long end = start + length;
+
+	// preconditions:
+	//  1) newrange [start,end) may or may not be in cachemap already
+	//  2) there are no overlapping address ranges in cachemap
+	// postconditions:
+	//  1) newrange is in cachemap
+	//  2) there are no overlapping address ranges in cachemap
+	p_item = ips_cl_qmap_search(p_map, start, end);
+	while (p_item->payload.start) {
+		// Since a precondition is that there are no overlapping ranges in cachemap,
+		// an exact match implies no need to check further
+		if (am_cuda_memhandle_cache_validate(p_item, sbuf,
+					   handle, length, epid) == PSM2_OK) {
+#ifdef PSM_DEBUG
+			cache_hit_counter++;
+#endif
+			am_cuda_idleq_reorder(p_item);
+			return p_item->payload.cuda_ipc_dev_ptr;
+		}
+
+		// newrange is not in the cache and overlaps at least one existing range.
+		// am_cuda_memhandle_cache_validate() closed and removed existing range.
+		// Continue searching for more overlapping ranges
+		p_item = ips_cl_qmap_search(p_map, start, end);
+	}
+
+#ifdef PSM_DEBUG
+	cache_miss_counter++;
+#endif
+	CUresult cudaerr;
+	PSMI_CUDA_CALL_EXCEPT(CUDA_ERROR_ALREADY_MAPPED, cuIpcOpenMemHandle,
+		&cuda_ipc_dev_ptr, *handle, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
+
+	if (cudaerr == CUDA_ERROR_ALREADY_MAPPED) {
+		// remote memory already mapped. Close all handles, clear cache,
+		// and try again
+		am_cuda_memhandle_cache_clear();
+		PSMI_CUDA_CALL(cuIpcOpenMemHandle, &cuda_ipc_dev_ptr, *handle,
+			CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
+	}
+
+	am_cuda_memhandle_cache_register(sbuf, handle,
+					   length, epid, cuda_ipc_dev_ptr);
+	return cuda_ipc_dev_ptr;
 }
 
 void
