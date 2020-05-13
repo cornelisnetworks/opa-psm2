@@ -65,11 +65,14 @@ static int psmi_verno = PSMI_VERNO_MAKE(PSM2_VERNO_MAJOR, PSM2_VERNO_MINOR);
 static int psmi_verno_client_val;
 int psmi_epid_ver;
 
+// Special psmi_refcount values
 #define PSMI_NOT_INITIALIZED    0
-#define PSMI_INITIALIZED        1
-#define PSMI_FINALIZED         -1	/* Prevent the user from calling psm2_init
-					 * once psm_finalize has been called. */
-static int psmi_isinit = PSMI_NOT_INITIALIZED;
+#define PSMI_FINALIZED         -1
+
+// PSM2 doesn't support transitioning out of the PSMI_FINALIZED state
+// once psmi_refcount is set to PSMI_FINALIZED, any further attempts to change
+// psmi_refcount should be treated as an error
+static int psmi_refcount = PSMI_NOT_INITIALIZED;
 
 /* Global lock used for endpoint creation and destroy
  * (in functions psm2_ep_open and psm2_ep_close) and also
@@ -104,9 +107,8 @@ uint32_t gdr_copy_threshold_recv;
  * It is supposed to be filled with logical OR
  * on conditional compilation basis
  * along with future features/capabilities.
- * At the very beginning we start with Multi EPs.
  */
-uint64_t psm2_capabilities_bitset = PSM2_MULTI_EP_CAP;
+uint64_t psm2_capabilities_bitset = PSM2_MULTI_EP_CAP | PSM2_LIB_REFCOUNT_CAP;
 
 int psmi_verno_client()
 {
@@ -130,7 +132,7 @@ int psmi_verno_isinteroperable(uint16_t verno)
 
 int MOCKABLE(psmi_isinitialized)()
 {
-	return (psmi_isinit == PSMI_INITIALIZED);
+	return (psmi_refcount > 0);
 }
 MOCK_DEF_EPILOGUE(psmi_isinitialized);
 
@@ -356,10 +358,12 @@ psm2_error_t __psm2_init(int *major, int *minor)
 	GENERIC_PERF_SET_SLOT_NAME(PSM_TX_SPEEDPATH_CTR, "TX");
 	GENERIC_PERF_SET_SLOT_NAME(PSM_RX_SPEEDPATH_CTR, "RX");
 
-	if (psmi_isinit == PSMI_INITIALIZED)
+	if (psmi_refcount > 0) {
+		psmi_refcount++;
 		goto update;
+	}
 
-	if (psmi_isinit == PSMI_FINALIZED) {
+	if (psmi_refcount == PSMI_FINALIZED) {
 		err = PSM2_IS_FINALIZED;
 		goto fail;
 	}
@@ -435,7 +439,7 @@ psm2_error_t __psm2_init(int *major, int *minor)
 				((id.eax & CPUID_EXMODEL_MASK) >> 12);
 	}
 
-	psmi_isinit = PSMI_INITIALIZED;
+	psmi_refcount++;
 	/* hfi_debug lives in libhfi.so */
 	psmi_getenv("PSM2_TRACEMASK",
 		    "Mask flags for tracing",
@@ -520,7 +524,6 @@ psm2_error_t __psm2_init(int *major, int *minor)
 #endif
 
 update:
-
 	if (getenv("PSM2_IDENTIFY")) {
                 Dl_info info_psm;
 		char ofed_delta[100] = "";
@@ -557,6 +560,8 @@ update:
 	*major = (int)psmi_verno_major;
 	*minor = (int)psmi_verno_minor;
 fail:
+	_HFI_DBG("psmi_refcount=%d,err=%u\n", psmi_refcount, err);
+
 	PSM2_LOG_MSG("leaving");
 	return err;
 }
@@ -779,7 +784,14 @@ psm2_error_t __psm2_finalize(void)
 
 	PSM2_LOG_MSG("entering");
 
+	_HFI_DBG("psmi_refcount=%d\n", psmi_refcount);
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
+	psmi_assert(psmi_refcount > 0);
+	psmi_refcount--;
+
+	if (psmi_refcount > 0) {
+		return PSM2_OK;
+	}
 
 	/* When PSM_PERF is enabled, the following line causes the
 	   instruction cycles gathered in the current run to be dumped
@@ -856,7 +868,7 @@ psm2_error_t __psm2_finalize(void)
 	}
 #endif
 
-	psmi_isinit = PSMI_FINALIZED;
+	psmi_refcount = PSMI_FINALIZED;
 	PSM2_LOG_MSG("leaving");
 	psmi_log_fini();
 

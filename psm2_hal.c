@@ -326,14 +326,10 @@ static struct _psmi_hal_instance *psmi_hal_get_pi_inst(void)
 				p->params.num_ports = nports;
 				p->params.default_pkey = dflt_pkey;
 				p->params.sw_status |= valid_flags;
-				p->params.unit_active = (uint8_t *) psmi_calloc(PSMI_EP_NONE, UNDEFINED, nunits,
-										sizeof(uint8_t));
-				p->params.unit_active_valid = (uint8_t *) psmi_calloc(PSMI_EP_NONE, UNDEFINED, nunits,
-										      sizeof(uint8_t));
-				p->params.port_active = (uint8_t *) psmi_calloc(PSMI_EP_NONE, UNDEFINED, nunits*nports,
-										sizeof(uint8_t));
-				p->params.port_active_valid = (uint8_t *) psmi_calloc(PSMI_EP_NONE, UNDEFINED, nunits*nports,
-										      sizeof(uint8_t));
+				p->params.unit_active = (int8_t *) psmi_calloc(PSMI_EP_NONE, UNDEFINED, nunits, sizeof(int8_t));
+				p->params.unit_active_valid = (int8_t *) psmi_calloc(PSMI_EP_NONE, UNDEFINED, nunits, sizeof(int8_t));
+				p->params.port_active = (int8_t *) psmi_calloc(PSMI_EP_NONE, UNDEFINED, nunits*nports, sizeof(int8_t));
+				p->params.port_active_valid = (int8_t *) psmi_calloc(PSMI_EP_NONE, UNDEFINED, nunits*nports, sizeof(int8_t));
 				p->params.num_contexts = (uint16_t *) psmi_calloc(PSMI_EP_NONE, UNDEFINED, nunits,
 										  sizeof(uint16_t));
 				p->params.num_contexts_valid = (uint16_t *) psmi_calloc(PSMI_EP_NONE, UNDEFINED, nunits,

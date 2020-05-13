@@ -183,8 +183,8 @@ typedef struct _psmi_hal_params
 	uint16_t   num_units;
 	uint16_t   num_ports;
 	uint16_t   default_pkey;
-	uint8_t    *unit_active,*unit_active_valid;
-	uint8_t    *port_active,*port_active_valid;
+	int8_t     *unit_active,*unit_active_valid;
+	int8_t     *port_active,*port_active_valid;
 	uint16_t   *num_contexts,*num_contexts_valid;
 	uint16_t   *num_free_contexts,*num_free_contexts_valid;
 } psmi_hal_params_t;

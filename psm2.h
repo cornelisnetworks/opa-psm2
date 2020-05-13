@@ -488,6 +488,7 @@ psm2_error_t psm2_init(int *api_verno_major, int *api_verno_minor);
  * consecutive bits : 0x2, 0x4 ... and so on.
  */
 #define PSM2_MULTI_EP_CAP 0x1	/* Multiple Endpoints capability */
+#define PSM2_LIB_REFCOUNT_CAP 0x2	/* Library finalization is managed with reference count */
 
 /** @brief PSM2 capabilities provider
  *

@@ -483,7 +483,7 @@ dist: distclean
 	PRUNE_LIST="";										\
 	for pd in ".git" "cscope*" "$(shell realpath --relative-to=${top_srcdir} ${OUTDIR})"	\
 		"*.orig" "*~" "#*" ".gitignore" "doc" "libcm" "psm.supp" "test" "psm_hal_MOCK"	\
-		 "tools" "artifacts" "*.rej.patch"; do			\
+		 "psm_test" "tools" "artifacts" "*.rej.patch"; do			\
 		PRUNE_LIST="$$PRUNE_LIST -name $$pd -prune -o";					\
 	done;											\
 	for hid in psm_hal_* ; do								\
