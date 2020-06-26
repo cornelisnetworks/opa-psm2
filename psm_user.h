@@ -362,6 +362,39 @@ CUresult (*psmi_cuDevicePrimaryCtxRelease)(CUdevice device);
 		}							\
 	} while (0)
 
+/**
+ * Similar to PSMI_CUDA_CALL() except does not error out
+ * if func(args) returns CUDA_SUCCESS or except_err
+ *
+ * Invoker must provide 'CUresult cudaerr' in invoked scope
+ * so invoker can inspect whether cudaerr == CUDA_SUCCESS or
+ * cudaerr == except_err after expanded code is executed.
+ *
+ * As except_err is an allowed value, message is printed at
+ * DBG level.
+ */
+#define PSMI_CUDA_CALL_EXCEPT(except_err, func, args...) do { \
+		cudaerr = psmi_##func(args);				\
+		if (cudaerr != CUDA_SUCCESS && cudaerr != except_err) {	\
+			if (ctxt == NULL)				\
+				_HFI_ERROR(				\
+				"Check if CUDA is initialized"	\
+				"before psm2_ep_open call \n");		\
+			_HFI_ERROR(					\
+				"CUDA failure: %s() (at %s:%d)"		\
+				"returned %d\n",			\
+				#func, __FILE__, __LINE__, cudaerr);	\
+			psmi_handle_error(				\
+				PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,	\
+				"Error returned from CUDA function.\n");\
+		} else if (cudaerr == except_err) { \
+			_HFI_DBG( \
+				"CUDA non-zero return value: %s() (at %s:%d)"		\
+				"returned %d\n",			\
+				#func, __FILE__, __LINE__, cudaerr);	\
+		} \
+	} while (0)
+
 #define PSMI_CUDA_CHECK_EVENT(event, cudaerr) do {			\
 		cudaerr = psmi_cuEventQuery(event);			\
 		if ((cudaerr != CUDA_SUCCESS) &&			\

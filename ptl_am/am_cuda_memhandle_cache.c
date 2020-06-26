@@ -55,25 +55,139 @@
 
 #include "psm_user.h"
 #include "am_cuda_memhandle_cache.h"
-#define RBTREE_GET_LEFTMOST(PAYLOAD_PTR)  ((PAYLOAD_PTR)->start)
-#define RBTREE_GET_RIGHTMOST(PAYLOAD_PTR) ((PAYLOAD_PTR)->start+((PAYLOAD_PTR)->length))
+
+/*
+ * rbtree cruft
+ */
+struct _cl_map_item;
+
+typedef struct
+{
+	unsigned long		start;		 /* start virtual address */
+	CUipcMemHandle		cuda_ipc_handle; /* cuda ipc mem handle */
+	CUdeviceptr		cuda_ipc_dev_ptr;/* Cuda device pointer */
+	uint16_t		length;	 /* length*/
+	psm2_epid_t             epid;
+	struct _cl_map_item*	i_prev;	 /* idle queue previous */
+	struct _cl_map_item*	i_next;	 /* idle queue next */
+}__attribute__ ((aligned (128))) rbtree_cuda_memhandle_cache_mapitem_pl_t;
+
+typedef struct {
+	uint32_t		nelems;	/* number of elements in the cache */
+} rbtree_cuda_memhandle_cache_map_pl_t;
+
+static psm2_error_t am_cuda_memhandle_mpool_init(uint32_t memcache_size);
+
+/*
+ * Custom comparator
+ */
+typedef rbtree_cuda_memhandle_cache_mapitem_pl_t cuda_cache_item;
+
+static int cuda_cache_key_cmp(const cuda_cache_item *a, const cuda_cache_item *b)
+{
+	// When multi-ep is disabled, cache can assume
+	//   1 epid == 1 remote process == 1 CUDA address space
+	// But when multi-ep is enabled, one process can have many epids, so in this case
+	// cannot use epid as part of cache key.
+	if (!psmi_multi_ep_enabled) {
+		if (a->epid < b->epid)
+			return -1;
+		if (a->epid > b->epid)
+			return 1;
+	}
+
+	unsigned long a_end, b_end;
+	// normalize into inclusive upper bounds to handle
+	// 0-length entries
+	a_end = (a->start + a->length);
+	b_end = (b->start + b->length);
+	if (a->length > 0)
+		a_end--;
+
+	if (b->length > 0)
+		b_end--;
+
+	if (a_end < b->start)
+		return -1;
+	if (b_end < a->start)
+		return 1;
+
+	return 0;
+}
+
+
+/*
+ * Necessary rbtree cruft
+ */
+#define RBTREE_MI_PL  rbtree_cuda_memhandle_cache_mapitem_pl_t
+#define RBTREE_MAP_PL rbtree_cuda_memhandle_cache_map_pl_t
+#define RBTREE_CMP(a,b) cuda_cache_key_cmp((a), (b))
 #define RBTREE_ASSERT                     psmi_assert
 #define RBTREE_MAP_COUNT(PAYLOAD_PTR)     ((PAYLOAD_PTR)->nelems)
+#define RBTREE_NO_EMIT_IPS_CL_QMAP_PREDECESSOR
 
+#include "rbtree.h"
 #include "rbtree.c"
 
-#ifdef PSM_DEBUG
-static int cache_hit_counter;
-static int cache_miss_counter;
-#endif
+/*
+ * Convenience rbtree cruft
+ */
+#define NELEMS			cuda_memhandle_cachemap.payload.nelems
+
+#define IHEAD			cuda_memhandle_cachemap.root
+#define LAST			IHEAD->payload.i_prev
+#define FIRST			IHEAD->payload.i_next
+#define INEXT(x)		x->payload.i_next
+#define IPREV(x)		x->payload.i_prev
+
+/*
+ * Actual module data
+ */
+static cl_qmap_t cuda_memhandle_cachemap; /* Global cache */
+static uint8_t cuda_memhandle_cache_enabled;
+static mpool_t cuda_memhandle_mpool;
+static uint32_t cuda_memhandle_cache_size;
+
+static uint64_t cache_hit_counter;
+static uint64_t cache_miss_counter;
+static uint64_t cache_evict_counter;
+static uint64_t cache_collide_counter;
+static uint64_t cache_clear_counter;
+
+static void print_cuda_memhandle_cache_stats(void)
+{
+	_HFI_DBG("enabled=%u,size=%u,hit=%lu,miss=%lu,evict=%lu,collide=%lu,clear=%lu\n",
+		cuda_memhandle_cache_enabled, cuda_memhandle_cache_size,
+		cache_hit_counter, cache_miss_counter,
+		cache_evict_counter, cache_collide_counter, cache_clear_counter);
+}
+
+/*
+ * This is the callback function when mempool are resized or destroyed.
+ * Upon calling cache fini mpool is detroyed which in turn calls this callback
+ * which helps in closing all memhandles.
+ */
+static void
+psmi_cuda_memhandle_cache_alloc_func(int is_alloc, void* context, void* obj)
+{
+	cl_map_item_t* memcache_item = (cl_map_item_t*)obj;
+	if (!is_alloc) {
+		if(memcache_item->payload.start)
+			PSMI_CUDA_CALL(cuIpcCloseMemHandle,
+				       memcache_item->payload.cuda_ipc_dev_ptr);
+	}
+}
 
 /*
  * Creating mempool for cuda memhandle cache nodes.
  */
-psm2_error_t
+static psm2_error_t
 am_cuda_memhandle_mpool_init(uint32_t memcache_size)
 {
 	psm2_error_t err;
+	if (memcache_size < 1)
+		return PSM2_PARAM_ERR;
+
 	cuda_memhandle_cache_size = memcache_size;
 	/* Creating a memory pool of size PSM2_CUDA_MEMCACHE_SIZE
 	 * which includes the Root and NIL items
@@ -95,8 +209,12 @@ am_cuda_memhandle_mpool_init(uint32_t memcache_size)
 /*
  * Initialize rbtree.
  */
-psm2_error_t am_cuda_memhandle_cache_map_init()
+psm2_error_t am_cuda_memhandle_cache_init(uint32_t memcache_size)
 {
+	psm2_error_t err = am_cuda_memhandle_mpool_init(memcache_size);
+	if (err != PSM2_OK)
+		return err;
+
 	cl_map_item_t *root, *nil_item;
 	root = (cl_map_item_t *)psmi_calloc(NULL, UNDEFINED, 1, sizeof(cl_map_item_t));
 	if (root == NULL)
@@ -110,23 +228,36 @@ psm2_error_t am_cuda_memhandle_cache_map_init()
 	cuda_memhandle_cache_enabled = 1;
 	ips_cl_qmap_init(&cuda_memhandle_cachemap,root,nil_item);
 	NELEMS = 0;
+
+	cache_hit_counter = 0;
+	cache_miss_counter = 0;
+	cache_evict_counter = 0;
+	cache_collide_counter = 0;
+	cache_clear_counter = 0;
+
 	return PSM2_OK;
 }
 
 void am_cuda_memhandle_cache_map_fini()
 {
-#ifdef PSM_DEBUG
-	_HFI_DBG("cache hit counter: %d\n", cache_hit_counter);
-	_HFI_DBG("cache miss counter: %d\n", cache_miss_counter);
-#endif
+	print_cuda_memhandle_cache_stats();
 
-	if (cuda_memhandle_cachemap.nil_item)
+	if (cuda_memhandle_cachemap.nil_item) {
 		psmi_free(cuda_memhandle_cachemap.nil_item);
-	if (cuda_memhandle_cachemap.root)
+		cuda_memhandle_cachemap.nil_item = NULL;
+	}
+
+	if (cuda_memhandle_cachemap.root) {
 		psmi_free(cuda_memhandle_cachemap.root);
-	if (cuda_memhandle_cache_enabled)
+		cuda_memhandle_cachemap.root = NULL;
+	}
+
+	if (cuda_memhandle_cache_enabled) {
 		psmi_mpool_destroy(cuda_memhandle_mpool);
-	return;
+		cuda_memhandle_cache_enabled = 0;
+	}
+
+	cuda_memhandle_cache_size = 0;
 }
 
 /*
@@ -155,11 +286,13 @@ am_cuda_idleq_remove_last(cl_map_item_t* memcache_item)
 	if (!INEXT(memcache_item)) {
 		LAST = NULL;
 		FIRST = NULL;
-		return;
+	} else {
+		LAST = INEXT(memcache_item);
+		IPREV(LAST) = NULL;
 	}
-	LAST = INEXT(memcache_item);
-	IPREV(LAST) = NULL;
-	return;
+	// Null-out now-removed memcache_item's next and prev pointers out of
+	// an abundance of caution
+	INEXT(memcache_item) = IPREV(memcache_item) = NULL;
 }
 
 static void
@@ -167,15 +300,16 @@ am_cuda_idleq_remove(cl_map_item_t* memcache_item)
 {
 	if (LAST == memcache_item) {
 		am_cuda_idleq_remove_last(memcache_item);
-		return;
+	} else if (FIRST == memcache_item) {
+		FIRST = IPREV(memcache_item);
+		INEXT(FIRST) = NULL;
+	} else {
+		INEXT(IPREV(memcache_item)) = INEXT(memcache_item);
+		IPREV(INEXT(memcache_item)) = IPREV(memcache_item);
 	}
-	if (INEXT(memcache_item) == NULL) {
-		INEXT(IPREV(memcache_item)) = NULL;
-		return;
-	}
-	INEXT(IPREV(memcache_item)) = INEXT(memcache_item);
-	IPREV(INEXT(memcache_item)) = IPREV(memcache_item);
-	return;
+	// Null-out now-removed memcache_item's next and prev pointers out of
+	// an abundance of caution
+	INEXT(memcache_item) = IPREV(memcache_item) = NULL;
 }
 
 static void
@@ -207,10 +341,14 @@ am_cuda_memhandle_cache_validate(cl_map_item_t* memcache_item,
 			 && epid == memcache_item->payload.epid) {
 		return PSM2_OK;
 	}
+	_HFI_DBG("cache collision: new entry start=%lu,length=%u\n", sbuf, length);
+
+	cache_collide_counter++;
 	ips_cl_qmap_remove_item(&cuda_memhandle_cachemap, memcache_item);
 	PSMI_CUDA_CALL(cuIpcCloseMemHandle,
 		       memcache_item->payload.cuda_ipc_dev_ptr);
 	am_cuda_idleq_remove(memcache_item);
+	memset(memcache_item, 0, sizeof(*memcache_item));
 	psmi_mpool_put(memcache_item);
 	return PSM2_OK_NO_PROGRESS;
 }
@@ -219,14 +357,18 @@ am_cuda_memhandle_cache_validate(cl_map_item_t* memcache_item,
  * Current eviction policy: Least Recently Used.
  */
 static void
-am_cuda_memhandle_cache_evict()
+am_cuda_memhandle_cache_evict(void)
 {
+	cache_evict_counter++;
 	cl_map_item_t *p_item = LAST;
+	_HFI_VDBG("Removing (epid=%lu,start=%lu,length=%u,dev_ptr=0x%llX,it=%p) from cuda_memhandle_cachemap.\n",
+		p_item->payload.epid, p_item->payload.start, p_item->payload.length,
+		p_item->payload.cuda_ipc_dev_ptr, p_item);
 	ips_cl_qmap_remove_item(&cuda_memhandle_cachemap, p_item);
 	PSMI_CUDA_CALL(cuIpcCloseMemHandle, p_item->payload.cuda_ipc_dev_ptr);
 	am_cuda_idleq_remove_last(p_item);
+	memset(p_item, 0, sizeof(*p_item));
 	psmi_mpool_put(p_item);
-	return;
 }
 
 static psm2_error_t
@@ -236,6 +378,7 @@ am_cuda_memhandle_cache_register(uintptr_t sbuf, CUipcMemHandle* handle,
 {
 	if (NELEMS == cuda_memhandle_cache_size)
 		am_cuda_memhandle_cache_evict();
+
 	cl_map_item_t* memcache_item = psmi_mpool_get(cuda_memhandle_mpool);
 	/* memcache_item cannot be NULL as we evict
 	 * before the call to mpool_get. Check has
@@ -253,6 +396,15 @@ am_cuda_memhandle_cache_register(uintptr_t sbuf, CUipcMemHandle* handle,
 	return PSM2_OK;
 }
 
+static void am_cuda_memhandle_cache_clear(void)
+{
+	_HFI_DBG("Closing all handles, clearing cuda_memhandle_cachemap and idleq. NELEMS=%u\n", NELEMS);
+	while (NELEMS) {
+		am_cuda_memhandle_cache_evict();
+	}
+	_HFI_DBG("Closed all handles, cleared cuda_memhandle_cachemap and idleq. NELEMS=%u\n", NELEMS);
+}
+
 /*
  * The key used to search the cache is the senders buf address pointer.
  * Upon a succesful hit in the cache, additional validation is required
@@ -262,36 +414,67 @@ CUdeviceptr
 am_cuda_memhandle_acquire(uintptr_t sbuf, CUipcMemHandle* handle,
 				uint32_t length, psm2_epid_t epid)
 {
+	_HFI_VDBG("sbuf=%lu,handle=%p,length=%u,epid=%lu\n",
+		sbuf, handle, length, epid);
+
 	CUdeviceptr cuda_ipc_dev_ptr;
-	if(cuda_memhandle_cache_enabled) {
-		cl_qmap_t *p_map = &cuda_memhandle_cachemap;
-		cl_map_item_t *p_item;
-		unsigned long start = (unsigned long)sbuf;
-		unsigned long end = start + length;
-		p_item = ips_cl_qmap_search(p_map, start, end);
-		if (p_item->payload.start) {
-			if (am_cuda_memhandle_cache_validate(p_item, sbuf,
-					       handle, length, epid) == PSM2_OK) {
-#ifdef PSM_DEBUG
-				cache_hit_counter++;
-#endif
-				am_cuda_idleq_reorder(p_item);
-				return p_item->payload.cuda_ipc_dev_ptr;
-			}
-		}
-#ifdef PSM_DEBUG
-		cache_miss_counter++;
-#endif
-		PSMI_CUDA_CALL(cuIpcOpenMemHandle, &cuda_ipc_dev_ptr,
-				 *handle, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
-		am_cuda_memhandle_cache_register(sbuf, handle,
-					       length, epid, cuda_ipc_dev_ptr);
-		return cuda_ipc_dev_ptr;
-	} else {
+	if(!cuda_memhandle_cache_enabled) {
 		PSMI_CUDA_CALL(cuIpcOpenMemHandle, &cuda_ipc_dev_ptr,
 				 *handle, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
 		return cuda_ipc_dev_ptr;
 	}
+
+	cuda_cache_item key = {
+		.start = (unsigned long) sbuf,
+		.length= length,
+		.epid = epid
+	};
+
+	/*
+	 * preconditions:
+	 *  1) newrange [start,end) may or may not be in cachemap already
+	 *  2) there are no overlapping address ranges in cachemap
+	 * postconditions:
+	 *  1) newrange is in cachemap
+	 *  2) there are no overlapping address ranges in cachemap
+	 *
+	 * The key used to search the cache is the senders buf address pointer.
+	 * Upon a succesful hit in the cache, additional validation is required
+	 * as multiple senders could potentially send the same buf address value.
+	 */
+	cl_map_item_t *p_item = ips_cl_qmap_searchv(&cuda_memhandle_cachemap, &key);
+	while (p_item->payload.start) {
+		// Since a precondition is that there are no overlapping ranges in cachemap,
+		// an exact match implies no need to check further
+		if (am_cuda_memhandle_cache_validate(p_item, sbuf, handle, length, epid) == PSM2_OK) {
+			cache_hit_counter++;
+			am_cuda_idleq_reorder(p_item);
+			return p_item->payload.cuda_ipc_dev_ptr;
+		}
+
+		// newrange is not in the cache and overlaps at least one existing range.
+		// am_cuda_memhandle_cache_validate() closed and removed existing range.
+		// Continue searching for more overlapping ranges
+		p_item = ips_cl_qmap_searchv(&cuda_memhandle_cachemap, &key);
+	}
+	cache_miss_counter++;
+
+	CUresult cudaerr;
+	PSMI_CUDA_CALL_EXCEPT(CUDA_ERROR_ALREADY_MAPPED, cuIpcOpenMemHandle,
+		&cuda_ipc_dev_ptr, *handle, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
+
+	if (cudaerr == CUDA_ERROR_ALREADY_MAPPED) {
+		// remote memory already mapped. Close all handles, clear cache,
+		// and try again
+		am_cuda_memhandle_cache_clear();
+		cache_clear_counter++;
+		PSMI_CUDA_CALL(cuIpcOpenMemHandle, &cuda_ipc_dev_ptr, *handle,
+			CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
+	}
+
+	am_cuda_memhandle_cache_register(sbuf, handle,
+					   length, epid, cuda_ipc_dev_ptr);
+	return cuda_ipc_dev_ptr;
 }
 
 void
@@ -300,22 +483,6 @@ am_cuda_memhandle_release(CUdeviceptr cuda_ipc_dev_ptr)
 	if(!cuda_memhandle_cache_enabled)
 		PSMI_CUDA_CALL(cuIpcCloseMemHandle, cuda_ipc_dev_ptr);
 	return;
-}
-
-/*
- * This is the callback function when mempool are resized or destroyed.
- * Upon calling cache fini mpool is detroyed which in turn calls this callback
- * which helps in closing all memhandles.
- */
-void
-psmi_cuda_memhandle_cache_alloc_func(int is_alloc, void* context, void* obj)
-{
-	cl_map_item_t* memcache_item = (cl_map_item_t*)obj;
-	if (!is_alloc) {
-		if(memcache_item->payload.start)
-			PSMI_CUDA_CALL(cuIpcCloseMemHandle,
-				       memcache_item->payload.cuda_ipc_dev_ptr);
-	}
 }
 
 #endif

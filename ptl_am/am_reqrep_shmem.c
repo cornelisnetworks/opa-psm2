@@ -2574,10 +2574,7 @@ amsh_init(psm2_ep_t ep, ptl_t *ptl_gen, ptl_ctl_t *ctl)
 			    PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT,
 			    (union psmi_envvar_val)
 			    CUDA_MEMHANDLE_CACHE_SIZE, &env_memcache_size);
-		if ((err = am_cuda_memhandle_mpool_init(env_memcache_size.e_uint)
-		     != PSM2_OK))
-			goto fail;
-		if ((err = am_cuda_memhandle_cache_map_init() != PSM2_OK))
+		if ((err = am_cuda_memhandle_cache_init(env_memcache_size.e_uint) != PSM2_OK))
 			goto fail;
 	}
 #endif
