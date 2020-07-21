@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -17,10 +18,11 @@
   General Public License for more details.
 
   Contact Information:
-  Intel Corporation, www.intel.com
+  Cornelis Networks, www.cornelisnetworks.com
 
   BSD LICENSE
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
@@ -1429,6 +1431,9 @@ ips_proto_mq_handle_cts(struct ips_recvhdrq_event *rcv_ev)
 	return IPS_RECVHDRQ_CONTINUE;
 }
 
+static void ips_proto_mq_handle_outoforder_queue(psm2_mq_t mq, ips_msgctl_t *msgctl,
+  struct ips_proto *proto);
+
 int
 ips_proto_mq_handle_rts(struct ips_recvhdrq_event *rcv_ev)
 {
@@ -1533,7 +1538,7 @@ ips_proto_mq_handle_rts(struct ips_recvhdrq_event *rcv_ev)
 		/* XXX if blocking, break out of progress loop */
 
 		if (msgctl->outoforder_count)
-			ips_proto_mq_handle_outoforder_queue(mq, msgctl);
+			ips_proto_mq_handle_outoforder_queue(mq, msgctl, rcv_ev->proto);
 
 		if (rc == MQ_RET_UNEXP_OK)
 			ret = IPS_RECVHDRQ_BREAK;
@@ -1587,7 +1592,7 @@ ips_proto_mq_handle_tiny(struct ips_recvhdrq_event *rcv_ev)
 	 */
 	psmi_assert(msgorder != IPS_MSG_ORDER_PAST);
 
-	_HFI_VDBG("tag=%08x.%08x.%08x opcode=%d, msglen=%d\n",
+	_HFI_VDBG("tag=%08x.%08x.%08x opcode=0x%x, msglen=%d\n",
 		  p_hdr->tag[0], p_hdr->tag[1], p_hdr->tag[2],
 		  OPCODE_TINY, p_hdr->hdr_data.u32w1);
 
@@ -1620,7 +1625,7 @@ ips_proto_mq_handle_tiny(struct ips_recvhdrq_event *rcv_ev)
 		ipsaddr->msg_toggle = 0;
 
 		if (msgctl->outoforder_count)
-			ips_proto_mq_handle_outoforder_queue(mq, msgctl);
+			ips_proto_mq_handle_outoforder_queue(mq, msgctl, rcv_ev->proto);
 
 		if (rc == MQ_RET_UNEXP_OK)
 			ret = IPS_RECVHDRQ_BREAK;
@@ -1673,7 +1678,7 @@ ips_proto_mq_handle_short(struct ips_recvhdrq_event *rcv_ev)
 	 */
 	psmi_assert(msgorder != IPS_MSG_ORDER_PAST);
 
-	_HFI_VDBG("tag=%08x.%08x.%08x opcode=%d, msglen=%d\n",
+	_HFI_VDBG("tag=%08x.%08x.%08x opcode=0x%x, msglen=%d\n",
 		  p_hdr->tag[0], p_hdr->tag[1], p_hdr->tag[2],
 		  OPCODE_SHORT, p_hdr->hdr_data.u32w1);
 
@@ -1707,7 +1712,7 @@ ips_proto_mq_handle_short(struct ips_recvhdrq_event *rcv_ev)
 		ipsaddr->msg_toggle = 0;
 
 		if (msgctl->outoforder_count)
-			ips_proto_mq_handle_outoforder_queue(mq, msgctl);
+			ips_proto_mq_handle_outoforder_queue(mq, msgctl, rcv_ev->proto);
 
 		if (rc == MQ_RET_UNEXP_OK)
 			ret = IPS_RECVHDRQ_BREAK;
@@ -1770,6 +1775,9 @@ ips_proto_mq_handle_eager(struct ips_recvhdrq_event *rcv_ev)
 				req->req_data.buf = gdr_convert_gpu_to_host_addr(GDR_FD,
 							(unsigned long)req->user_gpu_buffer,
 							req->req_data.send_msglen, 1, rcv_ev->proto);
+			} else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) && req->is_buf_gpu_mem) {
+				psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+				  "CUDA memcpy not permitted for this operation.");
 			}
 #endif
 			psmi_mq_handle_data(mq, req,
@@ -1806,7 +1814,7 @@ ips_proto_mq_handle_eager(struct ips_recvhdrq_event *rcv_ev)
 	 */
 	psmi_assert(msgorder != IPS_MSG_ORDER_PAST);
 
-	_HFI_VDBG("tag=%08x.%08x.%08x opcode=%d, msglen=%d\n",
+	_HFI_VDBG("tag=%08x.%08x.%08x opcode=0x%x, msglen=%d\n",
 		p_hdr->tag[0], p_hdr->tag[1], p_hdr->tag[2],
 		OPCODE_EAGER, p_hdr->hdr_data.u32w1);
 
@@ -1840,7 +1848,7 @@ ips_proto_mq_handle_eager(struct ips_recvhdrq_event *rcv_ev)
 		ipsaddr->msg_toggle = 0;
 
 		if (msgctl->outoforder_count)
-			ips_proto_mq_handle_outoforder_queue(mq, msgctl);
+			ips_proto_mq_handle_outoforder_queue(mq, msgctl, rcv_ev->proto);
 
 		if (rc == MQ_RET_UNEXP_OK)
 			ret = IPS_RECVHDRQ_BREAK;
@@ -1859,22 +1867,26 @@ ips_proto_mq_handle_eager(struct ips_recvhdrq_event *rcv_ev)
  * Progress the out of order queue to see if any message matches
  * current receiving sequence number.
  */
-void
-ips_proto_mq_handle_outoforder_queue(psm2_mq_t mq, ips_msgctl_t *msgctl)
+static void
+ips_proto_mq_handle_outoforder_queue(psm2_mq_t mq, ips_msgctl_t *msgctl,
+  struct ips_proto *proto)
 {
 	psm2_mq_req_t req;
 
 	do {
-		req =
-		    mq_ooo_match(&mq->outoforder_q, msgctl,
-				 msgctl->mq_recv_seqnum);
+		req = mq_ooo_match(&mq->outoforder_q, msgctl,
+		   msgctl->mq_recv_seqnum);
 		if (req == NULL)
 			return;
 
 		msgctl->outoforder_count--;
 		msgctl->mq_recv_seqnum++;
 
+#ifdef PSM_CUDA
+		psmi_mq_handle_outoforder(mq, req, proto);
+#else
 		psmi_mq_handle_outoforder(mq, req);
+#endif
 
 	} while (msgctl->outoforder_count > 0);
 

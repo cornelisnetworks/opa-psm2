@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2018 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -17,10 +18,11 @@
   General Public License for more details.
 
   Contact Information:
-  Intel Corporation, www.intel.com
+  Cornelis Networks, www.cornelisnetworks.com
 
   BSD LICENSE
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2018 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
@@ -61,9 +63,11 @@
 #include "ptl_ips/ips_expected_proto.h"
 #include "opa_user_gen1.h"
 
-static int gdr_fd;
+static int gdr_refcount;
+static int gdr_fd = -1;
 
-int get_gdr_fd(){
+int get_gdr_fd(void)
+{
 	return gdr_fd;
 }
 
@@ -71,7 +75,8 @@ int get_gdr_fd(){
 #define GPU_PAGE_MASK ~GPU_PAGE_OFFSET_MASK
 
 uint64_t
-gdr_cache_evict() {
+gdr_cache_evict(void)
+{
 	int ret;
 	struct hfi1_gdr_cache_evict_params params;
 	params.evict_params_in.version = HFI1_GDR_VERSION;
@@ -90,8 +95,9 @@ gdr_cache_evict() {
 }
 
 
-uint64_t
-ips_sdma_gpu_cache_evict(int fd) {
+static uint64_t
+ips_sdma_gpu_cache_evict(int fd)
+{
 	int ret;
 	struct hfi1_sdma_gpu_cache_evict_params params;
 	params.evict_params_in.version = HFI1_GDR_VERSION;
@@ -117,7 +123,7 @@ ips_sdma_gpu_cache_evict(int fd) {
  * which we bail out. If successful we retry to PIN/MMAP once
  * again
  */
-uint64_t
+static uint64_t
 handle_out_of_bar_space(struct ips_proto *proto)
 {
 	time_t lastEvictTime = 0;
@@ -158,27 +164,40 @@ gdr_convert_gpu_to_host_addr(int gdr_fd, unsigned long buf,
 							 size_t size, int flags,
 							 struct ips_proto* proto)
 {
-	struct hfi1_gdr_query_params query_params;
-	void *host_addr_buf;
-	int ret;
+	_HFI_VDBG("(gdrcopy) buf=%p size=%zu flags=0x%x proto=%p\n",
+	  (void*)buf, size, flags, proto);
+	if (!size) {
+		// Attempting 0-length pin results in error from driver.
+		// Just return NULL. Caller has to figure out what to do in this
+		// case.
+		return NULL;
+	}
 
-	query_params.query_params_in.version = HFI1_GDR_VERSION;
 	uintptr_t pageaddr = buf & GPU_PAGE_MASK;
-	/* As size is guarenteed to be in the range of 0-8kB
-	 * there is a guarentee that buf+size-1 does not overflow
-	 * 64 bits.
-	 */
-	uint32_t pagelen = (uint32_t) (PSMI_GPU_PAGESIZE +
-					   ((buf + size - 1) & GPU_PAGE_MASK) -
-					   pageaddr);
+	uintptr_t pageend = PSMI_GPU_PAGESIZE + ((buf + size - 1) & GPU_PAGE_MASK);
 
-	_HFI_VDBG("(gpudirect) buf=%p size=%zu pageaddr=%p pagelen=%u flags=0x%x proto=%p\n",
-		(void *)buf, size, (void *)pageaddr, pagelen, flags, proto);
+	// Validate pointer arithmetic
+	if (pageend < pageaddr) {
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+		  "pageend < pageaddr, wraparound; pageend=%p pageaddr=%p",
+		  (void*)pageend, (void*)pageaddr);
+	} else if ((pageend - pageaddr) > UINT32_MAX) {
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+		  "pageend - pageaddr > UINT32_MAX; pageend=%p pageaddr=%p difference=%zu",
+		  (void*)pageend, (void*)pageaddr, (pageend - pageaddr));
+	}
 
+	uint32_t pagelen = pageend - pageaddr;
+	_HFI_VDBG("(gdrcopy) pageaddr=%p pagelen=%u pageend=%p\n",
+	  (void *)pageaddr, pagelen, (void*)pageend);
+
+	struct hfi1_gdr_query_params query_params;
+	query_params.query_params_in.version = HFI1_GDR_VERSION;
 	query_params.query_params_in.gpu_buf_addr = pageaddr;
 	query_params.query_params_in.gpu_buf_size = pagelen;
- retry:
 
+	int ret;
+ retry:
 	ret = ioctl(gdr_fd, HFI1_IOCTL_GDR_GPU_PIN_MMAP, &query_params);
 
 	if (ret) {
@@ -199,29 +218,40 @@ gdr_convert_gpu_to_host_addr(int gdr_fd, unsigned long buf,
 			return NULL;
 		}
 	}
-	host_addr_buf = (void *)query_params.query_params_out.host_buf_addr;
+	void *host_addr_buf = (void *)query_params.query_params_out.host_buf_addr;
 	return host_addr_buf + (buf & GPU_PAGE_OFFSET_MASK);
 }
 
 
-void hfi_gdr_open(){
-	gdr_fd = open(GDR_DEVICE_PATH, O_RDWR);
-	if (-1 == gdr_fd ) {
-		/* Non-Fatal error. If device cannot be found we assume
-		 * that the driver does not support GDR Copy and we fallback
-		 * to sending all GPU messages using rndv protocol
-		 */
-		_HFI_INFO(" Warning: The HFI1 driver installed does not support GPUDirect RDMA"
-				  " fast copy. Turning off GDR fast copy in PSM \n");
-		is_gdr_copy_enabled = 0;
-		return;
+void hfi_gdr_open(void)
+{
+	if (gdr_fd < 0) {
+		psmi_assert(!gdr_refcount);
+		gdr_fd = open(GDR_DEVICE_PATH, O_RDWR);
+		if (-1 == gdr_fd ) {
+			/* Non-Fatal error. If device cannot be found we assume
+			 * that the driver does not support GDR Copy and we fallback
+			 * to sending all GPU messages using rndv protocol
+			 */
+			_HFI_INFO(" Warning: The HFI1 driver installed does not support GPUDirect RDMA"
+					  " fast copy. Turning off GDR fast copy in PSM \n");
+			is_gdr_copy_enabled = 0;
+			return;
+		}
 	}
-	return;
+	gdr_refcount++;
 }
 
-void hfi_gdr_close()
+void hfi_gdr_close(void)
 {
-	close(GDR_FD);
+	if (gdr_fd > -1) {
+		psmi_assert(gdr_refcount);
+		gdr_refcount--;
+		if (!gdr_refcount) {
+			close(gdr_fd);
+			gdr_fd = -1;
+		}
+	}
 }
 
 #endif

@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2015 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -17,10 +18,11 @@
   General Public License for more details.
 
   Contact Information:
-  Intel Corporation, www.intel.com
+  Cornelis Networks, www.cornelisnetworks.com
 
   BSD LICENSE
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2015 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
@@ -511,7 +513,7 @@ psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 					    rcv_ev.recvq->context->psm_hw_ctxt);
 
 			_HFI_VDBG_ALWAYS(
-				"hdrq_head %d, p_hdr: %p, opcode %x, payload %p paylen %d; "
+				"hdrq_head %d, p_hdr: %p, opcode 0x%x, payload %p paylen %d; "
 				"egrhead %x egrtail %x; "
 				"useegrbit %x egrindex %x, egroffset %x, egrindexhead %x\n",
 				state->hdrq_head,

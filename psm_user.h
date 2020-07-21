@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -17,10 +18,11 @@
   General Public License for more details.
 
   Contact Information:
-  Intel Corporation, www.intel.com
+  Cornelis Networks, www.cornelisnetworks.com
 
   BSD LICENSE
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
@@ -371,6 +373,7 @@ static int check_set_cuda_ctxt(void)
 }
 
 #define PSMI_CUDA_CALL(func, args...) do {				\
+		_HFI_CUDADBG("func=psmi_"#func"\n"); \
 		CUresult cudaerr;					\
 		if (check_set_cuda_ctxt()) { \
 			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR, \
@@ -486,6 +489,7 @@ int gpu_p2p_supported())
  * DBG level.
  */
 #define PSMI_CUDA_CALL_EXCEPT(except_err, func, args...) do { \
+		_HFI_CUDADBG("func=psmi_"#func",except_err=%d\n", except_err); \
 		if (check_set_cuda_ctxt()) { \
 			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR, \
 				"Failed to set/synchronize CUDA context.\n"); \
@@ -512,6 +516,7 @@ int gpu_p2p_supported())
 	} while (0)
 
 #define PSMI_CUDA_CHECK_EVENT(event, cudaerr) do {			\
+		_HFI_CUDADBG("event=%p\n", (void*)(event)); \
 		cudaerr = psmi_cuEventQuery(event);			\
 		if ((cudaerr != CUDA_SUCCESS) &&			\
 		    (cudaerr != CUDA_ERROR_NOT_READY)) {		\
@@ -609,9 +614,10 @@ extern uint32_t gdr_copy_threshold_send;
  */
 extern uint32_t gdr_copy_threshold_recv;
 
-#define PSMI_USE_GDR_COPY(req, len) req->is_buf_gpu_mem &&       \
-				    PSMI_IS_GDR_COPY_ENABLED  && \
-				    len >=1 && len <= gdr_copy_threshold_recv
+#define PSMI_USE_GDR_COPY(req, len) \
+	req->is_buf_gpu_mem && \
+	PSMI_IS_GDR_COPY_ENABLED  && \
+	(req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY || (len >=1 && len <= gdr_copy_threshold_recv))
 
 enum psm2_chb_match_type {
 	/* Complete data found in a single chb */

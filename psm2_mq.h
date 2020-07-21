@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2017 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -17,10 +18,11 @@
   General Public License for more details.
 
   Contact Information:
-  Intel Corporation, www.intel.com
+  Cornelis Networks, www.cornelisnetworks.com
 
   BSD LICENSE
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2017 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
@@ -519,6 +521,8 @@ psm2_error_t psm2_mq_setopt(psm2_mq_t mq, int option, const void *value);
 #define PSM2_MQ_FLAG_SENDSYNC	0x01
 				/**< MQ Send Force synchronous send */
 
+#define PSM2_MQ_FLAG_GDRCPY_ONLY	0x02
+				/**< only GDRCOPY is allowed for GPU */
 #define PSM2_MQ_REQINVALID	((psm2_mq_req_t)(NULL))
 				/**< MQ request completion value */
 

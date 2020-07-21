@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2015 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -17,10 +18,11 @@
   General Public License for more details.
 
   Contact Information:
-  Intel Corporation, www.intel.com
+  Cornelis Networks, www.cornelisnetworks.com
 
   BSD LICENSE
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2015 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
@@ -366,6 +368,9 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 				user_buffer = gdr_convert_gpu_to_host_addr(GDR_FD,
 								(unsigned long)req->req_data.buf,
 								msglen, 1, src->proto);
+			} else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) && req->is_buf_gpu_mem) {
+				psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+				  "CUDA memcpy not permitted for this operation.");
 			}
 #endif
 			mq_copy_tiny((uint32_t *) user_buffer, (uint32_t *) payload, msglen);
@@ -383,6 +388,9 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 							(unsigned long)req->req_data.buf,
 							msglen, 1, src->proto);
 				psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
+			} else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) && req->is_buf_gpu_mem) {
+				psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+				  "CUDA memcpy not permitted for this operation.");
 			}
 #endif
 			if (msglen <= paylen) {
@@ -414,6 +422,9 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 				req->req_data.buf = gdr_convert_gpu_to_host_addr(GDR_FD,
 						(unsigned long)req->user_gpu_buffer,
 						req->req_data.send_msglen, 1, src->proto);
+			} else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) && req->is_buf_gpu_mem) {
+				psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+				  "CUDA memcpy not permitted for this operation.");
 			}
 #endif
 			if (paylen > 0)
@@ -540,7 +551,11 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 	return MQ_RET_UNEXP_OK;
 }
 
-int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t ureq)
+int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t ureq
+#ifdef PSM_CUDA
+  , struct ips_proto *proto
+#endif
+)
 {
 	psm2_mq_req_t ereq;
 	uint32_t msglen;
@@ -555,12 +570,18 @@ int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t ureq)
 	ereq->req_data.peer = ureq->req_data.peer;
 	ereq->req_data.tag = ureq->req_data.tag;
 	msglen = mq_set_msglen(ereq, ereq->req_data.buf_len, ureq->req_data.send_msglen);
+	uint8_t *dest = ereq->req_data.buf;
+
+#ifdef PSM_CUDA
+	if (proto && PSMI_USE_GDR_COPY(ereq, msglen)) {
+		dest = gdr_convert_gpu_to_host_addr(GDR_FD, (unsigned long)dest, msglen, 0, proto);
+	}
+#endif
 
 	switch (ureq->state) {
 	case MQ_STATE_COMPLETE:
 		if (ureq->req_data.buf != NULL) {	/* 0-byte don't alloc a sysreq_data.buf */
-			psmi_mq_mtucpy(ereq->req_data.buf, (const void *)ureq->req_data.buf,
-				       msglen);
+			psmi_mq_mtucpy(dest, (const void *)ureq->req_data.buf, msglen);
 			psmi_mq_sysbuf_free(mq, ureq->req_data.buf);
 		}
 		ereq->state = MQ_STATE_COMPLETE;
@@ -574,7 +595,7 @@ int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t ureq)
 		ereq->send_msgoff = ureq->send_msgoff;
 		ereq->recv_msgoff = min(ureq->recv_msgoff, msglen);
 		if (ereq->recv_msgoff) {
-			psmi_mq_mtucpy(ereq->req_data.buf,
+			psmi_mq_mtucpy(dest,
 				       (const void *)ureq->req_data.buf,
 				       ereq->recv_msgoff);
 		}
@@ -590,7 +611,7 @@ int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t ureq)
 		ereq->send_msgoff = ureq->send_msgoff;
 		ereq->recv_msgoff = min(ureq->recv_msgoff, msglen);
 		if (ereq->recv_msgoff) {
-			psmi_mq_mtucpy(ereq->req_data.buf,
+			psmi_mq_mtucpy(dest,
 				       (const void *)ureq->req_data.buf,
 				       ereq->recv_msgoff);
 		}

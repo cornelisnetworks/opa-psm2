@@ -4,6 +4,7 @@
 #
 #  GPL LICENSE SUMMARY
 #
+#  Copyright(c) 2021 Cornelis Networks.
 #  Copyright(c) 2017 Intel Corporation.
 #
 #  This program is free software; you can redistribute it and/or modify
@@ -16,10 +17,11 @@
 #  General Public License for more details.
 #
 #  Contact Information:
-#  Intel Corporation, www.intel.com
+#  Cornelis Networks, www.cornelisnetworks.com
 #
 #  BSD LICENSE
 #
+#  Copyright(c) 2021 Cornelis Networks.
 #  Copyright(c) 2017 Intel Corporation.
 #
 #  Redistribution and use in source and binary forms, with or without
@@ -374,8 +376,8 @@ debug:
 	$(MAKE) OUTDIR=$(OUTDIR) PSM_DEBUG=1
 
 test_clean:
-	if [ -d ./test ]; then \
-		$(MAKE) -C test clean; \
+	if [ -d ./test && -e ./test/Makefile ]; then \
+		$(MAKE) -f ./test/Makefile -C test clean; \
 	fi
 
 specfile_clean:

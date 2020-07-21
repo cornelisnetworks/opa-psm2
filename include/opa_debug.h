@@ -83,6 +83,7 @@
 #define __HFI_ENVDBG	    0x400
 #define __HFI_EPKTDBG     0x800	/* print error packet data */
 #define __HFI_CCADBG      0x1000	/* print CCA related events */
+#define __HFI_CUDADBG     0x2000	/* print CUDA calls, events */
 #else /* _HFI_DEBUGGING */
 
 /*
@@ -100,6 +101,7 @@
 /* print mmap/nopage stuff, not using VDBG any more */
 #define __HFI_MMDBG     0x0
 #define __HFI_CCADBG    0x0	/* print CCA related events */
+#define __HFI_CUDADBG   0x0
 
 #endif /* _HFI_DEBUGGING */
 

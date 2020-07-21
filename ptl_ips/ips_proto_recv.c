@@ -1116,7 +1116,7 @@ ips_proto_process_becn(struct ips_recvhdrq_event *rcv_ev)
 
 static void ips_bad_opcode(uint8_t op_code, struct ips_message_header *proto)
 {
-	_HFI_DBG("Discarding message with bad opcode 0x%x\n", op_code);
+	_HFI_INFO("Discarding message with bad opcode 0x%x\n", op_code);
 
 	if (hfi_debug & __HFI_DBG) {
 		ips_proto_show_header(proto, "received bad opcode");

@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -17,10 +18,11 @@
   General Public License for more details.
 
   Contact Information:
-  Intel Corporation, www.intel.com
+  Cornelis Networks, www.cornelisnetworks.com
 
   BSD LICENSE
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
@@ -1031,6 +1033,9 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 	char uvalue[6], pvalue[6];
 	int devid_enabled[PTL_MAX_INIT];
 	union psmi_envvar_val devs;
+#ifdef PSM_CUDA
+	int release_gdr = 0;
+#endif
 
 	PSM2_LOG_MSG("entering");
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
@@ -1086,8 +1091,10 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 	}
 
 #ifdef PSM_CUDA
-	if (PSMI_IS_GDR_COPY_ENABLED)
+	if (PSMI_IS_GDR_COPY_ENABLED) {
 		hfi_gdr_open();
+		release_gdr = 1;
+	}
 #endif
 
 	err = __psm2_ep_open_internal(unique_job_key,
@@ -1141,6 +1148,10 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 	_HFI_VDBG("psm2_ep_open() OK....\n");
 
 fail:
+#ifdef PSM_CUDA
+	if (err && release_gdr)
+		hfi_gdr_close();
+#endif
 	PSMI_UNLOCK(psmi_creation_lock);
 	PSM2_LOG_MSG("leaving");
 	return err;
@@ -1157,16 +1168,6 @@ psm2_error_t __psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout_in)
 	}
 #endif
 
-#ifdef PSM_CUDA
-	/*
-	 * The close on the gdr fd needs to be called before the
-	 * close on the hfi fd as the the gdr device will hold
-	 * reference count on the hfi device which will make the close
-	 * on the hfi fd return without actually closing the fd.
-	 */
-	if (PSMI_IS_GDR_COPY_ENABLED)
-		hfi_gdr_close();
-#endif
 	union psmi_envvar_val timeout_intval;
 	psm2_ep_t tmp;
 	psm2_mq_t mmq;
@@ -1346,6 +1347,11 @@ psm2_error_t __psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout_in)
 	}
 
 	PSMI_UNLOCK(psmi_creation_lock);
+
+#ifdef PSM_CUDA
+	if (PSMI_IS_GDR_COPY_ENABLED)
+		hfi_gdr_close();
+#endif
 
 	if (_HFI_PRDBG_ON) {
 		_HFI_PRDBG_ALWAYS("Closed endpoint in %.3f secs\n",

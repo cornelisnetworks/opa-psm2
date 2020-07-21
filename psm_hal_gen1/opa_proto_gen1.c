@@ -310,7 +310,7 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 	__hfi_pg_sz = sysconf(_SC_PAGESIZE);
 
 	if (!(spctrl = calloc(1, sizeof(struct _hfi_ctrl)))) {
-		_HFI_INFO("can't allocate memory for hfi_ctrl: %s\n",
+		_HFI_INFO("Warning: can't allocate memory for hfi_ctrl: %s\n",
 			  strerror(errno));
 		goto err_calloc_hfi_ctrl;
 	}
@@ -357,12 +357,12 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 #endif
 	if (hfi_cmd_write(fd, &c, sizeof(c)) == -1) {
 		if (errno == ENODEV) {
-			_HFI_INFO("PSM2 and driver version mismatch\n");
+			_HFI_INFO("Warning: PSM2 and driver version mismatch\n");
 			/* Overwrite errno. One would wish that the driver
 			 * didn't return ENODEV for a version mismatch */
 			errno = EPROTONOSUPPORT;
 		} else {
-			_HFI_INFO("assign_context command failed: %s\n",
+			_HFI_INFO("Warning: assign_context command failed: %s\n",
 				  strerror(errno));
 		}
 		goto err_hfi_cmd_assign_ctxt;
@@ -387,36 +387,36 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 	c.addr = (__u64) cinfo;
 
 	if (hfi_cmd_write(fd, &c, sizeof(c)) == -1) {
-		_HFI_INFO("CTXT_INFO command failed: %s\n", strerror(errno));
+		_HFI_ERROR("CTXT_INFO command failed: %s\n", strerror(errno));
 		goto err_hfi_cmd_ctxt_info;
 	}
 
 	/* sanity checking... */
 	if (cinfo->rcvtids%8) {
-		_HFI_INFO("rcvtids not 8 multiple: %d\n", cinfo->rcvtids);
+		_HFI_ERROR("rcvtids not 8 multiple: %d\n", cinfo->rcvtids);
 		goto err_sanity_check;
 	}
 	if (cinfo->egrtids%8) {
-		_HFI_INFO("egrtids not 8 multiple: %d\n", cinfo->egrtids);
+		_HFI_ERROR("egrtids not 8 multiple: %d\n", cinfo->egrtids);
 		goto err_sanity_check;
 	}
 	if (cinfo->rcvtids < cinfo->egrtids) {
-		_HFI_INFO("rcvtids(%d) < egrtids(%d)\n",
+		_HFI_ERROR("rcvtids(%d) < egrtids(%d)\n",
 				cinfo->rcvtids, cinfo->egrtids);
 		goto err_sanity_check;
 	}
 	if (cinfo->rcvhdrq_cnt%32) {
-		_HFI_INFO("rcvhdrq_cnt not 32 multiple: %d\n",
+		_HFI_ERROR("rcvhdrq_cnt not 32 multiple: %d\n",
 				cinfo->rcvhdrq_cnt);
 		goto err_sanity_check;
 	}
 	if (cinfo->rcvhdrq_entsize%64) {
-		_HFI_INFO("rcvhdrq_entsize not 64 multiple: %d\n",
+		_HFI_ERROR("rcvhdrq_entsize not 64 multiple: %d\n",
 				cinfo->rcvhdrq_entsize);
 		goto err_sanity_check;
 	}
 	if (cinfo->rcvegr_size%__hfi_pg_sz) {
-		_HFI_INFO("rcvegr_size not page multiple: %d\n",
+		_HFI_ERROR("rcvegr_size not page multiple: %d\n",
 				cinfo->rcvegr_size);
 		goto err_sanity_check;
 	}
@@ -443,7 +443,7 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 		CPU_ZERO(&cpuset);
 		CPU_SET(cinfo->rec_cpu, &cpuset);
 		if (sched_setaffinity(0, sizeof(cpuset), &cpuset)) {
-			_HFI_INFO("Couldn't set runon processor %u "
+			_HFI_INFO("Warning: Couldn't set runon processor %u "
 				  "(unit:context %u:%u) (%u active chips): %s\n",
 				  cinfo->rec_cpu, cinfo->unit, cinfo->ctxt,
 				  cinfo->num_active, strerror(errno));
@@ -456,7 +456,7 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 	c.addr = (__u64) binfo;
 
 	if (hfi_cmd_write(fd, &c, sizeof(c)) == -1) {
-		_HFI_INFO("BASE_INFO command failed: %s\n", strerror(errno));
+		_HFI_ERROR("BASE_INFO command failed: %s\n", strerror(errno));
 		goto err_hfi_cmd_user_info;
 	}
 
@@ -481,7 +481,7 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 	 * this is different from PSM API version.
 	 */
 	if ((binfo->sw_version >> HFI1_SWMAJOR_SHIFT) != hfi_get_user_major_version()) {
-		_HFI_INFO
+		_HFI_ERROR
 		    ("User major version 0x%x not same as driver major 0x%x\n",
 		     hfi_get_user_major_version(), binfo->sw_version >> HFI1_SWMAJOR_SHIFT);
 		if ((binfo->sw_version >> HFI1_SWMAJOR_SHIFT) < hfi_get_user_major_version())

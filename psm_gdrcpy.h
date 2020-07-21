@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2018 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -17,10 +18,11 @@
   General Public License for more details.
 
   Contact Information:
-  Intel Corporation, www.intel.com
+  Cornelis Networks, www.cornelisnetworks.com
 
   BSD LICENSE
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2018 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
@@ -60,18 +62,17 @@
 
 #define GDR_FD get_gdr_fd()
 
-int get_gdr_fd();
+int get_gdr_fd(void);
 
-void hfi_gdr_open();
+void hfi_gdr_open(void);
 
-void hfi_gdr_close();
+void hfi_gdr_close(void);
 
 void *
 gdr_convert_gpu_to_host_addr(int gdr_fd, unsigned long buf,
 				size_t size, int flags,
 				struct ips_proto* proto);
 
-uint64_t
-gdr_cache_evict();
+uint64_t gdr_cache_evict(void);
 #endif
 #endif
