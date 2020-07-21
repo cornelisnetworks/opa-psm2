@@ -162,8 +162,11 @@ static __inline__ void _dump_invalid_pkt(struct ips_recvhdrq_event *rcv_ev)
 	if (hfi_debug & __HFI_PKTDBG) {
 		ips_proto_dump_frame(rcv_ev->p_hdr, HFI_MESSAGE_HDR_SIZE,
 				     "header");
-		if (paylen)
+		if (!payload) {
+			_HFI_DBG("Cannot dump frame; payload is NULL\n");
+		} else if (paylen) {
 			ips_proto_dump_frame(payload, paylen, "data");
+		}
 	}
 
 }

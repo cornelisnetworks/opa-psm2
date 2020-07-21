@@ -96,7 +96,7 @@ struct ptl_rcvthread {
          * stored to provide hints during a cuda failure
          * due to a null cuda context.
          */
-	CUcontext ctxt;
+	CUcontext cu_ctxt;
 #endif
 
 /*
@@ -124,7 +124,7 @@ psm2_error_t ips_ptl_rcvthread_init(ptl_t *ptl_gen, struct ips_recvhdrq *recvq)
 
 #ifdef PSM_CUDA
 	if (PSMI_IS_CUDA_ENABLED)
-		PSMI_CUDA_CALL(cuCtxGetCurrent, &ctxt);
+		PSMI_CUDA_CALL(cuCtxGetCurrent, &cu_ctxt);
 #endif
 
 	if (psmi_hal_has_sw_status(PSM_HAL_PSMI_RUNTIME_RTS_RX_THREAD) &&
@@ -347,8 +347,8 @@ void *ips_ptl_pollintr(void *rcvthreadc)
 	psm2_error_t err;
 
 #ifdef PSM_CUDA
-	if (PSMI_IS_CUDA_ENABLED && ctxt != NULL)
-		PSMI_CUDA_CALL(cuCtxSetCurrent, ctxt);
+	if (PSMI_IS_CUDA_ENABLED && cu_ctxt != NULL)
+		PSMI_CUDA_CALL(cuCtxSetCurrent, cu_ctxt);
 #endif
 
 	PSM2_LOG_MSG("entering");

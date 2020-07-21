@@ -95,22 +95,17 @@ static psm2_error_t proto_sdma_init(struct ips_proto *proto,
 				   const psmi_context_t *context);
 
 #ifdef PSM_CUDA
-void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *context, void *obj)
+void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *obj)
 {
-	struct ips_cuda_hostbuf *icb;
-	struct ips_cuda_hostbuf_mpool_cb_context *ctxt =
-		(struct ips_cuda_hostbuf_mpool_cb_context *) context;
-
-	icb = (struct ips_cuda_hostbuf *)obj;
+	struct ips_cuda_hostbuf *icb = (struct ips_cuda_hostbuf *)obj;
 	if (is_alloc) {
-		PSMI_CUDA_CALL(cuMemHostAlloc,
-			       (void **) &icb->host_buf,
-			       ctxt->bufsz,
-			       CU_MEMHOSTALLOC_PORTABLE);
-		PSMI_CUDA_CALL(cuEventCreate, &icb->copy_status, CU_EVENT_DEFAULT);
+		icb->host_buf = NULL;
+		icb->copy_status = NULL;
 	} else {
-		if (icb->host_buf) {
+		if (icb->host_buf != NULL) {
 			PSMI_CUDA_CALL(cuMemFreeHost, icb->host_buf);
+		}
+		if (icb->copy_status != NULL) {
 			PSMI_CUDA_CALL(cuEventDestroy, icb->copy_status);
 		}
 	}
@@ -520,10 +515,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 
 	if (protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED) {
 #ifdef PSM_CUDA
-		if (PSMI_IS_CUDA_ENABLED) {
-			PSMI_CUDA_CALL(cuStreamCreate,
-				   &proto->cudastream_send, CU_STREAM_NON_BLOCKING);
-		}
+		proto->cudastream_send = NULL;
 #endif
 		proto->scbc_rv = NULL;
 		if ((err = ips_protoexp_init(context, proto, protoexp_flags,
@@ -635,14 +627,34 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 				PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
 				(union psmi_envvar_val)0, /* Disabled by default */
 				&env_gpudirect_rdma);
+        /* Use GPUDirect RDMA for SDMA send? */
+        union psmi_envvar_val env_gpudirect_rdma_send;
+        psmi_getenv("PSM2_GPUDIRECT_RDMA_SEND",
+                                "Use GPUDirect RDMA support to allow the HFI to directly"
+                                " read from the GPU for SDMA.  Requires driver"
+                                " support.(default is disabled i.e. 0)",
+                                PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
+                                (union psmi_envvar_val)0, /* Disabled by default */
+                                &env_gpudirect_rdma_send);
+ 
+        /* Use GPUDirect RDMA for recv? */
+        union psmi_envvar_val env_gpudirect_rdma_recv;
+        psmi_getenv("PSM2_GPUDIRECT_RDMA_RECV",
+                                "Use GPUDirect RDMA support to allow the HFI to directly"
+                                " write into GPU.  Requires driver support.(default is"
+                                " disabled i.e. 0)",
+                                PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
+                                (union psmi_envvar_val)0, /* Disabled by default */
+                                &env_gpudirect_rdma_recv);
+
 	/* The following cases need to be handled:
 	 * 1) GPU DIRECT is turned off but GDR COPY is turned on by the user or
 	 *    by default - Turn off GDR COPY
 	 * 2) GPU DIRECT is on but GDR COPY is turned off by the user - Leave
 	 *.   this config as it is.
 	 */
-	if (!env_gpudirect_rdma.e_uint)
-		is_gdr_copy_enabled = 0;
+        if (!env_gpudirect_rdma.e_uint && !env_gpudirect_rdma_send.e_uint && !env_gpudirect_rdma_recv.e_uint)		
+                is_gdr_copy_enabled = 0;
 
 	/* Default Send threshold for Gpu-direct set to 30000 */
 	union psmi_envvar_val env_gpudirect_send_thresh;
@@ -659,7 +671,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 		    (union psmi_envvar_val)UINT_MAX, &env_gpudirect_recv_thresh);
 	gpudirect_recv_threshold = env_gpudirect_recv_thresh.e_uint;
 
-	if (env_gpudirect_rdma.e_uint && device_support_gpudirect) {
+	if (env_gpudirect_rdma.e_uint && device_support_gpudirect()) {
 		if (PSMI_IS_CUDA_DISABLED ||
 			/* All pio, No SDMA*/
 			(proto->flags & IPS_PROTO_FLAG_SPIO) ||
@@ -675,16 +687,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 		 * experimentation and will not be documented for any customers.
 		 */
 		/* Use GPUDirect RDMA for SDMA send? */
-		union psmi_envvar_val env_gpudirect_rdma_send;
-		psmi_getenv("PSM2_GPUDIRECT_RDMA_SEND",
-					"Use GPUDirect RDMA support to allow the HFI to directly"
-					" read from the GPU for SDMA.  Requires driver"
-					" support.(default is disabled i.e. 0)",
-					PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
-					(union psmi_envvar_val)0, /* Disabled by default */
-					&env_gpudirect_rdma_send);
-
-		if (env_gpudirect_rdma_send.e_uint && device_support_gpudirect) {
+		if (env_gpudirect_rdma_send.e_uint && device_support_gpudirect()) {
 			if (PSMI_IS_CUDA_DISABLED ||
 				/* All pio, No SDMA*/
 				(proto->flags & IPS_PROTO_FLAG_SPIO))
@@ -695,16 +698,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 			proto->flags |= IPS_PROTO_FLAG_GPUDIRECT_RDMA_SEND;
 		}
 		/* Use GPUDirect RDMA for recv? */
-		union psmi_envvar_val env_gpudirect_rdma_recv;
-		psmi_getenv("PSM2_GPUDIRECT_RDMA_RECV",
-					"Use GPUDirect RDMA support to allow the HFI to directly"
-					" write into GPU.  Requires driver support.(default is"
-					" disabled i.e. 0)",
-					PSMI_ENVVAR_LEVEL_USER, PSMI_ENVVAR_TYPE_UINT_FLAGS,
-					(union psmi_envvar_val)0, /* Disabled by default */
-					&env_gpudirect_rdma_recv);
-
-		if (env_gpudirect_rdma_recv.e_uint && device_support_gpudirect) {
+		if (env_gpudirect_rdma_recv.e_uint && device_support_gpudirect()) {
 			if (PSMI_IS_CUDA_DISABLED ||
 				!(protoexp_flags & IPS_PROTOEXP_FLAG_ENABLED))
 					err = psmi_handle_error(PSMI_EP_NORETURN,
@@ -734,9 +728,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 			psmi_mpool_create_for_cuda(sizeof(struct ips_cuda_hostbuf),
 						   chunksz, max_elements, 0,
 						   UNDEFINED, NULL, NULL,
-						   psmi_cuda_hostbuf_alloc_func,
-						   (void *)
-						   &proto->cuda_hostbuf_send_cfg);
+						   psmi_cuda_hostbuf_alloc_func);
 
 		if (proto->cuda_hostbuf_pool_send == NULL) {
 			err = psmi_handle_error(proto->ep, PSM2_NO_MEMORY,
@@ -750,9 +742,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 			psmi_mpool_create_for_cuda(sizeof(struct ips_cuda_hostbuf),
 						   chunksz, max_elements, 0,
 						   UNDEFINED, NULL, NULL,
-						   psmi_cuda_hostbuf_alloc_func,
-						   (void *)
-						   &proto->cuda_hostbuf_small_send_cfg);
+						   psmi_cuda_hostbuf_alloc_func);
 
 		if (proto->cuda_hostbuf_pool_small_send == NULL) {
 			err = psmi_handle_error(proto->ep, PSM2_NO_MEMORY,
@@ -928,7 +918,7 @@ ips_proto_fini(struct ips_proto *proto, int force, uint64_t timeout_in)
 #endif
 
 #ifdef PSM_CUDA
-	if (PSMI_IS_CUDA_ENABLED) {
+	if (PSMI_IS_CUDA_ENABLED && proto->cudastream_send) {
 		PSMI_CUDA_CALL(cuStreamDestroy, proto->cudastream_send);
 	}
 #endif
