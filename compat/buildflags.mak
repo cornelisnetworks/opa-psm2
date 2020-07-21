@@ -57,19 +57,11 @@ export os ?= $(shell uname -s | tr '[A-Z]' '[a-z]')
 export arch := $(shell uname -m | sed -e 's,\(i[456]86\|athlon$$\),i386,')
 export CCARCH ?= gcc
 
-ifeq (${CCARCH},gcc)
-	export CC := gcc
+ifeq (${CCARCH},$(filter ${CCARCH},gcc gcc4 icc clang))
+	export CC := ${CCARCH}
 else
-	ifeq (${CCARCH},gcc4)
-		export CC := gcc4
-	else
-		ifeq (${CCARCH},icc)
-				 export CC := icc
-		else
-				 anerr := $(error Unknown C compiler arch: ${CCARCH})
-		endif # ICC
-	endif # gcc4
-endif # gcc
+	anerr := $(error Unknown C compiler arch: ${CCARCH})
+endif
 
 BASECFLAGS += $(BASE_FLAGS)
 LDFLAGS += $(BASE_FLAGS)
@@ -90,7 +82,7 @@ ifeq (${CCARCH},icc)
     BASECFLAGS += -O3 -g3
     LDFLAGS += -static-intel
 else
-	ifeq (${CCARCH},gcc)
+	ifeq (${CCARCH},$(filter ${CCARCH},gcc clang))
 	    BASECFLAGS += -Wno-strict-aliasing
 	else
 		ifneq (${CCARCH},gcc4)

@@ -60,19 +60,11 @@ endif
 export os ?= $(shell uname -s | tr '[A-Z]' '[a-z]')
 export arch := $(shell uname -m | sed -e 's,\(i[456]86\|athlon$$\),i386,')
 
-ifeq (${CCARCH},gcc)
-	export CC := gcc
+ifeq (${CCARCH},$(filter ${CCARCH},gcc gcc4 icc clang))
+	export CC := ${CCARCH}
 else
-	ifeq (${CCARCH},gcc4)
-		export CC := gcc4
-	else
-		ifeq (${CCARCH},icc)
-		     export CC := icc
-		else
-		     anerr := $(error Unknown C compiler arch: ${CCARCH})
-		endif # ICC
-	endif # gcc4
-endif # gcc
+	anerr := $(error Unknown C compiler arch: ${CCARCH})
+endif
 
 ifeq (${FCARCH},gfortran)
 	export FC := gfortran
@@ -108,48 +100,48 @@ BASECFLAGS +=-Wall $(WERROR)
 # test if compiler supports 32B(AVX2)/64B(AVX512F) move instruction.
 #
 ifeq (${CC},icc)
-  ifeq ($(PSM_DISABLE_AVX2),)
-    MAVX2=-xATOM_SSE4.2 -DPSM_AVX512
-  else
-    MAVX2=-march=core-avx-i
-  endif
+	ifeq ($(PSM_DISABLE_AVX2),)
+		MAVX2=-xATOM_SSE4.2 -DPSM_AVX512
+	else
+		MAVX2=-march=core-avx-i
+	endif
 else
-  ifeq ($(PSM_DISABLE_AVX2),)
-    MAVX2=-mavx2
-  else
-    MAVX2=-mavx
-  endif
+	ifeq ($(PSM_DISABLE_AVX2),)
+		MAVX2=-mavx2
+	else
+		MAVX2=-mavx
+	endif
 endif
 
 ifneq (icc,${CC})
-  ifeq ($(PSM_DISABLE_AVX2),)
-    RET := $(shell echo "int main() {}" | ${CC} ${MAVX2} -E -dM -xc - 2>&1 | grep -q AVX2 ; echo $$?)
-  else
-    RET := $(shell echo "int main() {}" | ${CC} ${MAVX2} -E -dM -xc - 2>&1 | grep -q AVX ; echo $$?)
-    $(warning ***NOTE TO USER**** Disabling AVX2 will harm performance)
-  endif
+	ifeq ($(PSM_DISABLE_AVX2),)
+		RET := $(shell echo "int main() {}" | ${CC} ${MAVX2} -E -dM -xc - 2>&1 | grep -q AVX2 ; echo $$?)
+	else
+		RET := $(shell echo "int main() {}" | ${CC} ${MAVX2} -E -dM -xc - 2>&1 | grep -q AVX ; echo $$?)
+		$(warning ***NOTE TO USER**** Disabling AVX2 will harm performance)
+	endif
 
-  ifeq (0,${RET})
-      BASECFLAGS += ${MAVX2}
-  else
-      $(error Compiler does not support ${MAVX2} )
-  endif
+	ifeq (0,${RET})
+		BASECFLAGS += ${MAVX2}
+	else
+		$(error Compiler does not support ${MAVX2} )
+	endif
 else
-    BASECFLAGS += ${MAVX2}
+		BASECFLAGS += ${MAVX2}
 endif
 
 # This support is dynamic at runtime, so is OK to enable as long as compiler can generate
 # the code.
 ifneq (,${PSM_AVX512})
-  ifneq (icc,${CC})
-    RET := $(shell echo "int main() {}" | ${CC} -mavx512f -E -dM -xc - 2>&1 | grep -q AVX512 ; echo $$?)
-    ifeq (0,${RET})
-      BASECFLAGS += -mavx512f
-    else
-        $(error Compiler does not support AVX512 )
-    endif
-    BASECFLAGS += -DPSM_AVX512
-  endif
+	ifneq (icc,${CC})
+		RET := $(shell echo "int main() {}" | ${CC} -mavx512f -E -dM -xc - 2>&1 | grep -q AVX512 ; echo $$?)
+		ifeq (0,${RET})
+			BASECFLAGS += -mavx512f
+		else
+			$(error Compiler does not support AVX512 )
+		endif
+		BASECFLAGS += -DPSM_AVX512
+	endif
 endif
 
 #
@@ -158,42 +150,42 @@ endif
 BASECFLAGS += -D_DEFAULT_SOURCE -D_SVID_SOURCE -D_BSD_SOURCE
 
 ifneq (,${HFI_BRAKE_DEBUG})
-  BASECFLAGS += -DHFI_BRAKE_DEBUG
+	BASECFLAGS += -DHFI_BRAKE_DEBUG
 endif
 ifneq (,${PSM_FI})
-  BASECFLAGS += -DPSM_FI
+	BASECFLAGS += -DPSM_FI
 endif
 ifneq (,${PSM_DEBUG})
-  BASECFLAGS += -O -g3 -DPSM_DEBUG -D_HFI_DEBUGGING -funit-at-a-time -Wp,-D_FORTIFY_SOURCE=2
+	BASECFLAGS += -O -g3 -DPSM_DEBUG -D_HFI_DEBUGGING -funit-at-a-time -Wp,-D_FORTIFY_SOURCE=2
 else
-  BASECFLAGS += -O3 -g3
+	BASECFLAGS += -O3 -g3
 endif
 ifneq (,${PSM_COVERAGE}) # This check must come after PSM_DEBUG to override optimization setting
-  BASECFLAGS += -O -fprofile-arcs -ftest-coverage
-  LDFLAGS += -fprofile-arcs
+	BASECFLAGS += -O -fprofile-arcs -ftest-coverage
+	LDFLAGS += -fprofile-arcs
 endif
 ifneq (,${PSM_LOG})
-   BASECFLAGS += -DPSM_LOG
+	 BASECFLAGS += -DPSM_LOG
 ifneq (,${PSM_LOG_FAST_IO})
-   BASECFLAGS += -DPSM_LOG_FAST_IO
-   PSM2_ADDITIONAL_GLOBALS += psmi_log_fini;psmi_log_message;
+	 BASECFLAGS += -DPSM_LOG_FAST_IO
+	 PSM2_ADDITIONAL_GLOBALS += psmi_log_fini;psmi_log_message;
 endif
 endif
 ifneq (,${PSM_PERF})
-   BASECFLAGS += -DRDPMC_PERF_FRAMEWORK
+	 BASECFLAGS += -DRDPMC_PERF_FRAMEWORK
 endif
 ifneq (,${PSM_HEAP_DEBUG})
-   BASECFLAGS += -DPSM_HEAP_DEBUG
-   PSM2_ADDITIONAL_GLOBALS += _psmi_heapdebug_val_heapallocs;
+	 BASECFLAGS += -DPSM_HEAP_DEBUG
+	 PSM2_ADDITIONAL_GLOBALS += _psmi_heapdebug_val_heapallocs;
 endif
 ifneq (,${PSM_PROFILE})
-  BASECFLAGS += -DPSM_PROFILE
+	BASECFLAGS += -DPSM_PROFILE
 endif
 BASECFLAGS += -DNVIDIA_GPU_DIRECT
 ifneq (,${PSM_CUDA})
-  BASECFLAGS += -DPSM_CUDA
-  CUDA_HOME ?= /usr/local/cuda
-  INCLUDES += -I$(CUDA_HOME)/include
+	BASECFLAGS += -DPSM_CUDA
+	CUDA_HOME ?= /usr/local/cuda
+	INCLUDES += -I$(CUDA_HOME)/include
 endif
 
 BASECFLAGS += -fpic -fPIC -D_GNU_SOURCE
@@ -203,15 +195,16 @@ ASFLAGS += -g3 -fpic
 BASECFLAGS += ${OPA_CFLAGS}
 
 ifeq (${CCARCH},icc)
-    BASECFLAGS += -fpic -fPIC -D_GNU_SOURCE -DPACK_STRUCT_STL=packed,
-    LDFLAGS += -static-intel
+	BASECFLAGS += -fpic -fPIC -D_GNU_SOURCE -DPACK_STRUCT_STL=packed,
+	LDFLAGS += -static-intel
 else
-	ifeq (${CCARCH},gcc)
-	    BASECFLAGS += -funwind-tables -Wno-strict-aliasing -Wformat-security
+	LDFLAGS += -Wl,--build-id
+	ifeq (${CCARCH},$(filter ${CCARCH},gcc clang))
+		BASECFLAGS += -funwind-tables -Wno-strict-aliasing -Wformat-security
 	else
-	    ifneq (${CCARCH},gcc4)
-		$(error Unknown compiler arch "${CCARCH}")
-	    endif # gcc4
+		ifneq (${CCARCH},gcc4)
+			$(error Unknown compiler arch "${CCARCH}")
+		endif # gcc4
 	endif # gcc
 endif # icc
 

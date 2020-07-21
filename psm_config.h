@@ -153,7 +153,7 @@
 #define MQ_HFI_THRESH_TINY		8
 #define MQ_HFI_THRESH_EGR_SDMA_XEON	34000       /* Eager Xeon blocking */
 #define MQ_HFI_THRESH_EGR_SDMA_PHI2	200000      /* Eager Phi2 blocking */
-#define MQ_HFI_THRESH_EGR_SDMA_SQ_XEON	16000    /* Eager Xeon non-blocking */
+#define MQ_HFI_THRESH_EGR_SDMA_SQ_XEON	16384    /* Eager Xeon non-blocking */
 #define MQ_HFI_THRESH_EGR_SDMA_SQ_PHI2	65536    /* Eager Phi2 non-blocking */
 
 #define MQ_HFI_THRESH_RNDV_PHI2		200000

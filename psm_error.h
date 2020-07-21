@@ -65,7 +65,7 @@
 #define PSMI_EP_NORETURN	    ((psm2_ep_t) -2)
 #define PSMI_EP_LOGEVENT	    ((psm2_ep_t) -3)
 
-psm2_ep_errhandler_t psmi_errhandler_global;
+extern psm2_ep_errhandler_t psmi_errhandler_global;
 
 psm2_error_t MOCKABLE(psmi_handle_error)(psm2_ep_t ep, psm2_error_t error,
 			      const char *buf, ...)

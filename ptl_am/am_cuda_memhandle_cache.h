@@ -59,6 +59,10 @@
 #include "psm_user.h"
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define CUDA_MEMHANDLE_CACHE_SIZE 64
 
 psm2_error_t am_cuda_memhandle_cache_init(uint32_t memcache_size);
@@ -70,6 +74,10 @@ void
 am_cuda_memhandle_release(CUdeviceptr cuda_ipc_dev_ptr);
 
 void am_cuda_memhandle_cache_map_fini();
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
 
 #endif /* _AM_CUDA_MEMHANDLE_CACHE_H */
 

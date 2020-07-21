@@ -71,8 +71,8 @@ Obsoletes: hfi1-psm < 1.0.0
 
 %if "@RPM_NAME_BASEEXT@"
 %package -n @RPM_NAME@@RPM_NAME_BASEEXT@
-%endif
 Summary: Intel PSM2 Libraries
+%endif
 Provides: @RPM_NAME@ = %{version}-%{release}
 Provides: @RPM_NAME@%{_isa} = %{version}-%{release}
 %if 0%{?suse_version}

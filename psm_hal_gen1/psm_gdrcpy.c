@@ -63,9 +63,6 @@
 
 static int gdr_fd;
 
-int is_gdr_copy_enabled;
-
-
 int get_gdr_fd(){
 	return gdr_fd;
 }
@@ -175,7 +172,7 @@ gdr_convert_gpu_to_host_addr(int gdr_fd, unsigned long buf,
 					   ((buf + size - 1) & GPU_PAGE_MASK) -
 					   pageaddr);
 
-	_HFI_VDBG("buf=%p size=%zu pageaddr=%p pagelen=%u flags=0x%x proto=%p\n",
+	_HFI_VDBG("(gpudirect) buf=%p size=%zu pageaddr=%p pagelen=%u flags=0x%x proto=%p\n",
 		(void *)buf, size, (void *)pageaddr, pagelen, flags, proto);
 
 	query_params.query_params_in.gpu_buf_addr = pageaddr;

@@ -87,6 +87,8 @@ uint64_t *shared_affinity_ptr;
 char *sem_affinity_shm_rw_name;
 char *affinity_shm_name;
 
+uint32_t psmi_cpu_model;
+
 #ifdef PSM_CUDA
 int is_cuda_enabled;
 int is_gdr_copy_enabled;
@@ -99,6 +101,42 @@ int is_cuda_primary_context_retain = 0;
 uint32_t cuda_thresh_rndv;
 uint32_t gdr_copy_threshold_send;
 uint32_t gdr_copy_threshold_recv;
+
+void *psmi_cuda_lib;
+CUresult (*psmi_cuInit)(unsigned int  Flags );
+CUresult (*psmi_cuCtxDetach)(CUcontext c);
+CUresult (*psmi_cuCtxGetCurrent)(CUcontext *c);
+CUresult (*psmi_cuCtxSetCurrent)(CUcontext c);
+CUresult (*psmi_cuPointerGetAttribute)(void *data, CUpointer_attribute pa, CUdeviceptr p);
+CUresult (*psmi_cuPointerSetAttribute)(void *data, CUpointer_attribute pa, CUdeviceptr p);
+CUresult (*psmi_cuDeviceCanAccessPeer)(int *canAccessPeer, CUdevice dev, CUdevice peerDev);
+CUresult (*psmi_cuDeviceGet)(CUdevice* device, int  ordinal);
+CUresult (*psmi_cuDeviceGetAttribute)(int* pi, CUdevice_attribute attrib, CUdevice dev);
+CUresult (*psmi_cuDriverGetVersion)(int* driverVersion);
+CUresult (*psmi_cuDeviceGetCount)(int* count);
+CUresult (*psmi_cuStreamCreate)(CUstream* phStream, unsigned int Flags);
+CUresult (*psmi_cuStreamDestroy)(CUstream phStream);
+CUresult (*psmi_cuEventCreate)(CUevent* phEvent, unsigned int Flags);
+CUresult (*psmi_cuEventDestroy)(CUevent hEvent);
+CUresult (*psmi_cuEventQuery)(CUevent hEvent);
+CUresult (*psmi_cuEventRecord)(CUevent hEvent, CUstream hStream);
+CUresult (*psmi_cuEventSynchronize)(CUevent hEvent);
+CUresult (*psmi_cuMemHostAlloc)(void** pp, size_t bytesize, unsigned int Flags);
+CUresult (*psmi_cuMemFreeHost)(void* p);
+CUresult (*psmi_cuMemcpy)(CUdeviceptr dst, CUdeviceptr src, size_t ByteCount);
+CUresult (*psmi_cuMemcpyDtoD)(CUdeviceptr dstDevice, CUdeviceptr srcDevice, size_t ByteCount);
+CUresult (*psmi_cuMemcpyDtoH)(void* dstHost, CUdeviceptr srcDevice, size_t ByteCount);
+CUresult (*psmi_cuMemcpyHtoD)(CUdeviceptr dstDevice, const void* srcHost, size_t ByteCount);
+CUresult (*psmi_cuMemcpyDtoHAsync)(void* dstHost, CUdeviceptr srcDevice, size_t ByteCount, CUstream hStream);
+CUresult (*psmi_cuMemcpyHtoDAsync)(CUdeviceptr dstDevice, const void* srcHost, size_t ByteCount, CUstream hStream);
+CUresult (*psmi_cuIpcGetMemHandle)(CUipcMemHandle* pHandle, CUdeviceptr dptr);
+CUresult (*psmi_cuIpcOpenMemHandle)(CUdeviceptr* pdptr, CUipcMemHandle handle, unsigned int Flags);
+CUresult (*psmi_cuIpcCloseMemHandle)(CUdeviceptr dptr);
+CUresult (*psmi_cuMemGetAddressRange)(CUdeviceptr* pbase, size_t* psize, CUdeviceptr dptr);
+CUresult (*psmi_cuDevicePrimaryCtxGetState)(CUdevice dev, unsigned int* flags, int* active);
+CUresult (*psmi_cuDevicePrimaryCtxRetain)(CUcontext* pctx, CUdevice dev);
+CUresult (*psmi_cuCtxGetDevice)(CUdevice* device);
+CUresult (*psmi_cuDevicePrimaryCtxRelease)(CUdevice device);
 #endif
 
 /*

@@ -220,13 +220,6 @@ Note: It is also possible to use rpm command to install rpm's, but it is recomme
 that one use yum/dnf as rpm tool has issues with name changes and obsoletes tags.
 yum or dnf should be better able to resolve dependency issues.
 
-TESTING
-=======
-
-Please see the subdirectory psm_test, starting with the file: psm_test/README for
-code and instructions on testing the psm2 library.  Additionally, the
-directory: psm_test/samples contains sample code to test.
-
 RELATED SOFTWARE TO PSM2
 ========================
 

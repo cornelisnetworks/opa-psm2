@@ -56,6 +56,10 @@
 #ifndef _PSMI_USER_H
 #define _PSMI_USER_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "psm_config.h"
 #include <inttypes.h>
 #include <pthread.h>
@@ -307,42 +311,42 @@ extern int my_gpu_device;
 extern int cuda_lib_version;
 
 extern CUcontext ctxt;
-void *psmi_cuda_lib;
-CUresult (*psmi_cuInit)(unsigned int  Flags );
-CUresult (*psmi_cuCtxDetach)(CUcontext c);
-CUresult (*psmi_cuCtxSetCurrent)(CUcontext c);
-CUresult (*psmi_cuCtxGetCurrent)(CUcontext *c);
-CUresult (*psmi_cuCtxSetCurrent)(CUcontext c);
-CUresult (*psmi_cuPointerGetAttribute)(void *data, CUpointer_attribute pa, CUdeviceptr p);
-CUresult (*psmi_cuPointerSetAttribute)(void *data, CUpointer_attribute pa, CUdeviceptr p);
-CUresult (*psmi_cuDeviceCanAccessPeer)(int *canAccessPeer, CUdevice dev, CUdevice peerDev);
-CUresult (*psmi_cuDeviceGet)(CUdevice* device, int  ordinal);
-CUresult (*psmi_cuDeviceGetAttribute)(int* pi, CUdevice_attribute attrib, CUdevice dev);
-CUresult (*psmi_cuDriverGetVersion)(int* driverVersion);
-CUresult (*psmi_cuDeviceGetCount)(int* count);
-CUresult (*psmi_cuStreamCreate)(CUstream* phStream, unsigned int Flags);
-CUresult (*psmi_cuStreamDestroy)(CUstream phStream);
-CUresult (*psmi_cuEventCreate)(CUevent* phEvent, unsigned int Flags);
-CUresult (*psmi_cuEventDestroy)(CUevent hEvent);
-CUresult (*psmi_cuEventQuery)(CUevent hEvent);
-CUresult (*psmi_cuEventRecord)(CUevent hEvent, CUstream hStream);
-CUresult (*psmi_cuEventSynchronize)(CUevent hEvent);
-CUresult (*psmi_cuMemHostAlloc)(void** pp, size_t bytesize, unsigned int Flags);
-CUresult (*psmi_cuMemFreeHost)(void* p);
-CUresult (*psmi_cuMemcpy)(CUdeviceptr dst, CUdeviceptr src, size_t ByteCount);
-CUresult (*psmi_cuMemcpyDtoD)(CUdeviceptr dstDevice, CUdeviceptr srcDevice, size_t ByteCount);
-CUresult (*psmi_cuMemcpyDtoH)(void* dstHost, CUdeviceptr srcDevice, size_t ByteCount);
-CUresult (*psmi_cuMemcpyHtoD)(CUdeviceptr dstDevice, const void* srcHost, size_t ByteCount);
-CUresult (*psmi_cuMemcpyDtoHAsync)(void* dstHost, CUdeviceptr srcDevice, size_t ByteCount, CUstream hStream);
-CUresult (*psmi_cuMemcpyHtoDAsync)(CUdeviceptr dstDevice, const void* srcHost, size_t ByteCount, CUstream hStream);
-CUresult (*psmi_cuIpcGetMemHandle)(CUipcMemHandle* pHandle, CUdeviceptr dptr);
-CUresult (*psmi_cuIpcOpenMemHandle)(CUdeviceptr* pdptr, CUipcMemHandle handle, unsigned int Flags);
-CUresult (*psmi_cuIpcCloseMemHandle)(CUdeviceptr dptr);
-CUresult (*psmi_cuMemGetAddressRange)(CUdeviceptr* pbase, size_t* psize, CUdeviceptr dptr);
-CUresult (*psmi_cuDevicePrimaryCtxGetState)(CUdevice dev, unsigned int* flags, int* active);
-CUresult (*psmi_cuDevicePrimaryCtxRetain)(CUcontext* pctx, CUdevice dev);
-CUresult (*psmi_cuCtxGetDevice)(CUdevice* device);
-CUresult (*psmi_cuDevicePrimaryCtxRelease)(CUdevice device);
+extern void *psmi_cuda_lib;
+
+extern CUresult (*psmi_cuInit)(unsigned int  Flags );
+extern CUresult (*psmi_cuCtxDetach)(CUcontext c);
+extern CUresult (*psmi_cuCtxGetCurrent)(CUcontext *c);
+extern CUresult (*psmi_cuCtxSetCurrent)(CUcontext c);
+extern CUresult (*psmi_cuPointerGetAttribute)(void *data, CUpointer_attribute pa, CUdeviceptr p);
+extern CUresult (*psmi_cuPointerSetAttribute)(void *data, CUpointer_attribute pa, CUdeviceptr p);
+extern CUresult (*psmi_cuDeviceCanAccessPeer)(int *canAccessPeer, CUdevice dev, CUdevice peerDev);
+extern CUresult (*psmi_cuDeviceGet)(CUdevice* device, int  ordinal);
+extern CUresult (*psmi_cuDeviceGetAttribute)(int* pi, CUdevice_attribute attrib, CUdevice dev);
+extern CUresult (*psmi_cuDriverGetVersion)(int* driverVersion);
+extern CUresult (*psmi_cuDeviceGetCount)(int* count);
+extern CUresult (*psmi_cuStreamCreate)(CUstream* phStream, unsigned int Flags);
+extern CUresult (*psmi_cuStreamDestroy)(CUstream phStream);
+extern CUresult (*psmi_cuEventCreate)(CUevent* phEvent, unsigned int Flags);
+extern CUresult (*psmi_cuEventDestroy)(CUevent hEvent);
+extern CUresult (*psmi_cuEventQuery)(CUevent hEvent);
+extern CUresult (*psmi_cuEventRecord)(CUevent hEvent, CUstream hStream);
+extern CUresult (*psmi_cuEventSynchronize)(CUevent hEvent);
+extern CUresult (*psmi_cuMemHostAlloc)(void** pp, size_t bytesize, unsigned int Flags);
+extern CUresult (*psmi_cuMemFreeHost)(void* p);
+extern CUresult (*psmi_cuMemcpy)(CUdeviceptr dst, CUdeviceptr src, size_t ByteCount);
+extern CUresult (*psmi_cuMemcpyDtoD)(CUdeviceptr dstDevice, CUdeviceptr srcDevice, size_t ByteCount);
+extern CUresult (*psmi_cuMemcpyDtoH)(void* dstHost, CUdeviceptr srcDevice, size_t ByteCount);
+extern CUresult (*psmi_cuMemcpyHtoD)(CUdeviceptr dstDevice, const void* srcHost, size_t ByteCount);
+extern CUresult (*psmi_cuMemcpyDtoHAsync)(void* dstHost, CUdeviceptr srcDevice, size_t ByteCount, CUstream hStream);
+extern CUresult (*psmi_cuMemcpyHtoDAsync)(CUdeviceptr dstDevice, const void* srcHost, size_t ByteCount, CUstream hStream);
+extern CUresult (*psmi_cuIpcGetMemHandle)(CUipcMemHandle* pHandle, CUdeviceptr dptr);
+extern CUresult (*psmi_cuIpcOpenMemHandle)(CUdeviceptr* pdptr, CUipcMemHandle handle, unsigned int Flags);
+extern CUresult (*psmi_cuIpcCloseMemHandle)(CUdeviceptr dptr);
+extern CUresult (*psmi_cuMemGetAddressRange)(CUdeviceptr* pbase, size_t* psize, CUdeviceptr dptr);
+extern CUresult (*psmi_cuDevicePrimaryCtxGetState)(CUdevice dev, unsigned int* flags, int* active);
+extern CUresult (*psmi_cuDevicePrimaryCtxRetain)(CUcontext* pctx, CUdevice dev);
+extern CUresult (*psmi_cuCtxGetDevice)(CUdevice* device);
+extern CUresult (*psmi_cuDevicePrimaryCtxRelease)(CUdevice device);
 
 #define PSMI_CUDA_CALL(func, args...) do {				\
 		CUresult cudaerr;					\
@@ -369,6 +373,9 @@ CUresult (*psmi_cuDevicePrimaryCtxRelease)(CUdevice device);
  * Invoker must provide 'CUresult cudaerr' in invoked scope
  * so invoker can inspect whether cudaerr == CUDA_SUCCESS or
  * cudaerr == except_err after expanded code is executed.
+ *
+ * As except_err is an allowed value, message is printed at
+ * DBG level.
  */
 #define PSMI_CUDA_CALL_EXCEPT(except_err, func, args...) do { \
 		cudaerr = psmi_##func(args);				\
@@ -385,8 +392,8 @@ CUresult (*psmi_cuDevicePrimaryCtxRelease)(CUdevice device);
 				PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,	\
 				"Error returned from CUDA function.\n");\
 		} else if (cudaerr == except_err) { \
-			_HFI_INFO( \
-				"CUDA warning: %s() (at %s:%d)"		\
+			_HFI_DBG( \
+				"CUDA non-zero return value: %s() (at %s:%d)"		\
 				"returned %d\n",			\
 				#func, __FILE__, __LINE__, cudaerr);	\
 		} \
@@ -527,5 +534,9 @@ void psmi_cuda_set_attr_sync_memops(const void *ubuf)
 #endif /* PSM_CUDA */
 
 #define COMPILE_TIME_ASSERT(NAME,COND) extern char NAME[1/ COND]
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
 
 #endif /* _PSMI_USER_H */

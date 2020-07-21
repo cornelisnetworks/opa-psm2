@@ -152,13 +152,14 @@ static uint64_t cache_hit_counter;
 static uint64_t cache_miss_counter;
 static uint64_t cache_evict_counter;
 static uint64_t cache_collide_counter;
+static uint64_t cache_clear_counter;
 
 static void print_cuda_memhandle_cache_stats(void)
 {
-	_HFI_DBG("enabled=%u,size=%u,hit=%lu,miss=%lu,evict=%lu,collide=%lu\n",
+	_HFI_DBG("enabled=%u,size=%u,hit=%lu,miss=%lu,evict=%lu,collide=%lu,clear=%lu\n",
 		cuda_memhandle_cache_enabled, cuda_memhandle_cache_size,
 		cache_hit_counter, cache_miss_counter,
-		cache_evict_counter, cache_collide_counter);
+		cache_evict_counter, cache_collide_counter, cache_clear_counter);
 }
 
 /*
@@ -184,6 +185,9 @@ static psm2_error_t
 am_cuda_memhandle_mpool_init(uint32_t memcache_size)
 {
 	psm2_error_t err;
+	if (memcache_size < 1)
+		return PSM2_PARAM_ERR;
+
 	cuda_memhandle_cache_size = memcache_size;
 	/* Creating a memory pool of size PSM2_CUDA_MEMCACHE_SIZE
 	 * which includes the Root and NIL items
@@ -216,14 +220,24 @@ psm2_error_t am_cuda_memhandle_cache_init(uint32_t memcache_size)
 	if (root == NULL)
 		return PSM2_NO_MEMORY;
 	nil_item = (cl_map_item_t *)psmi_calloc(NULL, UNDEFINED, 1, sizeof(cl_map_item_t));
-	if (nil_item == NULL)
+	if (nil_item == NULL) {
+		psmi_free(root);
 		return PSM2_NO_MEMORY;
+	}
+
 	nil_item->payload.start = 0;
 	nil_item->payload.epid = 0;
 	nil_item->payload.length = 0;
 	cuda_memhandle_cache_enabled = 1;
 	ips_cl_qmap_init(&cuda_memhandle_cachemap,root,nil_item);
 	NELEMS = 0;
+
+	cache_hit_counter = 0;
+	cache_miss_counter = 0;
+	cache_evict_counter = 0;
+	cache_collide_counter = 0;
+	cache_clear_counter = 0;
+
 	return PSM2_OK;
 }
 
@@ -231,13 +245,22 @@ void am_cuda_memhandle_cache_map_fini()
 {
 	print_cuda_memhandle_cache_stats();
 
-	if (cuda_memhandle_cachemap.nil_item)
+	if (cuda_memhandle_cachemap.nil_item) {
 		psmi_free(cuda_memhandle_cachemap.nil_item);
-	if (cuda_memhandle_cachemap.root)
+		cuda_memhandle_cachemap.nil_item = NULL;
+	}
+
+	if (cuda_memhandle_cachemap.root) {
 		psmi_free(cuda_memhandle_cachemap.root);
-	if (cuda_memhandle_cache_enabled)
+		cuda_memhandle_cachemap.root = NULL;
+	}
+
+	if (cuda_memhandle_cache_enabled) {
 		psmi_mpool_destroy(cuda_memhandle_mpool);
-	return;
+		cuda_memhandle_cache_enabled = 0;
+	}
+
+	cuda_memhandle_cache_size = 0;
 }
 
 /*
@@ -448,6 +471,7 @@ am_cuda_memhandle_acquire(uintptr_t sbuf, CUipcMemHandle* handle,
 		// remote memory already mapped. Close all handles, clear cache,
 		// and try again
 		am_cuda_memhandle_cache_clear();
+		cache_clear_counter++;
 		PSMI_CUDA_CALL(cuIpcOpenMemHandle, &cuda_ipc_dev_ptr, *handle,
 			CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
 	}

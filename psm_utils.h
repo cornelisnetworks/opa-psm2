@@ -329,7 +329,7 @@ uint32_t psmi_crc(unsigned char *buf, int len);
 /*
  * Global model so we can tune defaults better for specific cpu's
  */
-uint32_t psmi_cpu_model;
+extern uint32_t psmi_cpu_model;
 
 /*
  * Diagnostics, all in psm_diags.c
