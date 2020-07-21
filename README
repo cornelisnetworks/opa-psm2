@@ -67,6 +67,7 @@ Contains the following sections:
 - INSTALLING
   * INSTALLING USING MAKEFILE
   * INSTALLING USING EITHER YUM OR DNF
+- TESTING
 - RELATED SOFTWARE TO PSM2
 - SUPPORTING DOCUMENTATION
 
@@ -249,24 +250,6 @@ build is performed. All compute nodes additionally should have the PSM2 runtime
 libraries available on them. Open MPI provides a standard configure, make and
 make install mechanism which will detect and build the relevant PSM2 network
 modules for Open MPI once the header and runtime files are detected.
-
-Open MPI 4.1.x, OFI BTL, and high PPN jobs
-----------------
-Open MPI added the OFI BTL for one-sided communication. On an OPA fabric, the
-OFI BTL may use the PSM2 OFI provider underneath. If PSM2 is in-use as both
-the MTL (directly or via OFI) and the BTL (via OFI), then each rank in the
-Open MPI job will require two PSM2 endpoints and PSM2 context-sharing will
-be disabled.
-
-In this case, total number of PSM2 ranks on a node can be no more than:
-  (num_hfi * num_user_contexts)/2
-Where num_user_contexts is typically equal to the number of physical CPU
-cores on that node.
-
-If your job does not require an inter-node BTL (e.g. OFI), then you can
-disable the OFI BTL in one of two ways:
-  1. When building Open MPI, specify '--with-ofi=no' when you run 'configure'.
-  2. When running your Open MPI job, add '-mca btl self,vader'.
 
 MVAPICH2 support
 ----------------

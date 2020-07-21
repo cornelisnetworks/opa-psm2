@@ -101,7 +101,6 @@ struct mpool {
 
 #ifdef PSM_CUDA
 	alloc_dealloc_callback_fn_t mp_alloc_dealloc_cb;
-	void *mp_alloc_dealloc_cb_context;
 #endif
 };
 
@@ -230,7 +229,7 @@ psmi_mpool_create_for_cuda(size_t obj_size, uint32_t num_obj_per_chunk,
 			   uint32_t num_obj_max_total, int flags,
 			   psmi_memtype_t statstype,
 			   non_empty_callback_fn_t cb, void *context,
-			   alloc_dealloc_callback_fn_t ad_cb, void *ad_context)
+			   alloc_dealloc_callback_fn_t ad_cb)
 {
 	mpool_t mp;
 
@@ -242,7 +241,6 @@ psmi_mpool_create_for_cuda(size_t obj_size, uint32_t num_obj_per_chunk,
 		return NULL;
 
 	mp->mp_alloc_dealloc_cb = ad_cb;
-	mp->mp_alloc_dealloc_cb_context = ad_context;
 
 	if (psmi_mpool_allocate_chunk(mp) != PSM2_OK) {
 		psmi_mpool_destroy(mp);
@@ -418,7 +416,6 @@ void psmi_mpool_chunk_dealloc(mpool_t mp, int idx)
 	int j;
 	for (j = 0; j < mp->mp_num_obj_per_chunk; j++)
 		mp->mp_alloc_dealloc_cb(0 /* is not alloc */,
-					mp->mp_alloc_dealloc_cb_context,
 					((void *) mp->mp_elm_vector[idx]) +
 					j * mp->mp_elm_size +
 					sizeof(struct mpool_element));
@@ -509,7 +506,6 @@ static int psmi_mpool_allocate_chunk(mpool_t mp)
 #ifdef PSM_CUDA
 		if (mp->mp_alloc_dealloc_cb)
 			mp->mp_alloc_dealloc_cb(1 /* is alloc */,
-						mp->mp_alloc_dealloc_cb_context,
 						chunk + i * mp->mp_elm_size +
 						sizeof(struct mpool_element));
 #endif

@@ -70,8 +70,7 @@
 
 typedef struct mpool *mpool_t;
 typedef void (*non_empty_callback_fn_t) (void *context);
-typedef void (*alloc_dealloc_callback_fn_t) (int is_alloc, void *context,
-					     void *chunk);
+typedef void (*alloc_dealloc_callback_fn_t) (int is_alloc, void *chunk);
 
 mpool_t
 MOCKABLE(psmi_mpool_create)(size_t obj_size, uint32_t num_obj_per_chunk,
@@ -84,8 +83,7 @@ mpool_t psmi_mpool_create_for_cuda(size_t obj_size, uint32_t num_obj_per_chunk,
 				   uint32_t num_obj_max_total, int flags,
 				   psmi_memtype_t statstype,
 				   non_empty_callback_fn_t cb, void *context,
-				   alloc_dealloc_callback_fn_t ad_cb,
-				   void *ad_context);
+				   alloc_dealloc_callback_fn_t ad_cb);
 
 void psmi_mpool_destroy(mpool_t mp);
 

@@ -296,6 +296,7 @@ void psmi_profile_reblock(int did_no_progress) __attribute__ ((weak));
 #endif
 
 #ifdef PSM_CUDA
+
 #include <cuda.h>
 #include <driver_types.h>
 
@@ -305,12 +306,12 @@ void psmi_profile_reblock(int did_no_progress) __attribute__ ((weak));
 
 extern int is_cuda_enabled;
 extern int is_gdr_copy_enabled;
-extern int device_support_gpudirect;
-extern int gpu_p2p_supported;
+extern int _device_support_gpudirect;
+extern int _gpu_p2p_supported;
 extern int my_gpu_device;
 extern int cuda_lib_version;
 
-extern CUcontext ctxt;
+extern CUcontext cu_ctxt;
 extern void *psmi_cuda_lib;
 
 extern CUresult (*psmi_cuInit)(unsigned int  Flags );
@@ -326,6 +327,7 @@ extern CUresult (*psmi_cuDriverGetVersion)(int* driverVersion);
 extern CUresult (*psmi_cuDeviceGetCount)(int* count);
 extern CUresult (*psmi_cuStreamCreate)(CUstream* phStream, unsigned int Flags);
 extern CUresult (*psmi_cuStreamDestroy)(CUstream phStream);
+extern CUresult (*psmi_cuStreamSynchronize)(CUstream phStream);
 extern CUresult (*psmi_cuEventCreate)(CUevent* phEvent, unsigned int Flags);
 extern CUresult (*psmi_cuEventDestroy)(CUevent hEvent);
 extern CUresult (*psmi_cuEventQuery)(CUevent hEvent);
@@ -348,14 +350,34 @@ extern CUresult (*psmi_cuDevicePrimaryCtxRetain)(CUcontext* pctx, CUdevice dev);
 extern CUresult (*psmi_cuCtxGetDevice)(CUdevice* device);
 extern CUresult (*psmi_cuDevicePrimaryCtxRelease)(CUdevice device);
 
+static int check_set_cuda_ctxt(void)
+{
+	CUresult err;
+	CUcontext tmpctxt = {0};
+
+	if (!psmi_cuCtxGetCurrent || !psmi_cuCtxSetCurrent)
+		return 0;
+
+	err = psmi_cuCtxGetCurrent(&tmpctxt);
+	if (!err) {
+		if (!tmpctxt && cu_ctxt) {
+			err = psmi_cuCtxSetCurrent(cu_ctxt);
+			return !!err;
+		} else if (tmpctxt && !cu_ctxt) {
+			cu_ctxt = tmpctxt;
+		}
+	}
+	return 0;
+}
+
 #define PSMI_CUDA_CALL(func, args...) do {				\
 		CUresult cudaerr;					\
+		if (check_set_cuda_ctxt()) { \
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR, \
+				"Failed to set/synchronize CUDA context.\n"); \
+		} \
 		cudaerr = psmi_##func(args);				\
 		if (cudaerr != CUDA_SUCCESS) {				\
-			if (ctxt == NULL)				\
-				_HFI_ERROR(				\
-				"Check if CUDA is initialized"	\
-				"before psm2_ep_open call \n");		\
 			_HFI_ERROR(					\
 				"CUDA failure: %s() (at %s:%d)"		\
 				"returned %d\n",			\
@@ -365,6 +387,92 @@ extern CUresult (*psmi_cuDevicePrimaryCtxRelease)(CUdevice device);
 				"Error returned from CUDA function.\n");\
 		}							\
 	} while (0)
+
+PSMI_ALWAYS_INLINE(
+int device_support_gpudirect())
+{
+	if (_device_support_gpudirect > -1) return _device_support_gpudirect;
+
+	int num_devices, dev;
+	
+	/* Check if all devices support Unified Virtual Addressing. */
+	PSMI_CUDA_CALL(cuDeviceGetCount, &num_devices);
+
+	_device_support_gpudirect = 1;
+
+	for (dev = 0; dev < num_devices; dev++) {
+		CUdevice device;
+		PSMI_CUDA_CALL(cuDeviceGet, &device, dev);
+		int unifiedAddressing;
+		PSMI_CUDA_CALL(cuDeviceGetAttribute,
+				&unifiedAddressing,
+				CU_DEVICE_ATTRIBUTE_UNIFIED_ADDRESSING,
+				device);
+
+		if (unifiedAddressing !=1) {
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_EP_DEVICE_FAILURE,
+				"CUDA device %d does not support Unified Virtual Addressing.\n",
+				dev);
+		}
+
+		int major;
+		PSMI_CUDA_CALL(cuDeviceGetAttribute,
+				&major,
+				CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
+				device);
+		if (major < 3) {
+			_device_support_gpudirect = 0;
+			_HFI_INFO("CUDA device %d does not support GPUDirect RDMA (Non-fatal error)\n", dev);
+		}
+	}
+
+	return _device_support_gpudirect;
+}
+
+#define PSMI_IS_CUDA_ENABLED  likely(is_cuda_enabled)
+#define PSMI_IS_CUDA_DISABLED unlikely(!is_cuda_enabled)
+
+PSMI_ALWAYS_INLINE(
+int gpu_p2p_supported())
+{
+	if (likely(_gpu_p2p_supported > -1)) return _gpu_p2p_supported;
+
+	if (PSMI_IS_CUDA_DISABLED) {
+		_gpu_p2p_supported=0; 
+		return 0;
+	}
+
+	int num_devices, dev;
+	
+	/* Check which devices the current device has p2p access to. */
+	CUdevice current_device;
+	PSMI_CUDA_CALL(cuCtxGetDevice, &current_device);
+	PSMI_CUDA_CALL(cuDeviceGetCount, &num_devices);
+
+	_gpu_p2p_supported = 0;
+
+	for (dev = 0; dev < num_devices; dev++) {
+		CUdevice device;
+		PSMI_CUDA_CALL(cuDeviceGet, &device, dev);
+
+		if (device != current_device) {
+			int canAccessPeer = 0;
+			PSMI_CUDA_CALL(cuDeviceCanAccessPeer, &canAccessPeer,
+					current_device, device);
+
+			if (canAccessPeer != 1)
+				_HFI_DBG("CUDA device %d does not support P2P from current device (Non-fatal error)\n", dev);
+			else
+				_gpu_p2p_supported |= (1 << device);
+		} else {
+			/* Always support p2p on the same GPU */
+			my_gpu_device = device;
+			_gpu_p2p_supported |= (1 << device);
+		}
+	}
+
+	return _gpu_p2p_supported;
+}
 
 /**
  * Similar to PSMI_CUDA_CALL() except does not error out
@@ -378,9 +486,13 @@ extern CUresult (*psmi_cuDevicePrimaryCtxRelease)(CUdevice device);
  * DBG level.
  */
 #define PSMI_CUDA_CALL_EXCEPT(except_err, func, args...) do { \
+		if (check_set_cuda_ctxt()) { \
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR, \
+				"Failed to set/synchronize CUDA context.\n"); \
+		} \
 		cudaerr = psmi_##func(args);				\
 		if (cudaerr != CUDA_SUCCESS && cudaerr != except_err) {	\
-			if (ctxt == NULL)				\
+			if (cu_ctxt == NULL)				\
 				_HFI_ERROR(				\
 				"Check if CUDA is initialized"	\
 				"before psm2_ep_open call \n");		\
@@ -442,9 +554,6 @@ _psmi_is_cuda_mem(const void *ptr))
 		return 0;
 }
 
-#define PSMI_IS_CUDA_ENABLED  likely(is_cuda_enabled)
-#define PSMI_IS_CUDA_DISABLED unlikely(!is_cuda_enabled)
-
 PSMI_ALWAYS_INLINE(
 int
 _psmi_is_gdr_copy_enabled())
@@ -473,7 +582,7 @@ struct ips_cuda_hostbuf {
 struct ips_cuda_hostbuf_mpool_cb_context {
 	unsigned bufsz;
 };
-void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *context, void *obj);
+void psmi_cuda_hostbuf_alloc_func(int is_alloc, void *obj);
 
 #define CUDA_HOSTBUFFER_LIMITS {				\
 	    .env = "PSM_CUDA_BOUNCEBUFFERS_MAX",		\
