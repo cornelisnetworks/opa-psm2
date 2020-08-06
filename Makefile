@@ -164,7 +164,7 @@ nthreads := $(shell echo $$(( `nproc` * 2 )) )
 # The DISTRO variable is used subsequently for variable
 # behaviors of the 3 distros.
 
-DISTRO := $(shell . /etc/os-release; if [[ "$$ID" == "sle_hpc" ]]; then ID="sles"; fi; echo $$ID)
+DISTRO := $(shell . /etc/os-release; if [ "$$ID" = "sle_hpc" ]; then ID="sles"; fi; echo $$ID)
 
 # By default the following two variables have the following values:
 LIBPSM2_COMPAT_CONF_DIR := /etc
