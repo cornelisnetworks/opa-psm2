@@ -92,8 +92,8 @@ uint32_t psmi_cpu_model;
 #ifdef PSM_CUDA
 int is_cuda_enabled;
 int is_gdr_copy_enabled;
-int device_support_gpudirect;
-int gpu_p2p_supported = 0;
+int _device_support_gpudirect = -1; // -1 indicates "unset". See device_support_gpudirect().
+int _gpu_p2p_supported = -1; // -1 indicates "unset". see gpu_p2p_supported().
 int my_gpu_device = 0;
 int cuda_lib_version;
 int is_driver_gpudirect_enabled;
@@ -116,6 +116,7 @@ CUresult (*psmi_cuDriverGetVersion)(int* driverVersion);
 CUresult (*psmi_cuDeviceGetCount)(int* count);
 CUresult (*psmi_cuStreamCreate)(CUstream* phStream, unsigned int Flags);
 CUresult (*psmi_cuStreamDestroy)(CUstream phStream);
+CUresult (*psmi_cuStreamSynchronize)(CUstream phStream);
 CUresult (*psmi_cuEventCreate)(CUevent* phEvent, unsigned int Flags);
 CUresult (*psmi_cuEventDestroy)(CUevent hEvent);
 CUresult (*psmi_cuEventQuery)(CUevent hEvent);
@@ -217,6 +218,7 @@ int psmi_cuda_lib_load()
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuDeviceGetCount);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuStreamCreate);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuStreamDestroy);
+	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuStreamSynchronize);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuEventCreate);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuEventDestroy);
 	PSMI_CUDA_DLSYM(psmi_cuda_lib, cuEventQuery);
@@ -251,7 +253,6 @@ fail:
 int psmi_cuda_initialize()
 {
 	psm2_error_t err = PSM2_OK;
-	int num_devices, dev;
 
 	PSM2_LOG_MSG("entering");
 	_HFI_VDBG("Enabling CUDA support.\n");
@@ -261,77 +262,6 @@ int psmi_cuda_initialize()
 		goto fail;
 
 	PSMI_CUDA_CALL(cuInit, 0);
-
-	/* Check if CUDA context is available. If not, we are not allowed to
-	 * launch any CUDA API calls */
-	PSMI_CUDA_CALL(cuCtxGetCurrent, &ctxt);
-	if (ctxt == NULL) {
-		_HFI_INFO("Unable to find active CUDA context\n");
-		is_cuda_enabled = 0;
-		err = PSM2_OK;
-		return err;
-	}
-
-	CUdevice current_device;
-	CUcontext primary_ctx;
-	PSMI_CUDA_CALL(cuCtxGetDevice, &current_device);
-	int is_ctx_active;
-	unsigned ctx_flags;
-	PSMI_CUDA_CALL(cuDevicePrimaryCtxGetState, current_device, &ctx_flags,
-			&is_ctx_active);
-	if (!is_ctx_active) {
-		/* There is an issue where certain CUDA API calls create
-		 * contexts but does not make it active which cause the
-		 * driver API call to fail with error 709 */
-		PSMI_CUDA_CALL(cuDevicePrimaryCtxRetain, &primary_ctx,
-				current_device);
-		is_cuda_primary_context_retain = 1;
-	}
-
-	/* Check if all devices support Unified Virtual Addressing. */
-	PSMI_CUDA_CALL(cuDeviceGetCount, &num_devices);
-
-	device_support_gpudirect = 1;
-
-	for (dev = 0; dev < num_devices; dev++) {
-		CUdevice device;
-		PSMI_CUDA_CALL(cuDeviceGet, &device, dev);
-		int unifiedAddressing;
-		PSMI_CUDA_CALL(cuDeviceGetAttribute,
-				&unifiedAddressing,
-				CU_DEVICE_ATTRIBUTE_UNIFIED_ADDRESSING,
-				device);
-
-		if (unifiedAddressing !=1) {
-			_HFI_ERROR("CUDA device %d does not support Unified Virtual Addressing.\n", dev);
-			goto fail;
-		}
-
-		int major;
-		PSMI_CUDA_CALL(cuDeviceGetAttribute,
-				&major,
-				CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
-				device);
-		if (major < 3) {
-			device_support_gpudirect = 0;
-			_HFI_INFO("CUDA device %d does not support GPUDirect RDMA (Non-fatal error)\n", dev);
-		}
-
-		if (device != current_device) {
-			int canAccessPeer = 0;
-			PSMI_CUDA_CALL(cuDeviceCanAccessPeer, &canAccessPeer,
-					current_device, device);
-
-			if (canAccessPeer != 1)
-				_HFI_DBG("CUDA device %d does not support P2P from current device (Non-fatal error)\n", dev);
-			else
-				gpu_p2p_supported |= (1 << device);
-		} else {
-			/* Always support p2p on the same GPU */
-			my_gpu_device = device;
-			gpu_p2p_supported |= (1 << device);
-		}
-	}
 
 	union psmi_envvar_val env_enable_gdr_copy;
 	psmi_getenv("PSM2_GDRCOPY",

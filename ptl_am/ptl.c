@@ -96,8 +96,7 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 		if (req->is_buf_gpu_mem) {
 			PSMI_CUDA_CALL(cuMemcpyDtoD, (CUdeviceptr)req->req_data.buf, cuda_ipc_dev_ptr,
 				       req->req_data.recv_msglen);
-			PSMI_CUDA_CALL(cuEventRecord, req->cuda_ipc_event, 0);
-			PSMI_CUDA_CALL(cuEventSynchronize, req->cuda_ipc_event);
+			PSMI_CUDA_CALL(cuStreamSynchronize, 0);
 		} else
 			PSMI_CUDA_CALL(cuMemcpyDtoH, req->req_data.buf, cuda_ipc_dev_ptr,
 				       req->req_data.recv_msglen);
@@ -129,8 +128,7 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 			 * copies for msg sizes less than 64k. The event record
 			 * and synchronize calls are to guarentee completion.
 			 */
-			PSMI_CUDA_CALL(cuEventRecord, req->cuda_ipc_event, 0);
-			PSMI_CUDA_CALL(cuEventSynchronize, req->cuda_ipc_event);
+			PSMI_CUDA_CALL(cuStreamSynchronize, 0);
 			psmi_free(cuda_ipc_bounce_buf);
 		} else {
 			/* cma can be done in handler context or not. */
