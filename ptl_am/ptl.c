@@ -204,7 +204,7 @@ psmi_am_mq_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 	tag.tag[1] = args[1].u32w0;
 	tag.tag[2] = args[2].u32w1;
 	psmi_assert(toki != NULL);
-	_HFI_VDBG("mq=%p opcode=%d, len=%d, msglen=%d\n",
+	_HFI_VDBG("mq=%p opcode=0x%x, len=%d, msglen=%d\n",
 		  tok->mq, opcode, (int)len, msglen);
 
 	switch (opcode) {

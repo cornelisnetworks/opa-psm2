@@ -1587,7 +1587,7 @@ ips_proto_mq_handle_tiny(struct ips_recvhdrq_event *rcv_ev)
 	 */
 	psmi_assert(msgorder != IPS_MSG_ORDER_PAST);
 
-	_HFI_VDBG("tag=%08x.%08x.%08x opcode=%d, msglen=%d\n",
+	_HFI_VDBG("tag=%08x.%08x.%08x opcode=0x%x, msglen=%d\n",
 		  p_hdr->tag[0], p_hdr->tag[1], p_hdr->tag[2],
 		  OPCODE_TINY, p_hdr->hdr_data.u32w1);
 
@@ -1673,7 +1673,7 @@ ips_proto_mq_handle_short(struct ips_recvhdrq_event *rcv_ev)
 	 */
 	psmi_assert(msgorder != IPS_MSG_ORDER_PAST);
 
-	_HFI_VDBG("tag=%08x.%08x.%08x opcode=%d, msglen=%d\n",
+	_HFI_VDBG("tag=%08x.%08x.%08x opcode=0x%x, msglen=%d\n",
 		  p_hdr->tag[0], p_hdr->tag[1], p_hdr->tag[2],
 		  OPCODE_SHORT, p_hdr->hdr_data.u32w1);
 
@@ -1806,7 +1806,7 @@ ips_proto_mq_handle_eager(struct ips_recvhdrq_event *rcv_ev)
 	 */
 	psmi_assert(msgorder != IPS_MSG_ORDER_PAST);
 
-	_HFI_VDBG("tag=%08x.%08x.%08x opcode=%d, msglen=%d\n",
+	_HFI_VDBG("tag=%08x.%08x.%08x opcode=0x%x, msglen=%d\n",
 		p_hdr->tag[0], p_hdr->tag[1], p_hdr->tag[2],
 		OPCODE_EAGER, p_hdr->hdr_data.u32w1);
 

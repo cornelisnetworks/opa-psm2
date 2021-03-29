@@ -511,7 +511,7 @@ psm2_error_t ips_recvhdrq_progress(struct ips_recvhdrq *recvq)
 					    rcv_ev.recvq->context->psm_hw_ctxt);
 
 			_HFI_VDBG_ALWAYS(
-				"hdrq_head %d, p_hdr: %p, opcode %x, payload %p paylen %d; "
+				"hdrq_head %d, p_hdr: %p, opcode 0x%x, payload %p paylen %d; "
 				"egrhead %x egrtail %x; "
 				"useegrbit %x egrindex %x, egroffset %x, egrindexhead %x\n",
 				state->hdrq_head,
