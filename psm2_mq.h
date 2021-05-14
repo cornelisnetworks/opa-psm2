@@ -519,6 +519,8 @@ psm2_error_t psm2_mq_setopt(psm2_mq_t mq, int option, const void *value);
 #define PSM2_MQ_FLAG_SENDSYNC	0x01
 				/**< MQ Send Force synchronous send */
 
+#define PSM2_MQ_FLAG_GDRCPY_ONLY	0x02
+				/**< only GDRCOPY is allowed for GPU */
 #define PSM2_MQ_REQINVALID	((psm2_mq_req_t)(NULL))
 				/**< MQ request completion value */
 
