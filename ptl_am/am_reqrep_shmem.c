@@ -2099,11 +2099,12 @@ amsh_mq_send_inner(psm2_mq_t mq, psm2_mq_req_t req, psm2_epaddr_t epaddr,
 
 #ifdef PSM_CUDA
 	int gpu_mem = 0;
-	int ep_supports_p2p = (1 << ((am_epaddr_t *) epaddr)->gpuid) & gpu_p2p_supported();
+	int ep_supports_p2p;
 
 	if (PSMI_IS_CUDA_ENABLED && PSMI_IS_CUDA_MEM(ubuf)) {
 		gpu_mem = 1;
 
+		ep_supports_p2p = (1 << ((am_epaddr_t *) epaddr)->gpuid) & gpu_p2p_supported();
 		/* All sends from a gpu buffer use the rendezvous protocol if p2p is supported */
 		if (ep_supports_p2p) {
 			goto do_rendezvous;
