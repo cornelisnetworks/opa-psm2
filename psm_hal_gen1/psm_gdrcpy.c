@@ -61,7 +61,8 @@
 #include "ptl_ips/ips_expected_proto.h"
 #include "opa_user_gen1.h"
 
-static int gdr_fd;
+static int gdr_refcount;
+static int gdr_fd = -1;
 
 int get_gdr_fd(){
 	return gdr_fd;
@@ -204,24 +205,35 @@ gdr_convert_gpu_to_host_addr(int gdr_fd, unsigned long buf,
 }
 
 
-void hfi_gdr_open(){
-	gdr_fd = open(GDR_DEVICE_PATH, O_RDWR);
-	if (-1 == gdr_fd ) {
-		/* Non-Fatal error. If device cannot be found we assume
-		 * that the driver does not support GDR Copy and we fallback
-		 * to sending all GPU messages using rndv protocol
-		 */
-		_HFI_INFO(" Warning: The HFI1 driver installed does not support GPUDirect RDMA"
-				  " fast copy. Turning off GDR fast copy in PSM \n");
-		is_gdr_copy_enabled = 0;
-		return;
+void hfi_gdr_open()
+{
+	if (gdr_fd < 0) {
+		psmi_assert(!gdr_refcount);
+		gdr_fd = open(GDR_DEVICE_PATH, O_RDWR);
+		if (-1 == gdr_fd ) {
+			/* Non-Fatal error. If device cannot be found we assume
+			 * that the driver does not support GDR Copy and we fallback
+			 * to sending all GPU messages using rndv protocol
+			 */
+			_HFI_INFO(" Warning: The HFI1 driver installed does not support GPUDirect RDMA"
+					  " fast copy. Turning off GDR fast copy in PSM \n");
+			is_gdr_copy_enabled = 0;
+			return;
+		}
 	}
-	return;
+	gdr_refcount++;
 }
 
 void hfi_gdr_close()
 {
-	close(GDR_FD);
+	if (gdr_fd > -1) {
+		psmi_assert(gdr_refcount);
+		gdr_refcount--;
+		if (!gdr_refcount) {
+			close(gdr_fd);
+			gdr_fd = -1;
+		}
+	}
 }
 
 #endif

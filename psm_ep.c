@@ -1031,6 +1031,9 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 	char uvalue[6], pvalue[6];
 	int devid_enabled[PTL_MAX_INIT];
 	union psmi_envvar_val devs;
+#ifdef PSM_CUDA
+	int release_gdr = 0;
+#endif
 
 	PSM2_LOG_MSG("entering");
 	PSMI_ERR_UNLESS_INITIALIZED(NULL);
@@ -1086,8 +1089,10 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 	}
 
 #ifdef PSM_CUDA
-	if (PSMI_IS_GDR_COPY_ENABLED)
+	if (PSMI_IS_GDR_COPY_ENABLED) {
 		hfi_gdr_open();
+		release_gdr = 1;
+	}
 #endif
 
 	err = __psm2_ep_open_internal(unique_job_key,
@@ -1141,6 +1146,10 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 	_HFI_VDBG("psm2_ep_open() OK....\n");
 
 fail:
+#ifdef PSM_CUDA
+	if (err && release_gdr)
+		hfi_gdr_close();
+#endif
 	PSMI_UNLOCK(psmi_creation_lock);
 	PSM2_LOG_MSG("leaving");
 	return err;
