@@ -1157,16 +1157,6 @@ psm2_error_t __psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout_in)
 	}
 #endif
 
-#ifdef PSM_CUDA
-	/*
-	 * The close on the gdr fd needs to be called before the
-	 * close on the hfi fd as the the gdr device will hold
-	 * reference count on the hfi device which will make the close
-	 * on the hfi fd return without actually closing the fd.
-	 */
-	if (PSMI_IS_GDR_COPY_ENABLED)
-		hfi_gdr_close();
-#endif
 	union psmi_envvar_val timeout_intval;
 	psm2_ep_t tmp;
 	psm2_mq_t mmq;
@@ -1346,6 +1336,11 @@ psm2_error_t __psm2_ep_close(psm2_ep_t ep, int mode, int64_t timeout_in)
 	}
 
 	PSMI_UNLOCK(psmi_creation_lock);
+
+#ifdef PSM_CUDA
+	if (PSMI_IS_GDR_COPY_ENABLED)
+		hfi_gdr_close();
+#endif
 
 	if (_HFI_PRDBG_ON) {
 		_HFI_PRDBG_ALWAYS("Closed endpoint in %.3f secs\n",
