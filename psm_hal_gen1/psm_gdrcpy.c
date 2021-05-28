@@ -64,7 +64,8 @@
 static int gdr_refcount;
 static int gdr_fd = -1;
 
-int get_gdr_fd(){
+int get_gdr_fd(void)
+{
 	return gdr_fd;
 }
 
@@ -72,7 +73,8 @@ int get_gdr_fd(){
 #define GPU_PAGE_MASK ~GPU_PAGE_OFFSET_MASK
 
 uint64_t
-gdr_cache_evict() {
+gdr_cache_evict(void)
+{
 	int ret;
 	struct hfi1_gdr_cache_evict_params params;
 	params.evict_params_in.version = HFI1_GDR_VERSION;
@@ -91,8 +93,9 @@ gdr_cache_evict() {
 }
 
 
-uint64_t
-ips_sdma_gpu_cache_evict(int fd) {
+static uint64_t
+ips_sdma_gpu_cache_evict(int fd)
+{
 	int ret;
 	struct hfi1_sdma_gpu_cache_evict_params params;
 	params.evict_params_in.version = HFI1_GDR_VERSION;
@@ -118,7 +121,7 @@ ips_sdma_gpu_cache_evict(int fd) {
  * which we bail out. If successful we retry to PIN/MMAP once
  * again
  */
-uint64_t
+static uint64_t
 handle_out_of_bar_space(struct ips_proto *proto)
 {
 	time_t lastEvictTime = 0;
@@ -205,7 +208,7 @@ gdr_convert_gpu_to_host_addr(int gdr_fd, unsigned long buf,
 }
 
 
-void hfi_gdr_open()
+void hfi_gdr_open(void)
 {
 	if (gdr_fd < 0) {
 		psmi_assert(!gdr_refcount);
@@ -224,7 +227,7 @@ void hfi_gdr_open()
 	gdr_refcount++;
 }
 
-void hfi_gdr_close()
+void hfi_gdr_close(void)
 {
 	if (gdr_fd > -1) {
 		psmi_assert(gdr_refcount);
