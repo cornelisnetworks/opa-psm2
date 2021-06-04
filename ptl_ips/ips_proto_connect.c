@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2015 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -17,10 +18,11 @@
   General Public License for more details.
 
   Contact Information:
-  Intel Corporation, www.intel.com
+  Cornelis Networks, www.cornelisnetworks.com
 
   BSD LICENSE
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2015 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
@@ -905,7 +907,7 @@ ptl_handle_connect_req(struct ips_proto *proto, psm2_epaddr_t epaddr,
 			if (!proto->done_warning) {
 				psmi_syslog(proto->ep, 1, LOG_INFO,
 					    "Non-fatal connection problem: Received an out-of-context "
-					    "connection message from host %s LID=0x%x context=%d. (Ignoring)",
+					    "connection message from host %s LID=0x%x context=%"PRId64". (Ignoring)",
 					    req->hostname,
 					    (int)psm2_epid_nid(req->epid),
 					    psm2_epid_context(req->epid));

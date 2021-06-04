@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2015 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -17,10 +18,11 @@
   General Public License for more details.
 
   Contact Information:
-  Intel Corporation, www.intel.com
+  Cornelis Networks, www.cornelisnetworks.com
 
   BSD LICENSE
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2015 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
@@ -383,6 +385,13 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 							(unsigned long)req->req_data.buf,
 							msglen, 1, src->proto);
 				psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
+			}
+			else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) &&
+							!PSMI_IS_GDR_COPY_ENABLED &&
+							req->is_buf_gpu_mem) {
+				psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+					"INTERNAL ERROR, PSM2_GDRCOPY should be enabled for this application");
+				break;
 			}
 #endif
 			if (msglen <= paylen) {

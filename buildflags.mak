@@ -4,6 +4,7 @@
 #
 #  GPL LICENSE SUMMARY
 #
+#  Copyright(c) 2021 Cornelis Networks.
 #  Copyright(c) 2016 Intel Corporation.
 #
 #  This program is free software; you can redistribute it and/or modify
@@ -16,10 +17,11 @@
 #  General Public License for more details.
 #
 #  Contact Information:
-#  Intel Corporation, www.intel.com
+#  Cornelis Networks, www.cornelisnetworks.com
 #
 #  BSD LICENSE
 #
+#  Copyright(c) 2021 Cornelis Networks.
 #  Copyright(c) 2016 Intel Corporation.
 #
 #  Redistribution and use in source and binary forms, with or without

@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -17,10 +18,11 @@
   General Public License for more details.
 
   Contact Information:
-  Intel Corporation, www.intel.com
+  Cornelis Networks, www.cornelisnetworks.com
 
   BSD LICENSE
 
+  Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2016 Intel Corporation.
 
   Redistribution and use in source and binary forms, with or without
@@ -767,6 +769,7 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 	PSM2_LOG_MSG("entering");
 	psmi_assert(MQE_TYPE_IS_RECV(req->type));
 	psmi_mtucpy_fn_t psmi_mtucpy_fn = psmi_mq_mtucpy;
+
 #ifdef PSM_CUDA
 	if (!req->is_buf_gpu_mem)
 		psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
@@ -786,6 +789,14 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 								    mq->ep->epaddr->proto);
 				psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
 			}
+			else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) &&
+					!PSMI_IS_GDR_COPY_ENABLED &&
+					req->is_buf_gpu_mem) {
+				psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+                                          "INTERNAL ERROR, PSM2_GDRCOPY should be enabled for this application ");
+                                break;
+			}
+
 #endif
 			psmi_mtucpy_fn(ubuf, (const void *)req->req_data.buf, copysz);
 			psmi_mq_sysbuf_free(mq, req->req_data.buf);
@@ -808,6 +819,13 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 							   req->req_data.send_msglen, 1,
 							   mq->ep->epaddr->proto);
 			psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
+		}
+		else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) &&
+				!PSMI_IS_GDR_COPY_ENABLED &&
+				req->is_buf_gpu_mem) {
+			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+                                "INTERNAL ERROR, PSM2_GDRCOPY should be enabled for this application ");
+                        break;
 		}
 #endif
 
@@ -912,6 +930,7 @@ __psm2_mq_fp_msg(psm2_ep_t ep, psm2_mq_t mq, psm2_epaddr_t addr, psm2_mq_tag_t *
 			recv_req->req_data.recv_msglen = len;
 			recv_req->recv_msgoff = 0;
 			recv_req->req_data.context = context;
+			recv_req->flags_user = flags;
 
 #ifdef PSM_CUDA
 			recv_req->is_buf_gpu_mem = gpu_mem;
@@ -935,6 +954,7 @@ __psm2_mq_fp_msg(psm2_ep_t ep, psm2_mq_t mq, psm2_epaddr_t addr, psm2_mq_tag_t *
 #endif
 
 			recv_req->req_data.context = context;
+			recv_req->flags_user = flags;
 
 			psm2_mq_irecv_inner(mq, recv_req, buf, len);
 		}
@@ -995,6 +1015,7 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 		req->req_data.recv_msglen = len;
 		req->recv_msgoff = 0;
 		req->req_data.context = context;
+		req->flags_user = flags;
 
 #ifdef PSM_CUDA
 		req->is_buf_gpu_mem = gpu_mem;
@@ -1023,6 +1044,7 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 #endif
 
 		req->req_data.context = context;
+		req->flags_user |= flags;
 
 		psm2_mq_irecv_inner(mq, req, buf, len);
 	}
