@@ -905,7 +905,7 @@ ptl_handle_connect_req(struct ips_proto *proto, psm2_epaddr_t epaddr,
 			if (!proto->done_warning) {
 				psmi_syslog(proto->ep, 1, LOG_INFO,
 					    "Non-fatal connection problem: Received an out-of-context "
-					    "connection message from host %s LID=0x%x context=%d. (Ignoring)",
+					    "connection message from host %s LID=0x%x context=%"PRId64". (Ignoring)",
 					    req->hostname,
 					    (int)psm2_epid_nid(req->epid),
 					    psm2_epid_context(req->epid));
