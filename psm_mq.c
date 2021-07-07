@@ -788,15 +788,10 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 								    len, 1,
 								    mq->ep->epaddr->proto);
 				psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
-			}
-			else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) &&
-					!PSMI_IS_GDR_COPY_ENABLED &&
-					req->is_buf_gpu_mem) {
+			} else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) && req->is_buf_gpu_mem) {
 				psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
-                                          "INTERNAL ERROR, PSM2_GDRCOPY should be enabled for this application ");
-                                break;
+				  "CUDA memcpy not permitted for this operation.");
 			}
-
 #endif
 			psmi_mtucpy_fn(ubuf, (const void *)req->req_data.buf, copysz);
 			psmi_mq_sysbuf_free(mq, req->req_data.buf);
@@ -819,13 +814,9 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 							   req->req_data.send_msglen, 1,
 							   mq->ep->epaddr->proto);
 			psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
-		}
-		else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) &&
-				!PSMI_IS_GDR_COPY_ENABLED &&
-				req->is_buf_gpu_mem) {
+		} else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) && req->is_buf_gpu_mem) {
 			psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
-                                "INTERNAL ERROR, PSM2_GDRCOPY should be enabled for this application ");
-                        break;
+			  "CUDA memcpy not permitted for this operation.");
 		}
 #endif
 

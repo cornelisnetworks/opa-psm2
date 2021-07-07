@@ -368,6 +368,9 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 				user_buffer = gdr_convert_gpu_to_host_addr(GDR_FD,
 								(unsigned long)req->req_data.buf,
 								msglen, 1, src->proto);
+			} else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) && req->is_buf_gpu_mem) {
+				psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+				  "CUDA memcpy not permitted for this operation.");
 			}
 #endif
 			mq_copy_tiny((uint32_t *) user_buffer, (uint32_t *) payload, msglen);
@@ -385,13 +388,9 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 							(unsigned long)req->req_data.buf,
 							msglen, 1, src->proto);
 				psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
-			}
-			else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) &&
-							!PSMI_IS_GDR_COPY_ENABLED &&
-							req->is_buf_gpu_mem) {
+			} else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) && req->is_buf_gpu_mem) {
 				psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
-					"INTERNAL ERROR, PSM2_GDRCOPY should be enabled for this application");
-				break;
+				  "CUDA memcpy not permitted for this operation.");
 			}
 #endif
 			if (msglen <= paylen) {
@@ -423,6 +422,9 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 				req->req_data.buf = gdr_convert_gpu_to_host_addr(GDR_FD,
 						(unsigned long)req->user_gpu_buffer,
 						req->req_data.send_msglen, 1, src->proto);
+			} else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) && req->is_buf_gpu_mem) {
+				psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+				  "CUDA memcpy not permitted for this operation.");
 			}
 #endif
 			if (paylen > 0)
