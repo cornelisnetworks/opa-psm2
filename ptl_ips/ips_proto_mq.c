@@ -1772,6 +1772,9 @@ ips_proto_mq_handle_eager(struct ips_recvhdrq_event *rcv_ev)
 				req->req_data.buf = gdr_convert_gpu_to_host_addr(GDR_FD,
 							(unsigned long)req->user_gpu_buffer,
 							req->req_data.send_msglen, 1, rcv_ev->proto);
+			} else if ((req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY) && req->is_buf_gpu_mem) {
+				psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+				  "CUDA memcpy not permitted for this operation.");
 			}
 #endif
 			psmi_mq_handle_data(mq, req,
