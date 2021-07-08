@@ -164,6 +164,15 @@ gdr_convert_gpu_to_host_addr(int gdr_fd, unsigned long buf,
 							 size_t size, int flags,
 							 struct ips_proto* proto)
 {
+	if (!size) {
+		// Attempting 0-length pin results in error from driver.
+		// Just return NULL. Caller has to figure out what to do in this
+		// case.
+		_HFI_VDBG("(gpudirect) buf=%p size=%zu flags=0x%x proto=%p\n",
+			(void*)buf, size, flags, proto);
+		return NULL;
+	}
+
 	struct hfi1_gdr_query_params query_params;
 	void *host_addr_buf;
 	int ret;
