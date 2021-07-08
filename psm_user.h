@@ -611,9 +611,10 @@ extern uint32_t gdr_copy_threshold_send;
  */
 extern uint32_t gdr_copy_threshold_recv;
 
-#define PSMI_USE_GDR_COPY(req, len) req->is_buf_gpu_mem &&       \
-				    PSMI_IS_GDR_COPY_ENABLED  && \
-				    len >=1 && (len <= gdr_copy_threshold_recv || (req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY))
+#define PSMI_USE_GDR_COPY(req, len) \
+	req->is_buf_gpu_mem && \
+	PSMI_IS_GDR_COPY_ENABLED  && \
+	(req->flags_user & PSM2_MQ_FLAG_GDRCPY_ONLY || (len >=1 && len <= gdr_copy_threshold_recv))
 
 enum psm2_chb_match_type {
 	/* Complete data found in a single chb */
