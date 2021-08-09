@@ -556,7 +556,14 @@ int psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 			    uint32_t msglen, uint32_t offset,
 			    const void *payload, uint32_t paylen, int msgorder,
 			    uint32_t opcode, psm2_mq_req_t *req_o);
+
+#ifdef PSM_CUDA
+// GDRCopy code requires ips_proto*, so CUDA-aware implementation must accept
+// ips_proto*
+int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t req, struct ips_proto *proto);
+#else
 int psmi_mq_handle_outoforder(psm2_mq_t mq, psm2_mq_req_t req);
+#endif
 
 void psmi_mq_stats_register(psm2_mq_t mq, mpspawn_stats_add_fn add_fn);
 

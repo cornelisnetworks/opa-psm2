@@ -664,7 +664,6 @@ int ips_proto_mq_handle_rts(struct ips_recvhdrq_event *rcv_ev);
 int ips_proto_mq_handle_tiny(struct ips_recvhdrq_event *rcv_ev);
 int ips_proto_mq_handle_short(struct ips_recvhdrq_event *rcv_ev);
 int ips_proto_mq_handle_eager(struct ips_recvhdrq_event *rcv_ev);
-void ips_proto_mq_handle_outoforder_queue(psm2_mq_t mq, ips_msgctl_t *msgctl);
 int ips_proto_mq_handle_data(struct ips_recvhdrq_event *rcv_ev);
 
 psm2_error_t ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t epaddr,

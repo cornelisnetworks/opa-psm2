@@ -1431,6 +1431,9 @@ ips_proto_mq_handle_cts(struct ips_recvhdrq_event *rcv_ev)
 	return IPS_RECVHDRQ_CONTINUE;
 }
 
+static void ips_proto_mq_handle_outoforder_queue(psm2_mq_t mq, ips_msgctl_t *msgctl,
+  struct ips_proto *proto);
+
 int
 ips_proto_mq_handle_rts(struct ips_recvhdrq_event *rcv_ev)
 {
@@ -1535,7 +1538,7 @@ ips_proto_mq_handle_rts(struct ips_recvhdrq_event *rcv_ev)
 		/* XXX if blocking, break out of progress loop */
 
 		if (msgctl->outoforder_count)
-			ips_proto_mq_handle_outoforder_queue(mq, msgctl);
+			ips_proto_mq_handle_outoforder_queue(mq, msgctl, rcv_ev->proto);
 
 		if (rc == MQ_RET_UNEXP_OK)
 			ret = IPS_RECVHDRQ_BREAK;
@@ -1622,7 +1625,7 @@ ips_proto_mq_handle_tiny(struct ips_recvhdrq_event *rcv_ev)
 		ipsaddr->msg_toggle = 0;
 
 		if (msgctl->outoforder_count)
-			ips_proto_mq_handle_outoforder_queue(mq, msgctl);
+			ips_proto_mq_handle_outoforder_queue(mq, msgctl, rcv_ev->proto);
 
 		if (rc == MQ_RET_UNEXP_OK)
 			ret = IPS_RECVHDRQ_BREAK;
@@ -1709,7 +1712,7 @@ ips_proto_mq_handle_short(struct ips_recvhdrq_event *rcv_ev)
 		ipsaddr->msg_toggle = 0;
 
 		if (msgctl->outoforder_count)
-			ips_proto_mq_handle_outoforder_queue(mq, msgctl);
+			ips_proto_mq_handle_outoforder_queue(mq, msgctl, rcv_ev->proto);
 
 		if (rc == MQ_RET_UNEXP_OK)
 			ret = IPS_RECVHDRQ_BREAK;
@@ -1845,7 +1848,7 @@ ips_proto_mq_handle_eager(struct ips_recvhdrq_event *rcv_ev)
 		ipsaddr->msg_toggle = 0;
 
 		if (msgctl->outoforder_count)
-			ips_proto_mq_handle_outoforder_queue(mq, msgctl);
+			ips_proto_mq_handle_outoforder_queue(mq, msgctl, rcv_ev->proto);
 
 		if (rc == MQ_RET_UNEXP_OK)
 			ret = IPS_RECVHDRQ_BREAK;
@@ -1864,22 +1867,26 @@ ips_proto_mq_handle_eager(struct ips_recvhdrq_event *rcv_ev)
  * Progress the out of order queue to see if any message matches
  * current receiving sequence number.
  */
-void
-ips_proto_mq_handle_outoforder_queue(psm2_mq_t mq, ips_msgctl_t *msgctl)
+static void
+ips_proto_mq_handle_outoforder_queue(psm2_mq_t mq, ips_msgctl_t *msgctl,
+  struct ips_proto *proto)
 {
 	psm2_mq_req_t req;
 
 	do {
-		req =
-		    mq_ooo_match(&mq->outoforder_q, msgctl,
-				 msgctl->mq_recv_seqnum);
+		req = mq_ooo_match(&mq->outoforder_q, msgctl,
+		   msgctl->mq_recv_seqnum);
 		if (req == NULL)
 			return;
 
 		msgctl->outoforder_count--;
 		msgctl->mq_recv_seqnum++;
 
+#ifdef PSM_CUDA
+		psmi_mq_handle_outoforder(mq, req, proto);
+#else
 		psmi_mq_handle_outoforder(mq, req);
+#endif
 
 	} while (msgctl->outoforder_count > 0);
 
