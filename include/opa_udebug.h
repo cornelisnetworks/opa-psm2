@@ -124,6 +124,7 @@ extern FILE *__hfi_dbgout;
 		"env " fmt, ##__VA_ARGS__)
 #define _HFI_MMDBG(fmt, ...) __HFI_DBG_WHICH(__HFI_MMDBG, fmt, ##__VA_ARGS__)
 #define _HFI_CCADBG(fmt, ...) __HFI_DBG_WHICH(__HFI_CCADBG, fmt, ##__VA_ARGS__)
+#define _HFI_CUDADBG(fmt, ...) __HFI_DBG_WHICH(__HFI_CUDADBG, fmt, ##__VA_ARGS__)
 
 /*
  * Use these macros (_HFI_DBG_ON and _HFI_DBG_ALWAYS) together
@@ -149,6 +150,9 @@ extern FILE *__hfi_dbgout;
 
 #define _HFI_CCADBG_ON unlikely(hfi_debug & __HFI_CCADBG)
 #define _HFI_CCADBG_ALWAYS(fmt, ...) _HFI_DBG_ALWAYS(fmt, ##__VA_ARGS__)
+
+#define _HFI_CUDADBG_ON unlikely(hfi_debug & __HFI_CUDADBG)
+#define _HFI_CUDADBG_ALWAYS(fmt, ...) _HFI_DBG_ALWAYS(fmt, ##__VA_ARGS__)
 
 #define _HFI_INFO_ON unlikely(hfi_debug & __HFI_INFO)
 #define _HFI_INFO_ALWAYS(fmt, ...) _HFI_DBG_ALWAYS(fmt, ##__VA_ARGS__)
@@ -177,6 +181,7 @@ extern FILE *__hfi_dbgout;
 #define _HFI_VDBG(fmt, ...)
 #define _HFI_MMDBG(fmt, ...)
 #define _HFI_CCADBG(fmt, ...)
+#define _HFI_CUDADBG(fmt, ...)
 
 #define _HFI_DBG_ON 0
 #define _HFI_DBG_ALWAYS(fmt, ...)
@@ -186,6 +191,8 @@ extern FILE *__hfi_dbgout;
 #define _HFI_PRDBG_ALWAYS(fmt, ...)
 #define _HFI_CCADBG_ON 0
 #define _HFI_CCADBG_ALWAYS(fmt, ...)
+#define _HFI_CUDADBG_ON 0
+#define _HFI_CUDADBG_ALWAYS(fmt, ...)
 #define _HFI_INFO_ON 0
 #define _HFI_INFO_ALWAYS(fmt, ...)
 
