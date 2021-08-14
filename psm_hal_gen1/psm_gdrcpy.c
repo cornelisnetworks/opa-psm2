@@ -164,36 +164,40 @@ gdr_convert_gpu_to_host_addr(int gdr_fd, unsigned long buf,
 							 size_t size, int flags,
 							 struct ips_proto* proto)
 {
+	_HFI_VDBG("(gdrcopy) buf=%p size=%zu flags=0x%x proto=%p\n",
+	  (void*)buf, size, flags, proto);
 	if (!size) {
 		// Attempting 0-length pin results in error from driver.
 		// Just return NULL. Caller has to figure out what to do in this
 		// case.
-		_HFI_VDBG("(gpudirect) buf=%p size=%zu flags=0x%x proto=%p\n",
-			(void*)buf, size, flags, proto);
 		return NULL;
 	}
 
-	struct hfi1_gdr_query_params query_params;
-	void *host_addr_buf;
-	int ret;
-
-	query_params.query_params_in.version = HFI1_GDR_VERSION;
 	uintptr_t pageaddr = buf & GPU_PAGE_MASK;
-	/* As size is guarenteed to be in the range of 0-8kB
-	 * there is a guarentee that buf+size-1 does not overflow
-	 * 64 bits.
-	 */
-	uint32_t pagelen = (uint32_t) (PSMI_GPU_PAGESIZE +
-					   ((buf + size - 1) & GPU_PAGE_MASK) -
-					   pageaddr);
+	uintptr_t pageend = PSMI_GPU_PAGESIZE + ((buf + size - 1) & GPU_PAGE_MASK);
 
-	_HFI_VDBG("(gpudirect) buf=%p size=%zu pageaddr=%p pagelen=%u flags=0x%x proto=%p\n",
-		(void *)buf, size, (void *)pageaddr, pagelen, flags, proto);
+	// Validate pointer arithmetic
+	if (pageend < pageaddr) {
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+		  "pageend < pageaddr, wraparound; pageend=%p pageaddr=%p",
+		  (void*)pageend, (void*)pageaddr);
+	} else if ((pageend - pageaddr) > UINT32_MAX) {
+		psmi_handle_error(PSMI_EP_NORETURN, PSM2_INTERNAL_ERR,
+		  "pageend - pageaddr > UINT32_MAX; pageend=%p pageaddr=%p difference=%zu",
+		  (void*)pageend, (void*)pageaddr, (pageend - pageaddr));
+	}
 
+	uint32_t pagelen = pageend - pageaddr;
+	_HFI_VDBG("(gdrcopy) pageaddr=%p pagelen=%u pageend=%p\n",
+	  (void *)pageaddr, pagelen, (void*)pageend);
+
+	struct hfi1_gdr_query_params query_params;
+	query_params.query_params_in.version = HFI1_GDR_VERSION;
 	query_params.query_params_in.gpu_buf_addr = pageaddr;
 	query_params.query_params_in.gpu_buf_size = pagelen;
- retry:
 
+	int ret;
+ retry:
 	ret = ioctl(gdr_fd, HFI1_IOCTL_GDR_GPU_PIN_MMAP, &query_params);
 
 	if (ret) {
@@ -214,7 +218,7 @@ gdr_convert_gpu_to_host_addr(int gdr_fd, unsigned long buf,
 			return NULL;
 		}
 	}
-	host_addr_buf = (void *)query_params.query_params_out.host_buf_addr;
+	void *host_addr_buf = (void *)query_params.query_params_out.host_buf_addr;
 	return host_addr_buf + (buf & GPU_PAGE_OFFSET_MASK);
 }
 
