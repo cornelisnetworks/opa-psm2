@@ -95,6 +95,7 @@ psm2_mq_req_t MOCKABLE(psmi_mq_req_alloc)(psm2_mq_t mq, uint32_t type)
 #ifdef PSM_CUDA
 		req->is_buf_gpu_mem = 0;
 		req->user_gpu_buffer = NULL;
+		req->cuda_ipc_handle_attached = 0;
 #endif
 		req->flags_user = 0;
 		req->flags_internal = 0;
