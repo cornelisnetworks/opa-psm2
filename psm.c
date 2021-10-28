@@ -730,10 +730,10 @@ psm2_error_t __psm2_info_query(psm2_info_query_t q, void *out,
 		{
 			char              *networkType      = (char*)out;
 			size_t            networkTypeLength = args[0].length;
-			const char *const intelopa          = "Intel(R) OPA";
-			if (networkTypeLength >= strlen(intelopa)+1)
+			const char *const cornelisopx          = "Cornelis(TM) OPX";
+			if (networkTypeLength >= strlen(cornelisopx)+1)
 			{
-				strcpy(networkType,intelopa);
+				strcpy(networkType,cornelisopx);
 				rv = PSM2_OK;
 			}
 		}
