@@ -1893,6 +1893,7 @@ ips_dma_transfer_frame(struct ips_proto *proto, struct ips_flow *flow,
 	 * Write into driver to do SDMA work.
 	 */
 retry:
+	printf("%s(): Calling HAL writev\n", __func__);
 	ret = psmi_hal_writev(iovec, iovcnt, &proto->epinfo, proto->ep->context.psm_hw_ctxt);
 
 	if (ret > 0) {
@@ -2069,6 +2070,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 			scb->frag_size ? scb->frag_size : flow->frag_size;
 
 		sdmahdr->comp_idx = fillidx;
+
 		fillidx++;
 		if (fillidx == proto->sdma_queue_size)
 			fillidx = 0;
@@ -2079,6 +2081,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 		iovec[vec_idx].iov_base = sdmahdr;
 		iovec[vec_idx].iov_len = psmi_hal_get_sdma_req_size(proto->ep->context.
 								    psm_hw_ctxt) + extra_bytes;
+		printf("%s() Iovec size is %ld\n", __func__, iovec[vec_idx].iov_len);						
 		vec_idx++;
 		iovcnt = 1;
 		_HFI_VDBG("hdr=%p,%d\n",
@@ -2159,7 +2162,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 			{
 
 				sdmahdr->ctrl = 1 |
-					(PSM_HAL_EXP << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
+					(2 << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
 					(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
 			}
 			_HFI_VDBG("tid-info=%p,%d\n",
@@ -2176,10 +2179,12 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 #endif
 			{
 				sdmahdr->ctrl = 1 |
-					(PSM_HAL_EGR << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
+					(3 << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
 					(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
 			}
 		}
+
+		printf("%s() SDMA ctrl field is: 0x%x\n", __func__, sdmahdr->ctrl);
 
 		/* Can bound the number to send by 'num' */
 		if (++scb_idx == num)
@@ -2187,6 +2192,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 	}
 	psmi_assert(vec_idx > 0);
 retry:
+	printf("%s(): Calling HAL writev\n", __func__);
 	ret = psmi_hal_writev(iovec, vec_idx, &proto->epinfo, proto->ep->context.psm_hw_ctxt);
 
 	if (ret > 0) {

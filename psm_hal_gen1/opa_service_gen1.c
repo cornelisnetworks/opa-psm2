@@ -55,6 +55,7 @@
    level hfi protocol code. */
 
 #include <sys/types.h>
+
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <ctype.h>
@@ -71,6 +72,8 @@
 #include "opa_service_gen1.h"
 #include "psmi_wrappers.h"
 
+//#include "liburing.h"
+
 typedef union
 {
 	struct
@@ -84,8 +87,8 @@ typedef union
 static sw_version_t sw_version =
 {
 	{
-	.major = HFI1_USER_SWMAJOR,
-	.minor = HFI1_USER_SWMINOR
+	.major = 7,
+	.minor = 0,
 	}
 };
 
@@ -216,7 +219,57 @@ void hfi_context_close(int fd)
 
 int hfi_cmd_writev(int fd, const struct iovec *iov, int iovcnt)
 {
-	return writev(fd, iov, iovcnt);
+	int ret;
+	printf("%s() PSM2:: Iovect count %d\n", __func__, iovcnt);
+
+
+	int i;
+	for (i=0; i<iovcnt; i++) {
+		printf("%s(): Iovec[%d] len %ld\n", __func__, i, iov[i].iov_len);
+	}
+#if 1
+	printf("Doing writev of all iovecs\n");
+        ret =  writev(fd, iov, iovcnt);
+	printf("writev returns %d\n", ret);
+#else	
+	struct io_uring ring;
+	struct io_uring_sqe *sqe;
+	struct io_uring_cqe *cqe;
+
+	ret = io_uring_queue_init(10, &ring, 0);
+
+	if (ret < 0) {
+		printf("Failed to create/init iouring\n");
+		return -EINVAL;
+	}
+	
+	sqe = io_uring_get_sqe(&ring);
+	if (!sqe) {
+		printf("Failed to prep writev\n");
+		return -EINVAL;
+	}
+	io_uring_prep_writev(sqe, fd, iov, iovcnt, 0);
+	ret = io_uring_submit(&ring);
+	if (ret < 0) {
+		printf("Failed to submit io uring\n");
+		return -EINVAL;
+	}
+	ret = io_uring_wait_cqe(&ring, &cqe);
+	if (ret < 0) {
+		printf("Failed to call wait cqe\n");
+		return -EINVAL;
+	}
+
+	/* cqe->rest gets the value returned by the write_iter under the hood which is always 1 it seems */
+	ret = cqe->res;
+
+        io_uring_cqe_seen(&ring, cqe);
+
+	io_uring_queue_exit(&ring);
+#endif
+	//~	printf("Returning %d\n", ret);
+	return ret; 
+
 }
 
 int hfi_cmd_write(int fd, struct hfi1_cmd *cmd, size_t count)

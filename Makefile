@@ -126,6 +126,7 @@ unexport SOURCES_CHKSUM_FILES
 unexport SOURCES_CHKSUM_VALUE
 unexport LINKER_SCRIPT_FILE
 INCLUDES += -I$(top_srcdir) -I$(top_srcdir)/ptl_ips -I$(OUTDIR)
+#INCLUDES += -I$(top_srcdir) -I$(top_srcdir)/ptl_ips -I$(OUTDIR) -I/home/ddalessandro/liburing-2.1/src/include
 
 ifneq (x86_64,$(arch))
    ifneq (i386,$(arch))
@@ -246,7 +247,10 @@ else
 VERSION_RELEASE := ${VERSION_RELEASE_OVERRIDE}
 endif
 
+#LDFLAGS := -L/home/ddalessandro/liburing-2.1/src
+
 LDLIBS := -lrt -ldl -lnuma ${EXTRA_LIBS} -pthread
+#LDLIBS := -lrt -ldl -lnuma -uring ${EXTRA_LIBS} -pthread
 
 PKG_CONFIG ?= pkg-config
 
