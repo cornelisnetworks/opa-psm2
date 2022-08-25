@@ -920,11 +920,15 @@ int ips_protoexp_data(struct ips_recvhdrq_event *rcv_ev)
 	 * assert(0 < paylen < MTU).
 	 */
 	if (psmi_hal_has_cap(PSM_HAL_CAP_RSM_FECN_SUPP) &&
-	    ips_recvhdrq_event_payload(rcv_ev) &&
-	    ips_recvhdrq_event_paylen(rcv_ev))
-		psmi_mq_mtucpy(tidrecvc->buffer + p_hdr->exp_offset,
-			       ips_recvhdrq_event_payload(rcv_ev),
-			       ips_recvhdrq_event_paylen(rcv_ev));
+			ips_recvhdrq_event_payload(rcv_ev) &&
+			ips_recvhdrq_event_paylen(rcv_ev)) {
+
+		psmi_assert(p_hdr->exp_offset + ips_recvhdrq_event_paylen(rcv_ev) <= tidrecvc->recv_tidbytes);
+
+		psmi_mq_mtucpy(tidrecvc->buffer + tidrecvc->tid_list.tsess_unaligned_start + p_hdr->exp_offset,
+			ips_recvhdrq_event_payload(rcv_ev),
+			ips_recvhdrq_event_paylen(rcv_ev));
+	}
 
 	/* If last packet then we are done. We send a tid transfer completion
 	 * packet back to sender, free all tids and close the current tidflow
