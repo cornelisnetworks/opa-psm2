@@ -308,6 +308,8 @@ psm2_error_t psmi_shm_create(ptl_t *ptl_gen)
 							"shared memory object "
 							"with fstat: %s",
 							strerror(errno));
+				psmi_free(amsh_keyname);
+				amsh_keyname = NULL;
 				goto fail;
 			}
 			if (getuid() == st.st_uid) {
@@ -316,6 +318,8 @@ psm2_error_t psmi_shm_create(ptl_t *ptl_gen)
 			} else {
 				err = PSM2_SHMEM_SEGMENT_ERR;
 				close(shmfd);
+				psmi_free(amsh_keyname);
+				amsh_keyname = NULL;
 			}
 		}
 	}
