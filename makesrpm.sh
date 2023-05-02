@@ -153,6 +153,6 @@ mkdir -p ./$TEMPDIR/{BUILD,RPMS,SOURCES,SPECS,SRPMS,BUILDROOT}
 cp ${OUTDIR}/$RPM_NAME-*.tar.gz $TEMPDIR/SOURCES
 make RPM_NAME=$RPM_NAME RPM_NAME_BASEEXT=$RPM_NAME_BASEEXT specfile OUTDIR=$OUTDIR
 cp ${OUTDIR}/$RPM_NAME.spec $TEMPDIR/SPECS
-rpmbuild -b$BUILDARG --define "_topdir $PWD/$TEMPDIR" --nodeps $TEMPDIR/SPECS/$RPM_NAME.spec
+rpmbuild -b$BUILDARG --define "_topdir $PWD/$TEMPDIR" --define "source_date_epoch_from_changelog 0" --nodeps $TEMPDIR/SPECS/$RPM_NAME.spec
 
 echo "The SRPM(s) are in $TEMPDIR/SRPMS/`ls $TEMPDIR/SRPMS`"
