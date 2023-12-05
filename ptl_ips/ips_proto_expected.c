@@ -755,7 +755,7 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 	tidsendc = (struct ips_tid_send_desc *)
 	    psmi_mpool_find_obj_by_index(protoexp->tid_desc_send_pool,
 					 desc_id._desc_idx);
-	_HFI_VDBG("desc_id=%d (%p)\n", desc_id._desc_idx, tidsendc);
+	_HFI_VDBG(" desc_id=%d (%p)\n", desc_id._desc_idx, tidsendc);
 	if (tidsendc == NULL) {
 		_HFI_ERROR
 		    ("exptid comp: Index %d is out of range\n",
@@ -769,7 +769,7 @@ ips_protoexp_recv_tid_completion(struct ips_recvhdrq_event *rcv_ev)
 						   &desc_tidsendc._desc_idx,
 						   &desc_tidsendc._desc_genc);
 
-		_HFI_VDBG("desc_req:id=%d,gen=%d desc_sendc:id=%d,gen=%d\n",
+		_HFI_VDBG(" desc_req:id=%d,gen=%d desc_sendc:id=%d,gen=%d\n",
 			  desc_id._desc_idx, desc_id._desc_genc,
 			  desc_tidsendc._desc_idx, desc_tidsendc._desc_genc);
 
@@ -999,7 +999,7 @@ void ips_dump_tids(ips_tid_session_list *tid_list, const char *msg, ...)
 				IPS_TIDINFO_GET_TID(tid_list->tsess_list[i]),
 				i < num_tids - 1 ? "," : "");
 
-	_HFI_VDBG("%s\n", buf);
+	_HFI_VDBG(" %s\n", buf);
 	return;
 }
 #endif
@@ -2403,7 +2403,7 @@ ipsaddr_next:
 			getreq->tidgr_offset += tidrecvc->recv_msglen;
 			psmi_assert(getreq->tidgr_offset <=
 				    getreq->tidgr_length);
-			_HFI_VDBG("GRANT tididx=%d srcoff=%d nbytes=%d/%d\n",
+			_HFI_VDBG(" GRANT tididx=%d srcoff=%d nbytes=%d/%d\n",
 				  tidrecvc->rdescid._desc_idx,
 				  getreq->tidgr_offset, tidrecvc->recv_msglen,
 				  getreq->tidgr_length);
@@ -2740,7 +2740,7 @@ ips_protoexp_handle_data_err(const struct ips_recvhdrq_event *rcv_ev)
 		}
 
 	} else {
-		_HFI_VDBG("HDR_ERROR: %s\n", errmsg);
+		_HFI_VDBG(" HDR_ERROR: %s\n", errmsg);
 	}
 
 }

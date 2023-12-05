@@ -80,7 +80,7 @@ psm2_error_t psmi_timer_fini(struct psmi_timer_ctrl *ctrl)
 {
 #if PSMI_TIMER_STATS
 	if (ctrl->num_insertions > 0) {
-		_HFI_INFO("avg elem traversals/insertion = %3.2f %%\n",
+		_HFI_INFO(" avg elem traversals/insertion = %3.2f %%\n",
 			  100.0 * (double)ctrl->num_traversals /
 			  ctrl->num_insertions);
 	}

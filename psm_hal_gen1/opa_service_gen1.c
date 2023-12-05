@@ -152,7 +152,7 @@ int hfi_context_open_ex(int unit, int port, uint64_t open_timeout,
 	}
 
 	if (fcntl(fd, F_SETFD, FD_CLOEXEC))
-		_HFI_INFO("Failed to set close on exec for device: %s\n",
+		_HFI_INFO(" Failed to set close on exec for device: %s\n",
 			  strerror(errno));
 
 #ifdef PSM2_SUPPORT_IW_CMD_API
@@ -165,6 +165,7 @@ int hfi_context_open_ex(int unit, int port, uint64_t open_timeout,
 		c.type = PSMI_HFI_CMD_GET_VERS;
 		c.len  = 0;
 		c.addr = 0;
+		_HFI_VDBG(" PSMI_HFI_CMD_GET_VERS:%u\n",__LINE__);
 
 		if (hfi_cmd_write(fd, &c, sizeof(c)) == -1) {
 			/* Let's assume that the driver is the old driver */
@@ -179,7 +180,7 @@ int hfi_context_open_ex(int unit, int port, uint64_t open_timeout,
 					/* If there is a skew between the major version of the driver
 					   that is executing and the major version which was used during
 					   compilation of PSM, we treat that is a fatal error. */
-					_HFI_INFO("PSM2 and driver version mismatch: (%d != %d)\n",
+					_HFI_INFO(" PSM2 and driver version mismatch: (%d != %d)\n",
 						  major, hfi_get_user_major_version());
 				close(fd);
 				return -1;
@@ -221,6 +222,7 @@ int hfi_cmd_writev(int fd, const struct iovec *iov, int iovcnt)
 
 int hfi_cmd_write(int fd, struct hfi1_cmd *cmd, size_t count)
 {
+	_HFI_VDBG(" c.type %u len %u addr %#llX\n",cmd->type, cmd->len, cmd->addr);
 	return _hfi_cmd_send(fd, cmd, count);
 }
 
@@ -305,7 +307,10 @@ int _hfi_cmd_ioctl(int fd, struct hfi1_cmd *cmd, size_t count)
 void *hfi_mmap64(void *addr, size_t length, int prot, int flags, int fd,
 		 __off64_t offset)
 {
-	return mmap64(addr, length, prot, flags, fd, offset);
+	_HFI_VDBG(" mmap64(void *addr %p, size_t length %zu, int prot %#X, int flags %#X, int fd %#X,__off64_t offset %#lX)\n", addr, length, prot, flags, fd, offset);
+	void * rptr = mmap64(addr, length, prot, flags, fd, offset);
+	_HFI_VDBG(" mmap64 return %p\n", rptr);
+	return rptr;
 }
 
 /* get the number of units supported by the driver.  Does not guarantee */
@@ -436,13 +441,13 @@ int hfi_get_port_lid(int unit, int port)
 	if (hfi_get_port_active(unit,port) != 1)
 		return -2;
 	ret = hfi_sysfs_port_read_s64(unit, port, "lid", &val, 0);
-	_HFI_VDBG("hfi_get_port_lid: ret %d, unit %d port %d\n", ret, unit,
+	_HFI_VDBG(" hfi_get_port_lid: ret %d, unit %d port %d\n", ret, unit,
 		  port);
 
 	if (ret == -1) {
 		if (errno == ENODEV)
 			/* this is "normal" for port != 1, on single port chips */
-			_HFI_VDBG("Failed to get LID for unit %u:%u: %s\n",
+			_HFI_VDBG(" Failed to get LID for unit %u:%u: %s\n",
 				  unit, port, strerror(errno));
 		else
 			_HFI_DBG("Failed to get LID for unit %u:%u: %s\n",
@@ -464,10 +469,10 @@ int hfi_get_port_lid(int unit, int port)
 				_HFI_INFO
 				    ("Can't run CONTEXT_INFO for lid_loop, fd not set\n");
 			else if (write(__hfi_lastfd, &cmd, sizeof(cmd)) == -1)
-				_HFI_INFO("CONTEXT_INFO command failed: %s\n",
+				_HFI_INFO(" CONTEXT_INFO command failed: %s\n",
 					  strerror(errno));
 			else if (!info.context)
-				_HFI_INFO("CONTEXT_INFO returned context 0!\n");
+				_HFI_INFO(" CONTEXT_INFO returned context 0!\n");
 			else {
 				_HFI_PRDBG
 				    ("Using lid 0x%x, base %x, context %x\n",
@@ -497,7 +502,7 @@ int hfi_get_port_gid(int unit, int port, uint64_t *hi, uint64_t *lo)
 		if (errno == ENODEV)
 			/* this is "normal" for port != 1, on single
 			 * port chips */
-			_HFI_VDBG("Failed to get GID for unit %u:%u: %s\n",
+			_HFI_VDBG(" Failed to get GID for unit %u:%u: %s\n",
 				  unit, port, strerror(errno));
 		else
 			_HFI_DBG("Failed to get GID for unit %u:%u: %s\n",
@@ -537,7 +542,7 @@ int hfi_get_port_lmc(int unit, int port)
 	ret = hfi_sysfs_port_read_s64(unit, port, "lid_mask_count", &val, 0);
 
 	if (ret == -1) {
-		_HFI_INFO("Failed to get LMC for unit %u:%u: %s\n",
+		_HFI_INFO(" Failed to get LMC for unit %u:%u: %s\n",
 			  unit, port, strerror(errno));
 	} else
 		ret = val;
@@ -567,7 +572,7 @@ int hfi_get_port_rate(int unit, int port)
 	return ((int)(rate * 2) >> 1);
 
 get_port_rate_error:
-	_HFI_INFO("Failed to get link rate for unit %u:%u: %s\n",
+	_HFI_INFO(" Failed to get link rate for unit %u:%u: %s\n",
 		  unit, port, strerror(errno));
 
 	return ret;

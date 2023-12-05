@@ -197,16 +197,19 @@ typedef enum mapsize
 #define HFI_MMAP_ERRCHECK(fd, binfo, member, size, prot) ({						\
 		typeof((binfo)->member) *__tptr = (__u64 *)NULL;					\
 		(void)__tptr;										\
+	        _HFI_VDBG(#member" pre-mmap %jx           \n", (uintmax_t)((binfo)->member));	        \
+                _HFI_DBG_SLEEP;                                                                         \
 		void *__maddr = HFI_MMAP_ALIGNOFF((fd), (binfo)->member, (size), (prot));		\
 		do {											\
 			if (unlikely(__maddr == MAP_FAILED)) {						\
 				uintmax_t outval = (uintmax_t)((binfo)->member);			\
-				_HFI_INFO("mmap of " #member " (0x%jx) size %zu failed: %s\n",		\
+				_HFI_INFO(" mmap of " #member " (0x%jx) size %zu failed: %s\n",		\
 					outval, size, strerror(errno));					\
 				goto err_mmap_##member;							\
 			}										\
 			(binfo)->member = (__u64)__maddr;						\
-			_HFI_VDBG(#member "mmap %jx successful\n", (uintmax_t)((binfo)->member));	\
+			_HFI_VDBG(#member " mmap %jx successful\n", (uintmax_t)((binfo)->member));	\
+ 		        _HFI_DBG_SLEEP;                                                                 \
 		} while(0);										\
 		__maddr;										\
 })
@@ -217,11 +220,11 @@ typedef enum mapsize
 			(void)__tptr;								\
 			void *__addr = ALIGNDOWN_PTR((binfo)->member, HFI_MMAP_PGSIZE);		\
 			if (unlikely( __addr == NULL || (munmap(__addr, (size)) == -1))) {	\
-				_HFI_INFO("unmap of " #member " (%p) failed: %s\n",		\
+				_HFI_INFO(" unmap of " #member " (%p) failed: %s\n",		\
 					__addr, strerror(errno));				\
 			}									\
 			else {									\
-				_HFI_VDBG("unmap of " #member "(%p) succeeded\n", __addr);	\
+				_HFI_VDBG(" unmap of " #member "(%p) succeeded\n", __addr);	\
 				(binfo)->member = 0;						\
 			}									\
 		} while(0)
@@ -588,6 +591,7 @@ static __inline__ int32_t hfi_update_tid(struct _hfi_ctrl *ctrl,
 	}
 #endif
 
+	_HFI_VDBG(" PSMI_HFI_CMD_TID_UPDATE:%u\n",__LINE__);
 	err = hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd));
 
 	if (err != -1) {
@@ -614,6 +618,7 @@ static __inline__ int32_t hfi_free_tid(struct _hfi_ctrl *ctrl,
 	cmd.len = sizeof(tidinfo);
 	cmd.addr = (__u64) &tidinfo;
 
+	_HFI_VDBG(" PSMI_HFI_CMD_TID_FREE:%u\n",__LINE__);
 	err = hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd));
 
 	return err;
@@ -633,6 +638,7 @@ static __inline__ int32_t hfi_get_invalidation(struct _hfi_ctrl *ctrl,
 	cmd.len = sizeof(tidinfo);
 	cmd.addr = (__u64) &tidinfo;
 
+	_HFI_VDBG(" PSMI_HFI_CMD_TID_INVAL_READ:%u\n",__LINE__);
 	err = hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd));
 
 	if (err != -1)

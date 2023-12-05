@@ -478,7 +478,7 @@ PSMI_ALWAYS_INLINE(void mq_qq_append(struct mqq *q, psm2_mq_req_t req))
 		(qq)->last = (req);					\
 		(req)->q[PSM2_ANYTAG_ANYSRC] = (qq);			\
 		if (qq == &(req)->mq->completed_q)			\
-			_HFI_VDBG("Moving (req)=%p to completed queue on %s, %d\n", \
+			_HFI_VDBG(" Moving (req)=%p to completed queue on %s, %d\n", \
 				  (req), __FILE__, __LINE__);		\
 	} while (0)
 #endif

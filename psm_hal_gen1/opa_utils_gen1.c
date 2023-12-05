@@ -76,15 +76,23 @@ void hfi_touch_mmap(void *m, size_t bytes)
 	volatile uint32_t *b = (volatile uint32_t *)m, c;
 	size_t i;		/* m is always page aligned, so pgcnt exact */
 	int __hfi_pg_sz;
-
 	/* First get the page size */
 	__hfi_pg_sz = sysconf(_SC_PAGESIZE);
-
-	_HFI_VDBG("Touch %lu mmap'ed pages starting at %p\n",
+	if (getenv("HFI_DEBUG_NO_TOUCH")) {
+		_HFI_VDBG(" HFI_DEBUG_NO_TOUCH %lu mmap'ed pages starting at %p\n",
+			  (unsigned long)bytes / __hfi_pg_sz, m);
+		_HFI_DBG_SLEEP;
+		return;
+	}
+	_HFI_VDBG(" Touch %lu mmap'ed pages starting at %p\n",
 		  (unsigned long)bytes / __hfi_pg_sz, m);
+	_HFI_DBG_SLEEP;
 	bytes /= sizeof(c);
 	for (i = 0; i < bytes; i += __hfi_pg_sz / sizeof(c))
 		c = b[i];
+	_HFI_VDBG(" After Touch %lu mmap'ed pages starting at %p\n",
+		  (unsigned long)bytes / __hfi_pg_sz, m);
+	_HFI_DBG_SLEEP;
 }
 
 /* ack event bits, and clear them.  Usage is check *spi_sendbuf_status,
@@ -99,6 +107,7 @@ int hfi_event_ack(struct _hfi_ctrl *ctrl, __u64 ackbits)
 	cmd.len = 0;
 	cmd.addr = ackbits;
 
+	_HFI_VDBG(" PSMI_HFI_CMD_ACK_EVENT:%u\n",__LINE__);
 	if (hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd)) == -1) {
 		if (errno != EINVAL)	/* not implemented in driver. */
 			_HFI_DBG("event ack failed: %s\n", strerror(errno));
@@ -123,9 +132,10 @@ int hfi_poll_type(struct _hfi_ctrl *ctrl, uint16_t poll_type)
 	cmd.len = 0;
 	cmd.addr = (uint64_t) poll_type;
 
+	_HFI_VDBG(" PSMI_HFI_CMD_POLL_TYPE:%u\n",__LINE__);
 	if (hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd)) == -1) {
 		if (errno != EINVAL)	/* not implemented in driver */
-			_HFI_INFO("poll type failed: %s\n", strerror(errno));
+			_HFI_INFO(" poll type failed: %s\n", strerror(errno));
 		return -1;
 	}
 	return 0;
@@ -143,13 +153,14 @@ int hfi_set_pkey(struct _hfi_ctrl *ctrl, uint16_t pkey)
 	cmd.len = 0;
 	cmd.addr = (uint64_t) pkey;
 
-	_HFI_VDBG("Setting context pkey to 0x%04x.\n", pkey);
+	_HFI_VDBG(" Setting context pkey to 0x%04x.\n", pkey);
+	_HFI_VDBG(" PSMI_HFI_CMD_SET_PKEY:%u\n",__LINE__);
 	if (hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd)) == -1) {
-		_HFI_INFO("Setting context pkey to 0x%04x failed: %s\n",
+		_HFI_INFO(" Setting context pkey to 0x%04x failed: %s\n",
 			  pkey, strerror(errno));
 		return -1;
 	} else {
-		_HFI_VDBG("Successfully set context pkey to 0x%04x.\n", pkey);
+		_HFI_VDBG(" Successfully set context pkey to 0x%04x.\n", pkey);
 	}
 
         if (getenv("PSM2_SELINUX")) {
@@ -163,12 +174,13 @@ int hfi_set_pkey(struct _hfi_ctrl *ctrl, uint16_t pkey)
 		cmd.len = sizeof(tbinfo);
 		cmd.addr = (uint64_t) &tbinfo;
 
+		_HFI_VDBG(" PSMI_HFI_CMD_USER_INFO:%u\n",__LINE__);
 		if (hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd)) == -1) {
-			_HFI_VDBG("BASE_INFO command failed in setpkey: %s\n",
+			_HFI_VDBG(" BASE_INFO command failed in setpkey: %s\n",
 				  strerror(errno));
 			return -1;
 		}
-		_HFI_VDBG("PSM2_SELINUX is set, updating jkey to 0x%04x\n", tbinfo.jkey);
+		_HFI_VDBG(" PSM2_SELINUX is set, updating jkey to 0x%04x\n", tbinfo.jkey);
 		ctrl->base_info.jkey = tbinfo.jkey;
 	}
 	return 0;
@@ -189,12 +201,14 @@ int hfi_reset_context(struct _hfi_ctrl *ctrl)
 	cmd.addr = 0;
 
 retry:
+
+	_HFI_VDBG(" PSMI_HFI_CMD_CTXT_RESET:%u\n",__LINE__);
 	if (hfi_cmd_write(ctrl->fd, &cmd, sizeof(cmd)) == -1) {
 		if (errno == ENOLCK)
 			goto retry;
 
 		if (errno != EINVAL)
-			_HFI_INFO("reset ctxt failed: %s\n", strerror(errno));
+			_HFI_INFO(" reset ctxt failed: %s\n", strerror(errno));
 		return -1;
 	}
 	return 0;

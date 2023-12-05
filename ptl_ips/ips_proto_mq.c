@@ -695,7 +695,7 @@ ips_proto_mq_isend(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags_user,
 	if_pf(req == NULL)
 		return PSM2_NO_MEMORY;
 
-	_HFI_VDBG("(req=%p) ubuf=%p len=%u\n", req, ubuf, len);
+	_HFI_VDBG(" (req=%p) ubuf=%p len=%u\n", req, ubuf, len);
 
 	req->flags_user = flags_user;
 	req->flags_internal = flags_internal;
@@ -889,7 +889,7 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 	ips_scb_t *scb;
 	int gpu_mem = 0;
 
-	_HFI_VDBG("ubuf=%p len=%u\n", ubuf, len);
+	_HFI_VDBG(" ubuf=%p len=%u\n", ubuf, len);
 
 	ipsaddr = ((ips_epaddr_t *) mepaddr)->msgctl->ipsaddr_next;
 	ipsaddr->msgctl->ipsaddr_next = ipsaddr->next;
@@ -944,7 +944,7 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 		if (err != PSM2_OK)
 			return err;
 
-		_HFI_VDBG("[tiny][%s->%s][b=%p][m=%d][t=%08x.%08x.%08x]\n",
+		_HFI_VDBG(" [tiny][%s->%s][b=%p][m=%d][t=%08x.%08x.%08x]\n",
 			  psmi_epaddr_get_name(mq->ep->epid),
 			  psmi_epaddr_get_name(((psm2_epaddr_t) ipsaddr)->epid),
 			  ubuf, len, tag->tag[0], tag->tag[1], tag->tag[2]);
@@ -1025,7 +1025,7 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 					 (void*)user_buffer, paylen);
 			}
 		}
-		_HFI_VDBG("[shrt][%s->%s][b=%p][m=%d][t=%08x.%08x.%08x]\n",
+		_HFI_VDBG(" [shrt][%s->%s][b=%p][m=%d][t=%08x.%08x.%08x]\n",
 			  psmi_epaddr_get_name(mq->ep->epid),
 			  psmi_epaddr_get_name(((psm2_epaddr_t) ipsaddr)->epid),
 			  ubuf, len, tag->tag[0], tag->tag[1], tag->tag[2]);
@@ -1060,7 +1060,7 @@ ips_proto_mq_send(psm2_mq_t mq, psm2_epaddr_t mepaddr, uint32_t flags,
 
 		psmi_mq_wait_internal(&req);
 
-		_HFI_VDBG("[long][%s->%s][b=%p][m=%d][t=%08x.%08x.%08x]\n",
+		_HFI_VDBG(" [long][%s->%s][b=%p][m=%d][t=%08x.%08x.%08x]\n",
 			  psmi_epaddr_get_name(mq->ep->epid),
 			  psmi_epaddr_get_name(((psm2_epaddr_t) ipsaddr)->epid),
 			  ubuf, len, tag->tag[0], tag->tag[1], tag->tag[2]);
@@ -1393,7 +1393,7 @@ ips_proto_mq_handle_cts(struct ips_recvhdrq_event *rcv_ev)
 			ips_proto_send_nak((struct ips_recvhdrq *)rcv_ev->recvq, flow);
 			static unsigned int msg_cnt = 0;
 			if (msg_cnt++ == 0) {                                       /* Report the message only once */
-				_HFI_INFO("PSM2 memory shortage detected. Please consider modifying PSM2_MEMORY setting\n");
+				_HFI_INFO(" PSM2 memory shortage detected. Please consider modifying PSM2_MEMORY setting\n");
 			}
 			return PSM2_EP_NO_RESOURCES;
 		}
@@ -1480,7 +1480,7 @@ ips_proto_mq_handle_rts(struct ips_recvhdrq_event *rcv_ev)
 	 */
 	psmi_assert(msgorder != IPS_MSG_ORDER_PAST);
 
-	_HFI_VDBG("tag=%llx reqidx_peer=%d, msglen=%d\n",
+	_HFI_VDBG(" tag=%llx reqidx_peer=%d, msglen=%d\n",
 		  (long long)p_hdr->data[0].u64,
 		  p_hdr->data[1].u32w0, p_hdr->data[1].u32w1);
 
@@ -1592,7 +1592,7 @@ ips_proto_mq_handle_tiny(struct ips_recvhdrq_event *rcv_ev)
 	 */
 	psmi_assert(msgorder != IPS_MSG_ORDER_PAST);
 
-	_HFI_VDBG("tag=%08x.%08x.%08x opcode=0x%x, msglen=%d\n",
+	_HFI_VDBG(" tag=%08x.%08x.%08x opcode=0x%x, msglen=%d\n",
 		  p_hdr->tag[0], p_hdr->tag[1], p_hdr->tag[2],
 		  OPCODE_TINY, p_hdr->hdr_data.u32w1);
 
@@ -1678,7 +1678,7 @@ ips_proto_mq_handle_short(struct ips_recvhdrq_event *rcv_ev)
 	 */
 	psmi_assert(msgorder != IPS_MSG_ORDER_PAST);
 
-	_HFI_VDBG("tag=%08x.%08x.%08x opcode=0x%x, msglen=%d\n",
+	_HFI_VDBG(" tag=%08x.%08x.%08x opcode=0x%x, msglen=%d\n",
 		  p_hdr->tag[0], p_hdr->tag[1], p_hdr->tag[2],
 		  OPCODE_SHORT, p_hdr->hdr_data.u32w1);
 
@@ -1814,7 +1814,7 @@ ips_proto_mq_handle_eager(struct ips_recvhdrq_event *rcv_ev)
 	 */
 	psmi_assert(msgorder != IPS_MSG_ORDER_PAST);
 
-	_HFI_VDBG("tag=%08x.%08x.%08x opcode=0x%x, msglen=%d\n",
+	_HFI_VDBG(" tag=%08x.%08x.%08x opcode=0x%x, msglen=%d\n",
 		p_hdr->tag[0], p_hdr->tag[1], p_hdr->tag[2],
 		OPCODE_EAGER, p_hdr->hdr_data.u32w1);
 

@@ -83,7 +83,7 @@ ptl_handle_rtsmatch_request(psm2_mq_req_t req, int was_posted,
 	psmi_assert((tok != NULL && was_posted)
 		    || (tok == NULL && !was_posted));
 
-	_HFI_VDBG("[shm][rndv][recv] req=%p dest=%p len=%d tok=%p\n",
+	_HFI_VDBG(" [shm][rndv][recv] req=%p dest=%p len=%d tok=%p\n",
 		  req, req->req_data.buf, req->req_data.recv_msglen, tok);
 #ifdef PSM_CUDA
 	if (req->cuda_ipc_handle_attached) {
@@ -206,7 +206,7 @@ psmi_am_mq_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 	tag.tag[1] = args[1].u32w0;
 	tag.tag[2] = args[2].u32w1;
 	psmi_assert(toki != NULL);
-	_HFI_VDBG("mq=%p opcode=0x%x, len=%d, msglen=%d\n",
+	_HFI_VDBG(" mq=%p opcode=0x%x, len=%d, msglen=%d\n",
 		  tok->mq, opcode, (int)len, msglen);
 
 	switch (opcode) {
@@ -297,7 +297,7 @@ psmi_am_mq_handler_rtsmatch(void *toki, psm2_amarg_t *args, int narg, void *buf,
 	uint32_t msglen = args[3].u32w0;
 	psm2_amarg_t rarg[1];
 
-	_HFI_VDBG("[rndv][send] req=%p dest_req=%p src=%p dest=%p len=%d\n",
+	_HFI_VDBG(" [rndv][send] req=%p dest_req=%p src=%p dest=%p len=%d\n",
 		  sreq, (void *)(uintptr_t) args[1].u64w0, sreq->req_data.buf, dest,
 		  msglen);
 
@@ -343,7 +343,7 @@ psmi_am_mq_handler_rtsdone(void *toki, psm2_amarg_t *args, int narg, void *buf,
 {
 	psm2_mq_req_t rreq = (psm2_mq_req_t) (uintptr_t) args[0].u64w0;
 	psmi_assert(narg == 1);
-	_HFI_VDBG("[rndv][recv] req=%p dest=%p len=%d\n", rreq, rreq->req_data.buf,
+	_HFI_VDBG(" [rndv][recv] req=%p dest=%p len=%d\n", rreq, rreq->req_data.buf,
 		  rreq->req_data.recv_msglen);
 	psmi_mq_handle_rts_complete(rreq);
 }

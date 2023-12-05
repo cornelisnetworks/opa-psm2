@@ -760,7 +760,7 @@ int ips_proto_process_nak(struct ips_recvhdrq_event *rcv_ev)
 
 	proto->epaddr_stats.nak_recv++;
 
-	_HFI_VDBG("got a nack %d on flow %d, "
+	_HFI_VDBG(" got a nack %d on flow %d, "
 		  "first is %d, last is %d\n", ack_seq_num.psn_num,
 		  flow->flowid,
 		  STAILQ_EMPTY(unackedq) ? -1 : STAILQ_FIRST(unackedq)->seq_num.
@@ -941,7 +941,7 @@ ips_proto_process_err_chk(struct ips_recvhdrq_event *rcv_ev)
 	seq_off = (int16_t) (flow->recv_seq_num.psn_num - seq_num.psn_num);
 
 	if_pf(seq_off <= 0) {
-		_HFI_VDBG("naking for seq=%d, off=%d on flowid  %d\n",
+		_HFI_VDBG(" naking for seq=%d, off=%d on flowid  %d\n",
 			  seq_num.psn_num, seq_off, flowid);
 
 		if (seq_off < -flow->ack_interval)
@@ -1116,7 +1116,7 @@ ips_proto_process_becn(struct ips_recvhdrq_event *rcv_ev)
 
 static void ips_bad_opcode(uint8_t op_code, struct ips_message_header *proto)
 {
-	_HFI_INFO("Discarding message with bad opcode 0x%x\n", op_code);
+	_HFI_INFO(" Discarding message with bad opcode 0x%x\n", op_code);
 
 	if (hfi_debug & __HFI_DBG) {
 		ips_proto_show_header(proto, "received bad opcode");

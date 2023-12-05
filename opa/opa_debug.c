@@ -70,6 +70,8 @@
 #include "../psm_log.h"
 
 unsigned hfi_debug = 1;
+unsigned hfi_debug_sleep = 0;
+
 char *__hfi_mylabel = NULL;
 FILE *__hfi_dbgout;
 static void init_hfi_mylabel(void) __attribute__ ((constructor));
@@ -157,7 +159,7 @@ static void init_hfi_mylabel(void)
 			snprintf(lbl, 1024, "%s.%lu", hostname, val);
 	}
 	if (lbl[0] == '\0')
-		snprintf(lbl, 1024, "%s.%u", hostname, getpid());
+		snprintf(lbl, 1024, "%s.%u ", hostname, getpid());
 	__hfi_mylabel = strdup(lbl);
 }
 
@@ -295,7 +297,7 @@ static void init_hfi_dbgfile(void)
 	FILE *newf;
 
 	if (!fname) {
-		__hfi_dbgout = stdout;
+		__hfi_dbgout = stderr;
 		return;
 	}
 	exph = strstr(fname, "%h");	/* hostname */
@@ -341,7 +343,7 @@ static void init_hfi_dbgfile(void)
 		_HFI_ERROR
 		    ("Unable to open \"%s\" for debug output, using stdout: %s\n",
 		     fname, strerror(errno));
-		__hfi_dbgout = stdout;
+		__hfi_dbgout = stderr;
 	} else {
 		__hfi_dbgout = newf;
 		setlinebuf(__hfi_dbgout);

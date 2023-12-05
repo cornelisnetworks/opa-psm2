@@ -425,7 +425,7 @@ int device_support_gpudirect())
 				device);
 		if (major < 3) {
 			_device_support_gpudirect = 0;
-			_HFI_INFO("CUDA device %d does not support GPUDirect RDMA (Non-fatal error)\n", dev);
+			_HFI_INFO(" CUDA device %d does not support GPUDirect RDMA (Non-fatal error)\n", dev);
 		}
 	}
 

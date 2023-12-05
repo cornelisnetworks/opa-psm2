@@ -83,10 +83,10 @@ static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
 	__u64 off;
 	void *maddr;
 
-
 	/* 1. Map the PIO credits address */
 	off = binfo->sc_credits_addr &~ HFI_MMAP_PGMASK;
 
+	_HFI_VDBG(" :%u\n",__LINE__);
 	sz = HFI_MMAP_PGSIZE;
 	maddr = HFI_MMAP_ERRCHECK(fd, binfo, sc_credits_addr, sz, PROT_READ);
 	hfi_touch_mmap(maddr, sz);
@@ -101,12 +101,14 @@ static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
 	 * when treated as unsigned which in turn will make the HFI_MMAP_ERRCHECK() macro fail and give an
 	 * adequate error report. TODO: Consider sanitizing the credits value explicitly
 	 */
+	_HFI_VDBG(" :%u\n",__LINE__);
 	sz = cinfo->credits * CREDITS_NUM;
 	HFI_MMAP_ERRCHECK(fd, binfo, pio_bufbase_sop, sz, PROT_WRITE);
 	arrsz[PIO_BUFBASE_SOP] = sz;
 
 
 	/* 3. Map the PIO buffer address */
+	_HFI_VDBG(" :%u\n",__LINE__);
 	sz = cinfo->credits * CREDITS_NUM;
 	HFI_MMAP_ERRCHECK(fd, binfo, pio_bufbase, sz, PROT_WRITE);
 	arrsz[PIO_BUFBASE] = sz;
@@ -115,6 +117,7 @@ static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
 	/* 4. Map the receive header queue
 	 * (u16 * u16 -> max value 0xfffe0001)
 	 */
+	_HFI_VDBG(" :%u\n",__LINE__);
 	sz = (size_t)cinfo->rcvhdrq_cnt * cinfo->rcvhdrq_entsize;
 	maddr = HFI_MMAP_ERRCHECK(fd, binfo, rcvhdr_bufbase, sz, PROT_READ);
 	hfi_touch_mmap(maddr, sz);
@@ -124,6 +127,7 @@ static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
 	/* 5. Map the receive eager buffer
 	 * (u16 * u32. Assuming size_t's precision is 64 bits - no overflow)
 	 */
+	_HFI_VDBG(" :%u\n",__LINE__);
 	sz = (size_t)cinfo->egrtids * cinfo->rcvegr_size;
 	maddr = HFI_MMAP_ERRCHECK(fd, binfo, rcvegr_bufbase, sz, PROT_READ);
 	hfi_touch_mmap(maddr, sz);
@@ -131,10 +135,13 @@ static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
 
 
 	/* 6. Map the sdma completion queue */
+	_HFI_VDBG(" :%u\n",__LINE__);
 	if (cinfo->runtime_flags & HFI1_CAP_SDMA) {
+		_HFI_VDBG(" :%u\n",__LINE__);
 		sz = cinfo->sdma_ring_size * sizeof(struct hfi1_sdma_comp_entry);
 		HFI_MMAP_ERRCHECK(fd, binfo, sdma_comp_bufbase, sz, PROT_READ);
 	} else {
+		_HFI_VDBG(" :%u\n",__LINE__);
 		sz = 0;
 		binfo->sdma_comp_bufbase = (__u64)0;
 	}
@@ -142,6 +149,7 @@ static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
 
 
 	/* 7. Map RXE per-context CSRs */
+	_HFI_VDBG(" :%u\n",__LINE__);
 	sz = HFI_MMAP_PGSIZE;
 	HFI_MMAP_ERRCHECK(fd, binfo, user_regbase, sz, PROT_WRITE|PROT_READ);
 	arrsz[USER_REGBASE] = sz;
@@ -155,6 +163,19 @@ static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
 	ctrl->__hfi_rcvegrhead = (volatile __le64 *)(regbasep + ur_rcvegrindexhead);
 	ctrl->__hfi_rcvofftail = (volatile __le64 *)(regbasep + ur_rcvegroffsettail);
 
+	_HFI_VDBG(" user_regbase:[%d]            %p\n",
+		  ur_maxreg, regbasep);
+	_HFI_VDBG(" user_regbase:[%u] rcvhdrtail %p\n",
+		  ur_rcvhdrtail, ctrl->__hfi_rcvhdrtail);
+	_HFI_VDBG(" user_regbase:[%u] rcvhdrhead %p\n",
+		  ur_rcvhdrhead, ctrl->__hfi_rcvhdrhead);
+	_HFI_VDBG(" user_regbase:[%u] rcvegrtail %p\n",
+		  ur_rcvegrindextail, ctrl->__hfi_rcvegrtail);
+	_HFI_VDBG(" user_regbase:[%u] rcvegrhead %p\n",
+		  ur_rcvegrindexhead, ctrl->__hfi_rcvegrhead);
+	_HFI_VDBG(" user_regbase:[%u] rcvofftail %p\n",
+		  ur_rcvegroffsettail, ctrl->__hfi_rcvofftail);
+
 	if (cinfo->runtime_flags & HFI1_CAP_HDRSUPP) {
 		ctrl->__hfi_rcvtidflow = (volatile __le64 *)(regbasep + ur_rcvtidflowtable);
 		ctrl->__hfi_tfvalid = 1;
@@ -166,23 +187,31 @@ static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
 
 	/* 8. Map the rcvhdrq tail register address */
 	if (cinfo->runtime_flags & HFI1_CAP_DMA_RTAIL) {
+		_HFI_VDBG(" :%u\n",__LINE__);
 		sz = HFI_MMAP_PGSIZE;
 		HFI_MMAP_ERRCHECK(fd, binfo, rcvhdrtail_base, sz, PROT_READ);
 	} else {
 		/* We don't use receive header queue tail register to detect new packets,
  		 * but here we save the address for false-eager-full recovery
  		 */
+		_HFI_VDBG(" :%u\n",__LINE__);
 		sz = 0;
 		/* This points inside the previously established mapping (user_rehbase). Don't munmap()! */
 		binfo->rcvhdrtail_base = (uint64_t) (uintptr_t) ctrl->__hfi_rcvhdrtail;
 	}
+	_HFI_VDBG(" user_regbase:     rcvhdrtail_base %llx\n",
+		  binfo->rcvhdrtail_base);
+
 	ctrl->__hfi_rcvtail = (__le64 *)binfo->rcvhdrtail_base;
 	arrsz[RCVHDRTAIL_BASE] = sz;
+	_HFI_VDBG(" user_regbase:     rcvtail %p\n",
+		  ctrl->__hfi_rcvtail);
 
 
 	/* 9. Map the event page */
 	off = binfo->events_bufbase &~ HFI_MMAP_PGMASK;
 
+	_HFI_VDBG(" :%u\n",__LINE__);
 	sz = HFI_MMAP_PGSIZE;
 	HFI_MMAP_ERRCHECK(fd, binfo, events_bufbase, sz, PROT_READ);
 	arrsz[EVENTS_BUFBASE] = sz;
@@ -191,6 +220,7 @@ static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
 
 
 	/* 10. Map the status page */
+	_HFI_VDBG(" :%u\n",__LINE__);
 	sz = HFI_MMAP_PGSIZE;
 	HFI_MMAP_ERRCHECK(fd, binfo, status_bufbase, sz, PROT_READ);
 	arrsz[STATUS_BUFBASE] = sz;
@@ -204,6 +234,7 @@ static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
 	size_t factor;
 
 	/* 11a) subctxt_uregbase */
+	_HFI_VDBG(" :%u\n",__LINE__);
 	sz = HFI_MMAP_PGSIZE;
 	maddr = HFI_MMAP_ERRCHECK(fd, binfo, subctxt_uregbase, sz, PROT_READ|PROT_WRITE);
 	hfi_touch_mmap(maddr, sz);
@@ -215,6 +246,7 @@ static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
 	 */
 	factor = (size_t)cinfo->rcvhdrq_cnt * cinfo->rcvhdrq_entsize;
 	factor = ALIGN(factor, HFI_MMAP_PGSIZE);
+	_HFI_VDBG(" :%u\n",__LINE__);
 	sz = factor * subctxt_cnt;
 	maddr = HFI_MMAP_ERRCHECK(fd, binfo, subctxt_rcvhdrbuf, sz, PROT_READ|PROT_WRITE);
 	hfi_touch_mmap(maddr, sz);
@@ -226,9 +258,10 @@ static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
 	 */
 	factor = (size_t)cinfo->egrtids * cinfo->rcvegr_size;
 	factor = ALIGN(factor, HFI_MMAP_PGSIZE);
+	_HFI_VDBG(" :%u\n",__LINE__);
 	sz = factor * subctxt_cnt;
 	if (sz / subctxt_cnt != factor) {
-		_HFI_INFO("%s (rcvegrbuf)\n", errstr);
+		_HFI_INFO(" %s (rcvegrbuf)\n", errstr);
 		goto err_int_overflow_subctxt_rcvegrbuf;
 	}
 	maddr = HFI_MMAP_ERRCHECK(fd, binfo, subctxt_rcvegrbuf, sz, PROT_READ|PROT_WRITE);
@@ -305,19 +338,19 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 	/* for major version 6 of driver, we will use uinfo_new.  See below for details. */
 	struct hfi1_user_info uinfo_new = {0};
 #endif
-
+	_HFI_VDBG(" :%u\n",__LINE__);
 	/* First get the page size */
 	__hfi_pg_sz = sysconf(_SC_PAGESIZE);
 
 	if (!(spctrl = calloc(1, sizeof(struct _hfi_ctrl)))) {
-		_HFI_INFO("Warning: can't allocate memory for hfi_ctrl: %s\n",
+		_HFI_INFO(" Warning: can't allocate memory for hfi_ctrl: %s\n",
 			  strerror(errno));
 		goto err_calloc_hfi_ctrl;
 	}
 	cinfo = &spctrl->ctxt_info;
 	binfo = &spctrl->base_info;
 
-	_HFI_VDBG("uinfo: ver %x, alg %d, subc_cnt %d, subc_id %d\n",
+	_HFI_VDBG(" uinfo: ver %x, alg %d, subc_cnt %d, subc_id %d\n",
 		  uinfo->userversion, uinfo->hfi1_alg,
 		  uinfo->subctxt_cnt, uinfo->subctxt_id);
 
@@ -326,6 +359,7 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 	c.type = PSMI_HFI_CMD_ASSIGN_CTXT;
 
 #ifdef PSM2_SUPPORT_IW_CMD_API
+	_HFI_VDBG(" hfi_get_user_major_version() %d\n",hfi_get_user_major_version());
 	/* If psm is communicating with a MAJOR version 6 driver, we need
 	   to pass in an actual struct hfi1_user_info not a hfi1_user_info_dep.
 	   Else if psm is communicating with a MAJOR version 5 driver, we can
@@ -333,6 +367,7 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 	   is identical to the MAJOR version 5 struct hfi1_user_info. */
 	if (hfi_get_user_major_version() == IOCTL_CMD_API_MODULE_MAJOR)
 	{
+	_HFI_VDBG(" hfi_get_user_major_version() %d == %d\n",hfi_get_user_major_version(),IOCTL_CMD_API_MODULE_MAJOR);
 		/* If psm is communicating with a MAJOR version 6 driver,
 		   we copy uinfo into uinfo_new and pass uinfo_new to the driver. */
 		c.len = sizeof(uinfo_new);
@@ -355,22 +390,27 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 	c.len = sizeof(*uinfo);
 	c.addr = (__u64) uinfo;
 #endif
+	_HFI_VDBG(" c.len %d, c.addr %#llX\n",c.len,(__u64) c.addr);
+        _HFI_VDBG(" PSMI_HFI_CMD_ASSIGN_CTXT:%u\n",__LINE__);
 	if (hfi_cmd_write(fd, &c, sizeof(c)) == -1) {
+		_HFI_VDBG(" :%u\n",__LINE__);
 		if (errno == ENODEV) {
-			_HFI_INFO("Warning: PSM2 and driver version mismatch\n");
+			_HFI_INFO(" Warning: PSM2 and driver version mismatch\n");
 			/* Overwrite errno. One would wish that the driver
 			 * didn't return ENODEV for a version mismatch */
 			errno = EPROTONOSUPPORT;
 		} else {
-			_HFI_INFO("Warning: assign_context command failed: %s\n",
+			_HFI_INFO(" Warning: assign_context command failed: %s\n",
 				  strerror(errno));
 		}
 		goto err_hfi_cmd_assign_ctxt;
 	}
+	_HFI_VDBG(" :%u\n",__LINE__);
 
 #ifdef PSM2_SUPPORT_IW_CMD_API
 	if (hfi_get_user_major_version() == IOCTL_CMD_API_MODULE_MAJOR)
 	{
+		_HFI_VDBG(" :%u\n",__LINE__);
 		/* for the new driver, we copy the results of the call back to uinfo from
 		   uinfo_new. */
 		uinfo->userversion = uinfo_new.userversion;
@@ -380,70 +420,88 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 		memcpy(uinfo->uuid,uinfo_new.uuid,sizeof(uinfo_new.uuid));
 	}
 #endif
+        _HFI_VDBG(" :%u\n",__LINE__);
 
 	/* 2. get context info from driver */
 	c.type = PSMI_HFI_CMD_CTXT_INFO;
 	c.len = sizeof(*cinfo);
 	c.addr = (__u64) cinfo;
 
+        _HFI_VDBG(" PSMI_HFI_CMD_CTXT_INFO:%u\n",__LINE__);
 	if (hfi_cmd_write(fd, &c, sizeof(c)) == -1) {
+		_HFI_VDBG(" :%u\n",__LINE__);
 		_HFI_ERROR("CTXT_INFO command failed: %s\n", strerror(errno));
 		goto err_hfi_cmd_ctxt_info;
 	}
+        _HFI_VDBG(" :%u\n",__LINE__);
 
 	/* sanity checking... */
 	if (cinfo->rcvtids%8) {
+		_HFI_VDBG(" :%u\n",__LINE__);
 		_HFI_ERROR("rcvtids not 8 multiple: %d\n", cinfo->rcvtids);
 		goto err_sanity_check;
 	}
+		_HFI_VDBG(" :%u\n",__LINE__);
 	if (cinfo->egrtids%8) {
+		_HFI_VDBG(" :%u\n",__LINE__);
 		_HFI_ERROR("egrtids not 8 multiple: %d\n", cinfo->egrtids);
 		goto err_sanity_check;
 	}
+        _HFI_VDBG(" :%u\n",__LINE__);
 	if (cinfo->rcvtids < cinfo->egrtids) {
+		_HFI_VDBG(" :%u\n",__LINE__);
 		_HFI_ERROR("rcvtids(%d) < egrtids(%d)\n",
 				cinfo->rcvtids, cinfo->egrtids);
 		goto err_sanity_check;
 	}
+        _HFI_VDBG(" :%u\n",__LINE__);
 	if (cinfo->rcvhdrq_cnt%32) {
+		_HFI_VDBG(" :%u\n",__LINE__);
 		_HFI_ERROR("rcvhdrq_cnt not 32 multiple: %d\n",
 				cinfo->rcvhdrq_cnt);
 		goto err_sanity_check;
 	}
+        _HFI_VDBG(" :%u\n",__LINE__);
 	if (cinfo->rcvhdrq_entsize%64) {
+		_HFI_VDBG(" :%u\n",__LINE__);
 		_HFI_ERROR("rcvhdrq_entsize not 64 multiple: %d\n",
 				cinfo->rcvhdrq_entsize);
 		goto err_sanity_check;
 	}
+        _HFI_VDBG(" :%u\n",__LINE__);
 	if (cinfo->rcvegr_size%__hfi_pg_sz) {
+		_HFI_VDBG(" :%u\n",__LINE__);
 		_HFI_ERROR("rcvegr_size not page multiple: %d\n",
 				cinfo->rcvegr_size);
 		goto err_sanity_check;
 	}
+        _HFI_VDBG(" :%u\n",__LINE__);
 
-	_HFI_VDBG("ctxtinfo: runtime_flags %llx, rcvegr_size %d\n",
+	_HFI_VDBG(" ctxtinfo: runtime_flags %llx, rcvegr_size %d\n",
 		  cinfo->runtime_flags, cinfo->rcvegr_size);
-	_HFI_VDBG("ctxtinfo: active %d, unit %d, ctxt %d, subctxt %d\n",
+	_HFI_VDBG(" ctxtinfo: active %d, unit %d, ctxt %d, subctxt %d\n",
 		  cinfo->num_active, cinfo->unit, cinfo->ctxt, cinfo->subctxt);
-	_HFI_VDBG("ctxtinfo: rcvtids %d, credits %d\n",
+	_HFI_VDBG(" ctxtinfo: rcvtids %d, credits %d\n",
 		  cinfo->rcvtids, cinfo->credits);
-	_HFI_VDBG("ctxtinfo: numa %d, cpu %x, send_ctxt %d\n",
+	_HFI_VDBG(" ctxtinfo: numa %d, cpu %x, send_ctxt %d\n",
 		  cinfo->numa_node, cinfo->rec_cpu, cinfo->send_ctxt);
-	_HFI_VDBG("ctxtinfo: rcvhdrq_cnt %d, rcvhdrq_entsize %d\n",
+	_HFI_VDBG(" ctxtinfo: rcvhdrq_cnt %d, rcvhdrq_entsize %d\n",
 		  cinfo->rcvhdrq_cnt, cinfo->rcvhdrq_entsize);
-	_HFI_VDBG("ctxtinfo: egrtids %d, sdma_ring_size %d\n",
+	_HFI_VDBG(" ctxtinfo: egrtids %d, sdma_ring_size %d\n",
 		  cinfo->egrtids, cinfo->sdma_ring_size);
 
 	/* if affinity has not been setup, set it */
+        _HFI_VDBG(" :%u\n",__LINE__);
 	if (getenv("HFI_FORCE_CPUAFFINITY") ||
 		(cinfo->rec_cpu != (__u16) -1 &&
 		!(getenv("HFI_NO_CPUAFFINITY") || skip_affinity)))
 	{
+		_HFI_VDBG(" :%u\n",__LINE__);
 		cpu_set_t cpuset;
 		CPU_ZERO(&cpuset);
 		CPU_SET(cinfo->rec_cpu, &cpuset);
 		if (sched_setaffinity(0, sizeof(cpuset), &cpuset)) {
-			_HFI_INFO("Warning: Couldn't set runon processor %u "
+			_HFI_INFO(" Warning: Couldn't set runon processor %u "
 				  "(unit:context %u:%u) (%u active chips): %s\n",
 				  cinfo->rec_cpu, cinfo->unit, cinfo->ctxt,
 				  cinfo->num_active, strerror(errno));
@@ -454,24 +512,28 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 	c.type = PSMI_HFI_CMD_USER_INFO;
 	c.len = sizeof(*binfo);
 	c.addr = (__u64) binfo;
+	_HFI_VDBG(" PSMI_HFI_CMD_USER_INFO:%u\n",__LINE__);
 
 	if (hfi_cmd_write(fd, &c, sizeof(c)) == -1) {
+		_HFI_VDBG(" :%u\n",__LINE__);
 		_HFI_ERROR("BASE_INFO command failed: %s\n", strerror(errno));
 		goto err_hfi_cmd_user_info;
 	}
 
+        _HFI_VDBG(" :%u\n",__LINE__);
 	hfi_set_user_version(binfo->sw_version);
+        _HFI_VDBG(" :%u\n",__LINE__);
 
-	_HFI_VDBG("baseinfo: hwver %x, swver %x, jkey %d, qp %d\n",
+	_HFI_VDBG(" baseinfo: hwver %x, swver %x, jkey %d, qp %d\n",
 		  binfo->hw_version, binfo->sw_version,
 		  binfo->jkey, binfo->bthqp);
-	_HFI_VDBG("baseinfo: credit_addr %llx, sop %llx, pio %llx\n",
+	_HFI_VDBG(" baseinfo: credit_addr %llx, sop %llx, pio %llx\n",
 		  binfo->sc_credits_addr, binfo->pio_bufbase_sop,
 		  binfo->pio_bufbase);
-	_HFI_VDBG("baseinfo: hdrbase %llx, egrbase %llx, sdmabase %llx\n",
+	_HFI_VDBG(" baseinfo: hdrbase %llx, egrbase %llx, sdmabase %llx\n",
 		  binfo->rcvhdr_bufbase, binfo->rcvegr_bufbase,
 		  binfo->sdma_comp_bufbase);
-	_HFI_VDBG("baseinfo: ureg %llx, eventbase %llx, "
+	_HFI_VDBG(" baseinfo: ureg %llx, eventbase %llx, "
 		  "statusbase %llx, tailaddr %llx\n", binfo->user_regbase,
 		  binfo->events_bufbase, binfo->status_bufbase,
 		  binfo->rcvhdrtail_base);
@@ -480,6 +542,7 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 	 * Check if driver version matches PSM version,
 	 * this is different from PSM API version.
 	 */
+        _HFI_VDBG(" :%u\n",__LINE__);
 	if ((binfo->sw_version >> HFI1_SWMAJOR_SHIFT) != hfi_get_user_major_version()) {
 		_HFI_ERROR
 		    ("User major version 0x%x not same as driver major 0x%x\n",
@@ -487,13 +550,16 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 		if ((binfo->sw_version >> HFI1_SWMAJOR_SHIFT) < hfi_get_user_major_version())
 			goto err_version_mismatch;	/* else assume driver knows how to be compatible */
 	} else if ((binfo->sw_version & 0xffff) != HFI1_USER_SWMINOR) {
+		_HFI_VDBG(" :%u\n",__LINE__);
 		_HFI_PRDBG
 		    ("User minor version 0x%x not same as driver minor 0x%x\n",
 		     HFI1_USER_SWMINOR, binfo->sw_version & 0xffff);
 	}
+        _HFI_VDBG(" :%u\n",__LINE__);
 
 	if (map_hfi_mem(fd, spctrl, uinfo->subctxt_cnt) == -1)
 		goto err_map_hfi_mem;
+	_HFI_VDBG(" :%u\n",__LINE__);
 
 	/* Save some info. */
 	spctrl->fd = fd;
@@ -509,6 +575,7 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 	spctrl->__hfi_port = 1;
 	spctrl->__hfi_tidegrcnt = cinfo->egrtids;
 	spctrl->__hfi_tidexpcnt = cinfo->rcvtids - cinfo->egrtids;
+        _HFI_VDBG(" :%u\n",__LINE__);
 
 	return spctrl;
 
@@ -522,6 +589,7 @@ err_hfi_cmd_ctxt_info:
 	/* TODO: ioctl de-assign context here? */
 	// without de-assigning the context, all subsequent hfi_userinit_internal()
 	// calls are going to fail
+        _HFI_VDBG(" :%u\n",__LINE__);
 	_HFI_ERROR("An unrecoverable error occurred while communicating with the driver\n");
 	abort(); /* TODO: or do we want to include psm_user.h to use psmi_handle_error()? */
 	// no recovery here
@@ -534,10 +602,12 @@ err_hfi_cmd_assign_ctxt:
 	free(spctrl);
 
 err_calloc_hfi_ctrl:
+        _HFI_VDBG(" :%u\n",__LINE__);
 	return NULL;
 }
 
 struct _hfi_ctrl *hfi_userinit(int fd, struct hfi1_user_info_dep *uinfo)
 {
+        _HFI_VDBG(" :%u\n",__LINE__);
 	return hfi_userinit_internal(fd, false, uinfo);
 }

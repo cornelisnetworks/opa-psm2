@@ -247,7 +247,7 @@ __psm2_ep_connect(psm2_ep_t ep, int num_of_epid, psm2_epid_t const *array_of_epi
 		psmi_assert_always(array_of_epaddr[i] != NULL);
 		c = array_of_epaddr[i]->ptlctl;
 		psmi_assert_always(c != NULL);
-		_HFI_VDBG("%-20s DEVICE %s (%p)\n",
+		_HFI_VDBG(" %-20s DEVICE %s (%p)\n",
 			  psmi_epaddr_get_name(array_of_epid[i]),
 			  c == &ep->ptl_ips ? "hfi" :
 			  (c == &ep->ptl_amsh ? "amsh" : "self"),

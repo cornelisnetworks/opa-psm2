@@ -126,7 +126,7 @@ ips_epstate_add(struct ips_epstate *eps, struct ips_epaddr *ipsaddr,
 	}
 	psmi_assert_always(i != eps->eps_tabsize);
 	connidx = (j - eps->eps_base_idx) & (IPS_EPSTATE_CONNIDX_MAX-1);
-	_HFI_VDBG("node %s gets connidx=%d (table idx %d)\n",
+	_HFI_VDBG(" node %s gets connidx=%d (table idx %d)\n",
 		  psmi_epaddr_get_name(((psm2_epaddr_t) ipsaddr)->epid), connidx,
 		  j);
 	eps->eps_tab[j].ipsaddr = ipsaddr;
@@ -146,7 +146,7 @@ psm2_error_t ips_epstate_del(struct ips_epstate *eps, ips_epstate_idx connidx)
 	/* actual table index */
 	idx = (connidx + eps->eps_base_idx) & (IPS_EPSTATE_CONNIDX_MAX-1);
 	psmi_assert_always(idx < eps->eps_tabsize);
-	_HFI_VDBG("connidx=%d, table_idx=%d\n", connidx, idx);
+	_HFI_VDBG(" connidx=%d, table_idx=%d\n", connidx, idx);
 	eps->eps_tab[idx].ipsaddr = NULL;
 	/* We may eventually want to release memory, but probably not */
 	eps->eps_tabsizeused--;

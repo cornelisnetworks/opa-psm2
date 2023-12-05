@@ -60,6 +60,8 @@
 #include "opa_debug.h"
 
 extern unsigned hfi_debug;
+extern unsigned hfi_debug_sleep;
+
 const char *hfi_get_unit_name(int unit);
 extern char *__progname;
 
@@ -99,19 +101,22 @@ extern FILE *__hfi_dbgout;
 #define __HFI_DBG_WHICH(which, fmt, ...) \
 	do { \
 		_Pragma_unlikely \
-		if (unlikely(hfi_debug&(which))) \
+		if (unlikely(hfi_debug&(which))) {\
 			fprintf(__hfi_dbgout, "%s%s: " fmt, __hfi_mylabel, __func__, \
 			       ##__VA_ARGS__); \
+		fflush(__hfi_dbgout);} \
 	} while (0)
 
 #define __HFI_DBG_WHICH_NOFUNC(which, fmt, ...) \
 	do { \
 		_Pragma_unlikely \
-		if (unlikely(hfi_debug&(which))) \
+		if (unlikely(hfi_debug&(which))) {\
 			fprintf(__hfi_dbgout, "%s" fmt, __hfi_mylabel, \
 			       ##__VA_ARGS__); \
+                fflush(__hfi_dbgout);} \
 	} while (0)
 
+#define _HFI_DBG_SLEEP  if(hfi_debug_sleep) sleep(hfi_debug_sleep)
 #define _HFI_DBG(fmt, ...) __HFI_DBG_WHICH(__HFI_DBG, fmt, ##__VA_ARGS__)
 #define _HFI_VDBG(fmt, ...) __HFI_DBG_WHICH(__HFI_VERBDBG, fmt, ##__VA_ARGS__)
 #define _HFI_PDBG(fmt, ...) __HFI_DBG_WHICH(__HFI_PKTDBG, fmt, ##__VA_ARGS__)
@@ -140,6 +145,7 @@ extern FILE *__hfi_dbgout;
 		_Pragma_unlikely \
 		fprintf(__hfi_dbgout, "%s" fmt, __hfi_mylabel, \
 			##__VA_ARGS__); \
+                fflush(__hfi_dbgout); \
 	} while (0)
 
 #define _HFI_VDBG_ON unlikely(hfi_debug & __HFI_VERBDBG)

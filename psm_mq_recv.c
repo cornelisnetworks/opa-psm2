@@ -88,7 +88,7 @@ void psmi_mq_handle_rts_complete(psm2_mq_req_t req)
 	if(!psmi_is_req_internal(req))
 		mq_qq_append(&mq->completed_q, req);
 
-	_HFI_VDBG("RTS complete, req=%p, recv_msglen = %d\n",
+	_HFI_VDBG(" RTS complete, req=%p, recv_msglen = %d\n",
 		  req, req->req_data.recv_msglen);
 	return;
 }
@@ -319,14 +319,14 @@ psmi_mq_handle_rts(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 
 #ifdef PSM_DEBUG
 	if (req)
-		_HFI_VDBG("match=%s (req=%p) src=%s mqtag=%08x.%08x.%08x recvlen=%d "
+		_HFI_VDBG(" match=%s (req=%p) src=%s mqtag=%08x.%08x.%08x recvlen=%d "
 			  "sendlen=%d errcode=%d\n",
 			  rc == MQ_RET_MATCH_OK ? "YES" : "NO", req,
 			  psmi_epaddr_get_name(src->epid),
 			  req->req_data.tag.tag[0], req->req_data.tag.tag[1], req->req_data.tag.tag[2],
 			  req->req_data.recv_msglen, req->req_data.send_msglen, req->req_data.error_code);
 	else
-		_HFI_VDBG("match=%s (req=%p) src=%s\n",
+		_HFI_VDBG(" match=%s (req=%p) src=%s\n",
 			  rc == MQ_RET_MATCH_OK ? "YES" : "NO", req,
 			  psmi_epaddr_get_name(src->epid));
 #endif /* #ifdef PSM_DEBUG */
@@ -354,7 +354,7 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		req->req_data.tag = *tag;
 		msglen = mq_set_msglen(req, req->req_data.buf_len, send_msglen);
 
-		_HFI_VDBG("match=YES (req=%p) opcode=%x src=%s mqtag=%x.%x.%x"
+		_HFI_VDBG(" match=YES (req=%p) opcode=%x src=%s mqtag=%x.%x.%x"
 			  " msglen=%d paylen=%d\n", req, opcode,
 			  psmi_epaddr_get_name(src->epid),
 			  tag->tag[0], tag->tag[1], tag->tag[2], msglen,
@@ -415,7 +415,7 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 			req->type |= MQE_TYPE_EAGER_QUEUE;
 			req->send_msgoff = req->recv_msgoff = 0;
 			STAILQ_INSERT_TAIL(&mq->eager_q, req, nextq);
-			_HFI_VDBG("exp MSG_EAGER of length %d bytes pay=%d\n",
+			_HFI_VDBG(" exp MSG_EAGER of length %d bytes pay=%d\n",
 				  msglen, paylen);
 #ifdef PSM_CUDA
 			if (PSMI_USE_GDR_COPY(req, req->req_data.send_msglen)) {
@@ -480,7 +480,7 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 	req->req_data.recv_msglen = req->req_data.send_msglen = req->req_data.buf_len = msglen =
 	    send_msglen;
 
-	_HFI_VDBG("match=NO (req=%p) opcode=%x src=%s mqtag=%08x.%08x.%08x"
+	_HFI_VDBG(" match=NO (req=%p) opcode=%x src=%s mqtag=%08x.%08x.%08x"
 		  " send_msglen=%d\n", req, opcode,
 		  psmi_epaddr_get_name(src->epid),
 		  tag->tag[0], tag->tag[1], tag->tag[2], send_msglen);
@@ -528,7 +528,7 @@ psmi_mq_handle_envelope(psm2_mq_t mq, psm2_epaddr_t src, psm2_mq_tag_t *tag,
 		req->state = MQ_STATE_UNEXP;
 		req->type |= MQE_TYPE_EAGER_QUEUE;
 		STAILQ_INSERT_TAIL(&mq->eager_q, req, nextq);
-		_HFI_VDBG("unexp MSG_EAGER of length %d bytes pay=%d\n",
+		_HFI_VDBG(" unexp MSG_EAGER of length %d bytes pay=%d\n",
 			  msglen, paylen);
 		if (paylen > 0)
 			psmi_mq_handle_data(mq, req, offset, payload, paylen);

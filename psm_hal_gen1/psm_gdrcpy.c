@@ -164,7 +164,7 @@ gdr_convert_gpu_to_host_addr(int gdr_fd, unsigned long buf,
 							 size_t size, int flags,
 							 struct ips_proto* proto)
 {
-	_HFI_VDBG("(gdrcopy) buf=%p size=%zu flags=0x%x proto=%p\n",
+	_HFI_VDBG(" (gdrcopy) buf=%p size=%zu flags=0x%x proto=%p\n",
 	  (void*)buf, size, flags, proto);
 	if (!size) {
 		// Attempting 0-length pin results in error from driver.
@@ -188,7 +188,7 @@ gdr_convert_gpu_to_host_addr(int gdr_fd, unsigned long buf,
 	}
 
 	uint32_t pagelen = pageend - pageaddr;
-	_HFI_VDBG("(gdrcopy) pageaddr=%p pagelen=%u pageend=%p\n",
+	_HFI_VDBG(" (gdrcopy) pageaddr=%p pagelen=%u pageend=%p\n",
 	  (void *)pageaddr, pagelen, (void*)pageend);
 
 	struct hfi1_gdr_query_params query_params;

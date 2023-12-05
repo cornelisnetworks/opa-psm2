@@ -605,7 +605,7 @@ ips_proto_init(const psmi_context_t *context, const ptl_t *ptl,
 			_HFI_DBG("Unable to obtain local IP address, "
 				 "not fatal but some features may be disabled\n");
 		} else if (host_ipv4addr == __cpu_to_be32(0x7f000001)) {
-			_HFI_INFO("Localhost IP address is set to the "
+			_HFI_INFO(" Localhost IP address is set to the "
 				  "loopback address 127.0.0.1, "
 				  "not fatal but some features may be disabled\n");
 		} else {
@@ -1292,7 +1292,7 @@ ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 		ips_proto_epaddr_stats_set(proto, message_type);
 	}
 
-	_HFI_VDBG("transfer_frame of opcode=0x%x,remote_lid=%d,"
+	_HFI_VDBG(" transfer_frame of opcode=0x%x,remote_lid=%d,"
 		  "src=%p,len=%d returns %d\n",
 		  (int)_get_proto_hfi_opcode(&ctrlscb->ips_lrh),
 		  __be16_to_cpu(ctrlscb->ips_lrh.lrh[1]), payload, paylen, err);
@@ -1335,7 +1335,7 @@ ips_proto_send_ctrl_message(struct ips_flow *flow, uint8_t message_type,
 
 			ctrlq->ctrlq_head =
 			    (ctrlq->ctrlq_head + 1) % CTRL_MSG_QEUEUE_SIZE;
-			/* _HFI_INFO("requesting ctrlq timer for msgtype=%d!\n", message_type); */
+			/* _HFI_INFO(" requesting ctrlq timer for msgtype=%d!\n", message_type); */
 			psmi_timer_request(proto->timerq, &ctrlq->ctrlq_timer,
 					   PSMI_TIMER_PRIO_0);
 
@@ -2073,7 +2073,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 								    psm_hw_ctxt) + extra_bytes;
 		vec_idx++;
 		iovcnt = 1;
-		_HFI_VDBG("hdr=%p,%d\n",
+		_HFI_VDBG(" hdr=%p,%d\n",
 			  iovec[vec_idx - 1].iov_base,
 			  (int)iovec[vec_idx - 1].iov_len);
 
@@ -2107,7 +2107,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 			} else if (PSMI_IS_DRIVER_GPUDIRECT_ENABLED)
 				sdmahdr->flags = 0;
 #endif
-			_HFI_VDBG("seqno=%d hdr=%p,%d payload=%p,%d\n",
+			_HFI_VDBG(" seqno=%d hdr=%p,%d payload=%p,%d\n",
 				  scb->seq_num.psn_num,
 				  iovec[vec_idx - 2].iov_base,
 				  (int)iovec[vec_idx - 2].iov_len,
@@ -2123,7 +2123,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 			vec_idx++;
 			iovcnt++;
 
-			_HFI_VDBG("chsum=%p,%d\n",
+			_HFI_VDBG(" chsum=%p,%d\n",
 				  iovec[vec_idx - 1].iov_base,
 				  (int)iovec[vec_idx - 1].iov_len);
 		}
@@ -2154,7 +2154,7 @@ scb_dma_send(struct ips_proto *proto, struct ips_flow *flow,
 					(PSM_HAL_EXP << PSM_HAL_SDMA_REQ_OPCODE_SHIFT) |
 					(iovcnt << PSM_HAL_SDMA_REQ_IOVCNT_SHIFT);
 			}
-			_HFI_VDBG("tid-info=%p,%d\n",
+			_HFI_VDBG(" tid-info=%p,%d\n",
 				  iovec[vec_idx - 1].iov_base,
 				  (int)iovec[vec_idx - 1].iov_len);
 		} else {

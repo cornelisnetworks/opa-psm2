@@ -206,7 +206,7 @@ am_short_reqrep(ips_scb_t *scb, struct ips_epaddr *ipsaddr,
 	   overflow very easy.  Make sure the values match. */
 	psmi_assert(nargs == scb->ips_lrh.amhdr_nargs);
 
-	_HFI_VDBG("%s src=%p len=%d, nargs=%d\n",
+	_HFI_VDBG(" %s src=%p len=%d, nargs=%d\n",
 		  ((opcode == OPCODE_AM_REQUEST) ||
 		   (opcode == OPCODE_AM_REQUEST_NOREPLY)) ? "req" : "rep",
 		  src, (int)len, nargs);

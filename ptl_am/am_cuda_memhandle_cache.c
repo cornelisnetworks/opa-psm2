@@ -366,7 +366,7 @@ am_cuda_memhandle_cache_evict(void)
 {
 	cache_evict_counter++;
 	cl_map_item_t *p_item = LAST;
-	_HFI_VDBG("Removing (epid=%lu,start=%lu,length=%u,dev_ptr=0x%llX,it=%p) from cuda_memhandle_cachemap.\n",
+	_HFI_VDBG(" Removing (epid=%lu,start=%lu,length=%u,dev_ptr=0x%llX,it=%p) from cuda_memhandle_cachemap.\n",
 		p_item->payload.epid, p_item->payload.start, p_item->payload.length,
 		p_item->payload.cuda_ipc_dev_ptr, p_item);
 	ips_cl_qmap_remove_item(&cuda_memhandle_cachemap, p_item);
@@ -419,7 +419,7 @@ CUdeviceptr
 am_cuda_memhandle_acquire(uintptr_t sbuf, CUipcMemHandle* handle,
 				uint32_t length, psm2_epid_t epid)
 {
-	_HFI_VDBG("sbuf=%lu,handle=%p,length=%u,epid=%lu\n",
+	_HFI_VDBG(" sbuf=%lu,handle=%p,length=%u,epid=%lu\n",
 		sbuf, handle, length, epid);
 
 	CUdeviceptr cuda_ipc_dev_ptr;

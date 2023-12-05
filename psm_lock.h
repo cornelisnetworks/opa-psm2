@@ -165,7 +165,7 @@ PSMI_ALWAYS_INLINE(void psmi_destroy_lock(psmi_lock_t *lock))
 	 * Both their return values can be interpreted by strerror().
 	 */
 	if ((err = psmi_spin_destroy(&(lock->lock))) != 0) {
-		_HFI_VDBG("Destroying spinlock failed: %s\n", strerror(err));
+		_HFI_VDBG(" Destroying spinlock failed: %s\n", strerror(err));
 	}
 	/* The same path for both the regular mutex and the debugging mutex */
 #elif defined(PSMI_LOCK_IS_MUTEXLOCK) || defined(PSMI_LOCK_IS_MUTEXLOCK_DEBUG)
@@ -181,7 +181,7 @@ PSMI_ALWAYS_INLINE(void psmi_destroy_lock(psmi_lock_t *lock))
 		 *
 		 * The C11's strerror_s may be an option here too.
 		 */
-		_HFI_VDBG("Destroying mutex failed: %s\n", strerror(err));
+		_HFI_VDBG(" Destroying mutex failed: %s\n", strerror(err));
 	}
 #endif
 }
@@ -189,11 +189,11 @@ PSMI_ALWAYS_INLINE(void psmi_destroy_lock(psmi_lock_t *lock))
 PSMI_ALWAYS_INLINE(int psmi_sem_post(sem_t *sem, const char *name))
 {
 	if (sem_post(sem) == -1) {
-		_HFI_VDBG("Semaphore %s: post failed\n", name ? name : "NULL" );
+		_HFI_VDBG(" Semaphore %s: post failed\n", name ? name : "NULL" );
 		return -1;
 	}
 
-	_HFI_VDBG("Semaphore %s: post succeeded\n", name ? name : "NULL");
+	_HFI_VDBG(" Semaphore %s: post succeeded\n", name ? name : "NULL");
 
 	return 0;
 }
@@ -206,11 +206,11 @@ PSMI_ALWAYS_INLINE(int psmi_sem_timedwait(sem_t *sem, const char *name))
 	ts.tv_sec += 5;
 
 	if (sem_timedwait(sem, &ts) == -1) {
-		_HFI_VDBG("Semaphore %s: Timedwait failed\n", name ? name : "NULL" );
+		_HFI_VDBG(" Semaphore %s: Timedwait failed\n", name ? name : "NULL" );
 		return -1;
 	}
 
-	_HFI_VDBG("Semaphore %s: Timedwait succeeded\n", name ? name : "NULL");
+	_HFI_VDBG(" Semaphore %s: Timedwait succeeded\n", name ? name : "NULL");
 
 	return 0;
 }
@@ -222,12 +222,12 @@ PSMI_ALWAYS_INLINE(int psmi_init_semaphore(sem_t **sem, const char *name,
 	if ((*sem == SEM_FAILED) && (errno == EEXIST)) {
 		*sem = sem_open(name, O_CREAT, mode, value);
 		if (*sem == SEM_FAILED) {
-			_HFI_VDBG("Cannot open semaphore %s, errno=%d\n",
+			_HFI_VDBG(" Cannot open semaphore %s, errno=%d\n",
 				  name, errno);
 			return -1;
 		}
 	} else if (*sem == SEM_FAILED) {
-		_HFI_VDBG("Cannot create semaphore %s, errno=%d\n", name, errno);
+		_HFI_VDBG(" Cannot create semaphore %s, errno=%d\n", name, errno);
 		return -1;
 	}
 

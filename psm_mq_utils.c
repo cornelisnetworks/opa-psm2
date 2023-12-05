@@ -122,7 +122,7 @@ psm2_error_t psmi_mq_req_init(psm2_mq_t mq)
 	psm2_mq_req_t warmup_req;
 	psm2_error_t err = PSM2_OK;
 
-	_HFI_VDBG("mq element sizes are %d bytes\n",
+	_HFI_VDBG(" mq element sizes are %d bytes\n",
 		  (int)sizeof(struct psm2_mq_req));
 
 	/*

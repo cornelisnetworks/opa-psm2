@@ -547,12 +547,12 @@ MOCKABLE(ips_flow_init)(struct ips_flow *flow, struct ips_proto *proto,
 	/* if PIO, need to consider local pio buffer size */
 	if (transfer_type == PSM_TRANSFER_PIO) {
 		flow->frag_size = min(flow->frag_size, proto->epinfo.ep_piosize);
-		_HFI_VDBG("[ipsaddr=%p] PIO flow->frag_size: %u = min("
+		_HFI_VDBG(" [ipsaddr=%p] PIO flow->frag_size: %u = min("
 			"proto->epinfo.ep_mtu(%u), flow->path->pr_mtu(%u), proto->epinfo.ep_piosize(%u))\n",
 			ipsaddr, flow->frag_size, proto->epinfo.ep_mtu,
 			flow->path->pr_mtu, proto->epinfo.ep_piosize);
 	} else {
-		_HFI_VDBG("[ipsaddr=%p] SDMA flow->frag_size: %u = min("
+		_HFI_VDBG(" [ipsaddr=%p] SDMA flow->frag_size: %u = min("
 			"proto->epinfo.ep_mtu(%u), flow->path->pr_mtu(%u))\n",
 			ipsaddr, flow->frag_size, proto->epinfo.ep_mtu,
 			flow->path->pr_mtu);
@@ -698,7 +698,7 @@ void ips_free_epaddr(psm2_epaddr_t epaddr, struct ips_proto *proto)
 	ips_epaddr_t *ipsaddr = (ips_epaddr_t *) epaddr;
 	ips_flow_fini(ipsaddr, proto);
 
-	_HFI_VDBG("epaddr=%p,ipsaddr=%p,connidx_incoming=%d\n", epaddr, ipsaddr,
+	_HFI_VDBG(" epaddr=%p,ipsaddr=%p,connidx_incoming=%d\n", epaddr, ipsaddr,
 		  ipsaddr->connidx_incoming);
 	psmi_epid_remove(epaddr->proto->ep, epaddr->epid);
 	ips_epstate_del(epaddr->proto->epstate, ipsaddr->connidx_incoming);
@@ -748,7 +748,7 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 				     (int)PSMI_EPID_GET_SUBCONTEXT(hdr->epid));
 			} else if (ipsaddr->cstate_outgoing != CSTATE_OUTGOING_WAITING) {
 				/* possible dupe */
-				_HFI_VDBG("connect dupe, expected %d got %d\n",
+				_HFI_VDBG(" connect dupe, expected %d got %d\n",
 					  CSTATE_OUTGOING_WAITING,
 					  ipsaddr->cstate_outgoing);
 			} else {
@@ -774,7 +774,7 @@ ips_proto_process_connect(struct ips_proto *proto, uint8_t opcode,
 			int epaddr_do_free = 0;
 			psmi_assert_always(paylen ==
 					   sizeof(struct ips_connect_hdr));
-			_HFI_VDBG("Got a disconnect from %s\n",
+			_HFI_VDBG(" Got a disconnect from %s\n",
 				  psmi_epaddr_get_name(hdr->epid));
 			proto->num_disconnect_requests++;
 			/* It's possible to get a disconnection request on a ipsaddr that
@@ -1023,7 +1023,7 @@ ips_proto_connect(struct ips_proto *proto, int numep,
 
 	/* First pass: make sure array of errors is at least fully defined */
 	for (i = 0; i < numep; i++) {
-		_HFI_VDBG("epid-connect=%s connect to %d:%d:%d\n",
+		_HFI_VDBG(" epid-connect=%s connect to %d:%d:%d\n",
 			  array_of_epid_mask[i] ? "YES" : " NO",
 			  (int)PSMI_EPID_GET_LID(array_of_epid[i]),
 			  (int)PSMI_EPID_GET_CONTEXT(array_of_epid[i]),
@@ -1363,7 +1363,7 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 			psmi_assert_always(ipsaddr->cstate_outgoing ==
 					   CSTATE_ESTABLISHED);
 		}
-		_HFI_VDBG("disconnecting %p\n", array_of_epaddr[i]);
+		_HFI_VDBG(" disconnecting %p\n", array_of_epaddr[i]);
 		array_of_errors[i] = PSM2_EPID_UNKNOWN;
 		numep_todisc++;
 	}
@@ -1524,7 +1524,7 @@ ips_proto_disconnect(struct ips_proto *proto, int force, int numep,
 			ipsaddr->cstate_outgoing = CSTATE_OUTGOING_DISCONNECTED;
 			array_of_errors[i] = PSM2_OK;
 		}
-		_HFI_VDBG("non-graceful close complete from %d peers\n", numep);
+		_HFI_VDBG(" non-graceful close complete from %d peers\n", numep);
 	}
 
 	for (i = 0; i < numep; i++) {

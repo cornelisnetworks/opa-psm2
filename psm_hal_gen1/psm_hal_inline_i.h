@@ -568,7 +568,7 @@ static PSMI_HAL_INLINE int hfp_gen1_context_open(int unit,
 	int retry = 0;
 	do {
 		if (retry > 0)
-			_HFI_INFO("hfi_userinit_internal: failed, trying again (%d/%d)\n",
+			_HFI_INFO(" hfi_userinit_internal: failed, trying again (%d/%d)\n",
 				  retry, retryCnt);
 		pc_private->ctrl = hfi_userinit_internal(fd, ep->skip_affinity,
 				&pc_private->user_info);

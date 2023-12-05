@@ -330,7 +330,7 @@ psmi_ep_devlids(uint16_t **lids, uint32_t *num_lids_o,
 				if (ret == -1)
 					continue;
 				else if (my_gid_hi != gid_hi) {
-					_HFI_VDBG("LID %d, unit %d, port %d, "
+					_HFI_VDBG(" LID %d, unit %d, port %d, "
 						  "mismatched GID %llx:%llx and "
 						  "%llx:%llx\n",
 						  lid, i, j,
@@ -341,7 +341,7 @@ psmi_ep_devlids(uint16_t **lids, uint32_t *num_lids_o,
 						  my_gid_lo);
 					continue;
 				}
-				_HFI_VDBG("LID %d, unit %d, port %d, "
+				_HFI_VDBG(" LID %d, unit %d, port %d, "
 					  "matching GID %llx:%llx and "
 					  "%llx:%llx\n", lid, i, j,
 					  (unsigned long long)gid_hi,
@@ -944,7 +944,7 @@ __psm2_ep_open_internal(psm2_uuid_t const unique_job_key, int *devid_enabled,
 	psmi_assert_always(ep->epid != 0);
 	ep->epaddr->epid = ep->epid;
 
-	_HFI_VDBG("psmi_ep_open_device() passed\n");
+	_HFI_VDBG(" psmi_ep_open_device() passed\n");
 
 	/* Set our new label as soon as we know what it is */
 	strncpy(buf, psmi_gethostname(), sizeof(buf) - 1);
@@ -971,7 +971,7 @@ __psm2_ep_open_internal(psm2_uuid_t const unique_job_key, int *devid_enabled,
 	if ((err = psmi_epid_set_hostname(psm2_epid_nid(ep->epid), buf, 0)))
 		goto fail;
 
-	_HFI_VDBG("start ptl device init...\n");
+	_HFI_VDBG(" start ptl device init...\n");
 	if (psmi_ep_device_is_enabled(ep, PTL_DEVID_SELF)) {
 		if ((err = psmi_ptl_self.init(ep, self_ptl, &ep->ptl_self)))
 			goto fail;
@@ -989,7 +989,7 @@ __psm2_ep_open_internal(psm2_uuid_t const unique_job_key, int *devid_enabled,
 		 * shared contexts.  */
 	}
 
-	_HFI_VDBG("finish ptl device init...\n");
+	_HFI_VDBG(" finish ptl device init...\n");
 
 	/*
 	 * Keep only IPS since only IPS support multi-rail, other devices
@@ -1145,7 +1145,7 @@ __psm2_ep_open(psm2_uuid_t const unique_job_key,
 		}
 	}
 
-	_HFI_VDBG("psm2_ep_open() OK....\n");
+	_HFI_VDBG(" psm2_ep_open() OK....\n");
 
 fail:
 #ifdef PSM_CUDA

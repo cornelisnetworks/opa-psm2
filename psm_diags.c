@@ -71,10 +71,10 @@ int psmi_diags(void);
 	} while (0)
 
 #define DIAGS_RETURN_PASS(str)						\
-	do { _HFI_INFO("%s: PASSED %s\n", __func__, str); return 0; }	\
+	do { _HFI_INFO(" %s: PASSED %s\n", __func__, str); return 0; }	\
 	    while (0)
 #define DIAGS_RETURN_FAIL(str)						\
-	do { _HFI_INFO("%s: FAILED %s\n", __func__, str); return 1; }	\
+	do { _HFI_INFO(" %s: FAILED %s\n", __func__, str); return 1; }	\
 	    while (0)
 
 int psmi_diags(void)
@@ -237,7 +237,7 @@ static int psmi_test_memcpy(memcpy_fn_t fn, const char *memcpy_name)
 		DIAGS_RETURN_FAIL("no heap space");
 
 	for (n = lo; n <= hi; n <<= 1) {
-		_HFI_INFO("%s %d align=0..16\n", memcpy_name, (int)n);
+		_HFI_INFO(" %s %d align=0..16\n", memcpy_name, (int)n);
 		for (m = n - below; m <= n + above; m++) {
 			if (m == n) {
 				ret =
@@ -259,7 +259,7 @@ static int psmi_test_memcpy(memcpy_fn_t fn, const char *memcpy_name)
 
 	int total = memcpy_passed + memcpy_failed;
 	if (total > 0) {
-		_HFI_INFO("%d memcpy tests with %d passed (%.2f%%) "
+		_HFI_INFO(" %d memcpy tests with %d passed (%.2f%%) "
 			  "and %d failed (%.2f%%)\n",
 			  total, memcpy_passed, (100.0 * memcpy_passed) / total,
 			  memcpy_failed, (100.0 * memcpy_failed) / total);
@@ -346,7 +346,7 @@ int memcpy_check_size(memcpy_fn_t fn, int *p, int *f, size_t n)
 			uint8_t *s = ((uint8_t *) src) + src_align;
 			int ok = (memcpy_check_one(fn, d, s, n) != NULL);
 			if (DEBUG || !ok) {
-				_HFI_INFO("memcpy(%p, %p, %llu) : %s\n", d, s,
+				_HFI_INFO(" memcpy(%p, %p, %llu) : %s\n", d, s,
 					  (unsigned long long)n,
 					  ok ? "passed" : "failed");
 			}

@@ -211,20 +211,20 @@ psmi_create_and_open_affinity_shm(psm2_uuid_t const job_key)
 	if ((shm_fd < 0) && (errno == EEXIST)) {
 		shm_fd = shm_open(affinity_shm_name, O_RDWR, S_IRUSR | S_IWUSR);
 		if (shm_fd < 0) {
-			_HFI_VDBG("Cannot open affinity shared mem fd:%s, errno=%d\n",
+			_HFI_VDBG(" Cannot open affinity shared mem fd:%s, errno=%d\n",
 				  affinity_shm_name, errno);
 			return shm_fd;
 		}
 	} else if (shm_fd > 0) {
 		first_to_create = 1;
 	} else {
-		_HFI_VDBG("Cannot create affinity shared mem fd:%s, errno=%d\n",
+		_HFI_VDBG(" Cannot create affinity shared mem fd:%s, errno=%d\n",
 			  affinity_shm_name, errno);
 	}
 
 	ret = ftruncate(shm_fd, AFFINITY_SHMEMSIZE);
 	if ( ret < 0 ) {
-		_HFI_VDBG("Cannot truncate affinity shared mem fd:%s, errno=%d\n",
+		_HFI_VDBG(" Cannot truncate affinity shared mem fd:%s, errno=%d\n",
 			affinity_shm_name, errno);
 		if (shm_fd >= 0) close(shm_fd);
 		return ret;
@@ -233,7 +233,7 @@ psmi_create_and_open_affinity_shm(psm2_uuid_t const job_key)
 	shared_affinity_ptr = (uint64_t *) mmap(NULL, AFFINITY_SHMEMSIZE, PROT_READ | PROT_WRITE,
 					MAP_SHARED, shm_fd, 0);
 	if (shared_affinity_ptr == MAP_FAILED) {
-		_HFI_VDBG("Cannot mmap affinity shared memory. errno=%d\n",
+		_HFI_VDBG(" Cannot mmap affinity shared memory. errno=%d\n",
 			  errno);
 		close(shm_fd);
 		return -1;
@@ -243,7 +243,7 @@ psmi_create_and_open_affinity_shm(psm2_uuid_t const job_key)
 	psmi_affinity_shared_file_opened = 1;
 
 	if (first_to_create) {
-		_HFI_VDBG("Creating shm to store HFI affinity per socket\n");
+		_HFI_VDBG(" Creating shm to store HFI affinity per socket\n");
 
 		memset(shared_affinity_ptr, 0, AFFINITY_SHMEMSIZE);
 
@@ -253,7 +253,7 @@ psmi_create_and_open_affinity_shm(psm2_uuid_t const job_key)
 		 */
 		psmi_sem_post(sem_affinity_shm_rw, sem_affinity_shm_rw_name);
 	} else {
-		_HFI_VDBG("Opening shm object to read/write HFI affinity per socket\n");
+		_HFI_VDBG(" Opening shm object to read/write HFI affinity per socket\n");
 	}
 
 	/*
@@ -262,7 +262,7 @@ psmi_create_and_open_affinity_shm(psm2_uuid_t const job_key)
 	 * closing the shm.
 	 */
 	if (psmi_sem_timedwait(sem_affinity_shm_rw, sem_affinity_shm_rw_name)) {
-		_HFI_VDBG("Could not enter critical section to update shm refcount\n");
+		_HFI_VDBG(" Could not enter critical section to update shm refcount\n");
 		return -1;
 	}
 
@@ -301,14 +301,14 @@ psmi_spread_hfi_within_socket(long *unit_start, long *unit_end, int node_id,
 
 	/* Start critical section to read/write shm object */
 	if (psmi_sem_timedwait(sem_affinity_shm_rw, sem_affinity_shm_rw_name)) {
-		_HFI_VDBG("Could not enter critical section to update HFI index\n");
+		_HFI_VDBG(" Could not enter critical section to update HFI index\n");
 		goto spread_hfi_fallback;
 	}
 
 	*unit_start = *unit_end = shared_affinity_ptr[shm_location];
 	shared_affinity_ptr[shm_location] =
 		(shared_affinity_ptr[shm_location] + 1) % found;
-	_HFI_VDBG("Selected HFI index= %ld, Next HFI=%ld, node = %d, local rank=%d, found=%d.\n",
+	_HFI_VDBG(" Selected HFI index= %ld, Next HFI=%ld, node = %d, local rank=%d, found=%d.\n",
 		  *unit_start, shared_affinity_ptr[shm_location], node_id,
 		  psmi_get_envvar("MPI_LOCALRANKID"), found);
 
@@ -347,7 +347,7 @@ psmi_create_affinity_semaphores(psm2_uuid_t const job_key)
 	ret = psmi_init_semaphore(&sem_affinity_shm_rw, sem_affinity_shm_rw_name,
 				  S_IRUSR | S_IWUSR, 0);
 	if (ret) {
-		_HFI_VDBG("Cannot initialize semaphore: %s for read-write access to shm object.\n",
+		_HFI_VDBG(" Cannot initialize semaphore: %s for read-write access to shm object.\n",
 			  sem_affinity_shm_rw_name);
 		sem_close(sem_affinity_shm_rw);
 		psmi_free(sem_affinity_shm_rw_name);
@@ -355,7 +355,7 @@ psmi_create_affinity_semaphores(psm2_uuid_t const job_key)
 		return;
 	}
 
-	_HFI_VDBG("Semaphore: %s created for read-write access to shm object.\n",
+	_HFI_VDBG(" Semaphore: %s created for read-write access to shm object.\n",
 		  sem_affinity_shm_rw_name);
 
 	psmi_affinity_semaphore_open = 1;
@@ -548,7 +548,7 @@ psmi_context_open(const psm2_ep_t ep, long unit_param, long port,
 	else
 		fprintf(stderr,"WARNING: running CUDA version of libpsm2 with non CUDA version of hfi1 driver.\n");
 #endif
-	_HFI_VDBG("hfi_userinit() passed.\n");
+	_HFI_VDBG(" hfi_userinit() passed.\n");
 
 	/* Fetch hw parameters from HAL (that were obtained during opening the context above. */
 
@@ -596,7 +596,7 @@ bail:
 		psmi_hal_close_context(&context->psm_hw_ctxt);
 ret:
 
-	_HFI_VDBG("psmi_context_open() return %d\n", err);
+	_HFI_VDBG(" psmi_context_open() return %d\n", err);
 	return err;
 }
 

@@ -184,7 +184,7 @@ int psmi_cuda_lib_load()
 	char *dlerr;
 
 	PSM2_LOG_MSG("entering");
-	_HFI_VDBG("Loading CUDA library.\n");
+	_HFI_VDBG(" Loading CUDA library.\n");
 
 	psmi_cuda_lib = dlopen("libcuda.so.1", RTLD_LAZY);
 	if (!psmi_cuda_lib) {
@@ -257,7 +257,7 @@ int psmi_cuda_initialize()
 	psm2_error_t err = PSM2_OK;
 
 	PSM2_LOG_MSG("entering");
-	_HFI_VDBG("Enabling CUDA support.\n");
+	_HFI_VDBG(" Enabling CUDA support.\n");
 
 	err = psmi_cuda_lib_load();
 	if (err != PSM2_OK)
@@ -460,7 +460,7 @@ psm2_error_t __psm2_init(int *major, int *minor)
 	}
 
 	if (getenv("PSM2_DIAGS")) {
-		_HFI_INFO("Running diags...\n");
+		_HFI_INFO(" Running diags...\n");
 		psmi_diags();
 	}
 
@@ -813,10 +813,10 @@ psm2_error_t __psm2_finalize(void)
 
 		shared_affinity_ptr[AFFINITY_SHM_REF_COUNT_LOCATION] -= 1;
 		if (shared_affinity_ptr[AFFINITY_SHM_REF_COUNT_LOCATION] <= 0) {
-			_HFI_VDBG("Unlink shm file for HFI affinity as there are no more users\n");
+			_HFI_VDBG(" Unlink shm file for HFI affinity as there are no more users\n");
 			shm_unlink(affinity_shm_name);
 		} else {
-			_HFI_VDBG("Number of affinity shared memory users left=%ld\n",
+			_HFI_VDBG(" Number of affinity shared memory users left=%ld\n",
 				  shared_affinity_ptr[AFFINITY_SHM_REF_COUNT_LOCATION]);
 		}
 
@@ -832,7 +832,7 @@ psm2_error_t __psm2_finalize(void)
 	}
 
 	if (psmi_affinity_semaphore_open) {
-		_HFI_VDBG("Closing and Unlinking Semaphore: %s.\n", sem_affinity_shm_rw_name);
+		_HFI_VDBG(" Closing and Unlinking Semaphore: %s.\n", sem_affinity_shm_rw_name);
 		sem_close(sem_affinity_shm_rw);
 		sem_unlink(sem_affinity_shm_rw_name);
 		psmi_free(sem_affinity_shm_rw_name);

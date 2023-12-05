@@ -93,7 +93,7 @@ ptl_handle_rtsmatch(psm2_mq_req_t recv_req, int was_posted)
 	} else
 		psmi_mq_handle_rts_complete(send_req);
 
-	_HFI_VDBG("[self][complete][b=%p][sreq=%p][rreq=%p]\n",
+	_HFI_VDBG(" [self][complete][b=%p][sreq=%p][rreq=%p]\n",
 		  recv_req->req_data.buf, send_req, recv_req);
 	return PSM2_OK;
 }
@@ -165,7 +165,7 @@ self_mq_isend(psm2_mq_t mq, psm2_epaddr_t epaddr, uint32_t flags_user,
 	else
 		send_req->testwait_callback = self_mq_send_testwait;
 
-	_HFI_VDBG("[self][b=%p][m=%d][t=%08x.%08x.%08x][match=%s][req=%p]\n",
+	_HFI_VDBG(" [self][b=%p][m=%d][t=%08x.%08x.%08x][match=%s][req=%p]\n",
 		  ubuf, len, tag->tag[0], tag->tag[1], tag->tag[2],
 		  rc == MQ_RET_MATCH_OK ? "YES" : "NO", send_req);
 	*req_o = send_req;

@@ -507,7 +507,7 @@ psmi_mq_wait_inner(psm2_mq_req_t *ireq, void *status,
 		/* We'll be waiting on this req, mark it as so */
 		req->type |= MQE_TYPE_WAITING;
 
-		_HFI_VDBG("req=%p, buf=%p, len=%d, waiting\n",
+		_HFI_VDBG(" req=%p, buf=%p, len=%d, waiting\n",
 			  req, req->req_data.buf, req->req_data.buf_len);
 
 		if (req->testwait_callback) {
@@ -535,7 +535,7 @@ psmi_mq_wait_inner(psm2_mq_req_t *ireq, void *status,
 		status_copy(req, status);
 	}
 
-	_HFI_VDBG("req=%p complete, buf=%p, len=%d, err=%d\n",
+	_HFI_VDBG(" req=%p complete, buf=%p, len=%d, err=%d\n",
 		  req, req->req_data.buf, req->req_data.buf_len, req->req_data.error_code);
 
 	psmi_mq_req_free(req);
@@ -775,7 +775,7 @@ psm2_mq_irecv_inner(psm2_mq_t mq, psm2_mq_req_t req, void *buf, uint32_t len)
 		psmi_mtucpy_fn = psmi_mq_mtucpy_host_mem;
 #endif
 
-	_HFI_VDBG("(req=%p) buf=%p len=%u req.state=%u\n", req, buf, len, req->state);
+	_HFI_VDBG(" (req=%p) buf=%p len=%u req.state=%u\n", req, buf, len, req->state);
 
 	switch (req->state) {
 	case MQ_STATE_COMPLETE:
@@ -929,12 +929,12 @@ __psm2_mq_fp_msg(psm2_ep_t ep, psm2_mq_t mq, psm2_epaddr_t addr, psm2_mq_tag_t *
 #endif
 
 			mq_add_to_expected_hashes(mq, recv_req);
-			_HFI_VDBG("buf=%p,len=%d,tag=%08x.%08x.%08x "
+			_HFI_VDBG(" buf=%p,len=%d,tag=%08x.%08x.%08x "
 				  " tagsel=%08x.%08x.%08x req=%p\n",
 				  buf, len, tag->tag[0], tag->tag[1], tag->tag[2],
 				  tagsel->tag[0], tagsel->tag[1], tagsel->tag[2], recv_req);
 		} else {
-			_HFI_VDBG("unexpected buf=%p,len=%d,tag=%08x.%08x.%08x"
+			_HFI_VDBG(" unexpected buf=%p,len=%d,tag=%08x.%08x.%08x"
 				  " tagsel=%08x.%08x.%08x req=%p\n", buf, len,
 				  tag->tag[0], tag->tag[1], tag->tag[2],
 				  tagsel->tag[0], tagsel->tag[1], tagsel->tag[2], recv_req);
@@ -1017,12 +1017,12 @@ __psm2_mq_irecv2(psm2_mq_t mq, psm2_epaddr_t src,
 #endif
 
 		mq_add_to_expected_hashes(mq, req);
-		_HFI_VDBG("buf=%p,len=%d,tag=%08x.%08x.%08x "
+		_HFI_VDBG(" buf=%p,len=%d,tag=%08x.%08x.%08x "
 			  " tagsel=%08x.%08x.%08x req=%p\n",
 			  buf, len, tag->tag[0], tag->tag[1], tag->tag[2],
 			  tagsel->tag[0], tagsel->tag[1], tagsel->tag[2], req);
 	} else {
-		_HFI_VDBG("unexpected buf=%p,len=%d,tag=%08x.%08x.%08x"
+		_HFI_VDBG(" unexpected buf=%p,len=%d,tag=%08x.%08x.%08x"
 			  " tagsel=%08x.%08x.%08x req=%p\n", buf, len,
 			  tag->tag[0], tag->tag[1], tag->tag[2],
 			  tagsel->tag[0], tagsel->tag[1], tagsel->tag[2], req);
@@ -1269,7 +1269,7 @@ psm2_error_t psmi_mqopt_ctl(psm2_mq_t mq, uint32_t key, void *value, int get)
 			val32 = *((uint32_t *) value);
 			mq->hfi_thresh_rv = val32;
 		}
-		_HFI_VDBG("RNDV_HFI_SZ = %d (%s)\n",
+		_HFI_VDBG(" RNDV_HFI_SZ = %d (%s)\n",
 			  mq->hfi_thresh_rv, get ? "GET" : "SET");
 		break;
 
@@ -1280,7 +1280,7 @@ psm2_error_t psmi_mqopt_ctl(psm2_mq_t mq, uint32_t key, void *value, int get)
 			val32 = *((uint32_t *) value);
 			mq->shm_thresh_rv = val32;
 		}
-		_HFI_VDBG("RNDV_SHM_SZ = %d (%s)\n",
+		_HFI_VDBG(" RNDV_SHM_SZ = %d (%s)\n",
 			  mq->shm_thresh_rv, get ? "GET" : "SET");
 		break;
 	case PSM2_MQ_MAX_SYSBUF_MBYTES:
@@ -1459,7 +1459,7 @@ __psm2_mq_init(psm2_ep_t ep, uint64_t ignored,
 	psmi_mq_sysbuf_init(mq);
 	char buf[128];
 	psmi_mq_sysbuf_getinfo(mq, buf, sizeof buf);
-	_HFI_VDBG("%s", buf);
+	_HFI_VDBG(" %s", buf);
 
 	*mqo = mq;
 

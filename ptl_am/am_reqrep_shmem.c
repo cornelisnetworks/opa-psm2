@@ -184,7 +184,7 @@ void amsh_atexit()
 		ptl = (struct ptl_am *)(ep->ptl_amsh.ptl);
 		if (ptl->self_nodeinfo &&
 		    ptl->amsh_keyname != NULL) {
-			_HFI_VDBG("unlinking shm file %s\n",
+			_HFI_VDBG(" unlinking shm file %s\n",
 				  ptl->amsh_keyname);
 			shm_unlink(ptl->amsh_keyname);
 		}
@@ -685,7 +685,7 @@ psm2_error_t psmi_shm_detach(ptl_t *ptl_gen)
 	if (ptl->self_nodeinfo == NULL)
 		return err;
 
-	_HFI_VDBG("unlinking shm file %s\n", ptl->amsh_keyname + 1);
+	_HFI_VDBG(" unlinking shm file %s\n", ptl->amsh_keyname + 1);
 	shmbase = ptl->self_nodeinfo->amsh_shmbase;
 	shm_unlink(ptl->amsh_keyname);
 	psmi_free(ptl->amsh_keyname);
@@ -742,12 +742,12 @@ void am_update_directory(struct am_ctl_nodeinfo *nodeinfo)
 	    ((uintptr_t) nodeinfo->qdir.qrepFifoShort +
 	     nodeinfo->amsh_qsizes.qrepFifoShort);
 
-	_HFI_VDBG("epaddr=%p Request Hdr=%p,Pkt=%p,Long=%p\n",
+	_HFI_VDBG(" epaddr=%p Request Hdr=%p,Pkt=%p,Long=%p\n",
 		  nodeinfo->epaddr,
 		  nodeinfo->qdir.qreqH,
 		  nodeinfo->qdir.qreqFifoShort,
 		  nodeinfo->qdir.qreqFifoLong);
-	_HFI_VDBG("epaddr=%p Reply   Hdr=%p,Pkt=%p,Long=%p\n",
+	_HFI_VDBG(" epaddr=%p Reply   Hdr=%p,Pkt=%p,Long=%p\n",
 		  nodeinfo->epaddr,
 		  nodeinfo->qdir.qrepH,
 		  nodeinfo->qdir.qrepFifoShort,
@@ -819,7 +819,7 @@ amsh_epaddr_add(ptl_t *ptl_gen, psm2_epid_t epid, uint16_t shmidx, psm2_epaddr_t
 	/* Finally, add to table */
 	if ((err = psmi_epid_add(ptl->ep, epid, epaddr)))
 		goto fail;
-	_HFI_VDBG("epaddr=%s added to ptl=%p\n",
+	_HFI_VDBG(" epaddr=%s added to ptl=%p\n",
 		  psmi_epaddr_get_name(epid), ptl);
 	*epaddr_o = epaddr;
 	return PSM2_OK;
@@ -944,7 +944,7 @@ amsh_ep_connreq_init(ptl_t *ptl_gen, int op, /* connect, disconnect or abort */
 				continue;
 			}
 
-			_HFI_VDBG("looking at epid %llx\n",
+			_HFI_VDBG(" looking at epid %llx\n",
 				  (unsigned long long)epid);
 			epaddr = psmi_epid_lookup(ptl->ep, epid);
 			if (epaddr != NULL) {
@@ -991,7 +991,7 @@ amsh_ep_connreq_init(ptl_t *ptl_gen, int op, /* connect, disconnect or abort */
 	if (req->numep_left == 0) {	/* nothing to do */
 		psmi_free(req->epid_mask);
 		psmi_free(req);
-		_HFI_VDBG("Nothing to connect, bump up phase\n");
+		_HFI_VDBG(" Nothing to connect, bump up phase\n");
 		ptl->connect_phase++;
 		*req_o = NULL;
 		return PSM2_OK;
@@ -1150,7 +1150,7 @@ amsh_ep_connreq_poll(ptl_t *ptl_gen, struct ptl_connection_req *req)
 						 PSMI_VERNO_GET_MINOR
 						 (their_verno));
 
-					_HFI_INFO("Local endpoint id %" PRIx64
+					_HFI_INFO(" Local endpoint id %" PRIx64
 						  " has version %s "
 						  "which is not supported by library version %d.%d",
 						  epid, buf, PSM2_VERNO_MAJOR,
@@ -1606,7 +1606,7 @@ am_send_pkt_short(ptl_t *ptl, uint32_t destidx, uint32_t returnidx,
 		mq_copy_tiny((uint32_t *) &pkt->args[nargs], (uint32_t *) src,
 			     len);
 
-	_HFI_VDBG("pkt=%p fmt=%d bulkidx=%d,flag=%d,nargs=%d,"
+	_HFI_VDBG(" pkt=%p fmt=%d bulkidx=%d,flag=%d,nargs=%d,"
 		  "buf=%p,len=%d,hidx=%d,value=%d\n", pkt, (int)fmt, bulkidx,
 		  pkt->flag, pkt->nargs, src, (int)len, (int)handleridx,
 		  src != NULL ? *((uint32_t *) src) : 0);
@@ -1633,7 +1633,7 @@ psmi_amsh_generic_inner(uint32_t amtype, ptl_t *ptl_gen, psm2_epaddr_t epaddr,
 	int is_reply = AM_IS_REPLY(amtype);
 	volatile am_pkt_bulk_t *bulkpkt;
 
-	_HFI_VDBG("%s epaddr=%s, shmidx=%d, type=%d\n",
+	_HFI_VDBG(" %s epaddr=%s, shmidx=%d, type=%d\n",
 		  is_reply ? "reply" : "request",
 		  psmi_epaddr_get_name(epaddr->epid),
 		  ((am_epaddr_t *) epaddr)->shmidx, amtype);
@@ -1661,7 +1661,7 @@ psmi_amsh_generic_inner(uint32_t amtype, ptl_t *ptl_gen, psm2_epaddr_t epaddr,
 
 			bulkidx = bulkpkt->idx;
 			bulkpkt->len = len;
-			_HFI_VDBG("bulkpkt %p flag is %d from idx %d\n",
+			_HFI_VDBG(" bulkpkt %p flag is %d from idx %d\n",
 				  bulkpkt, bulkpkt->flag, destidx);
 
 			for (i = 0; i < nargs - NSHORT_ARGS; i++) {
@@ -1686,7 +1686,7 @@ psmi_amsh_generic_inner(uint32_t amtype, ptl_t *ptl_gen, psm2_epaddr_t epaddr,
 
 			type = AMFMT_LONG;
 
-			_HFI_VDBG("[long][%s] src=%p,dest=%p,len=%d,hidx=%d\n",
+			_HFI_VDBG(" [long][%s] src=%p,dest=%p,len=%d,hidx=%d\n",
 				  is_reply ? "rep" : "req", src, dst,
 				  (uint32_t) len, hidx);
 			while (bytes_left) {
@@ -1821,7 +1821,7 @@ psmi_am_reqq_add(int amtype, ptl_t *ptl_gen, psm2_epaddr_t epaddr,
 	am_reqq_t *nreq =
 	    (am_reqq_t *) psmi_malloc(ptl->ep, UNDEFINED, sizeof(am_reqq_t));
 	psmi_assert_always(nreq != NULL);
-	_HFI_VDBG("alloc of reqq=%p, to epaddr=%s, ptr=%p, len=%d, "
+	_HFI_VDBG(" alloc of reqq=%p, to epaddr=%s, ptr=%p, len=%d, "
 		  "localreq=%p, remotereq=%p\n", nreq,
 		  psmi_epaddr_get_hostname(epaddr->epid), dest,
 		  (int)len, (void *)(uintptr_t) args[1].u64w0,
@@ -1915,7 +1915,7 @@ void process_packet(ptl_t *ptl_gen, am_pkt_short_t *pkt, int isreq)
 		}
 
 		bulkpkt = (am_pkt_bulk_t *) bulkptr;
-		_HFI_VDBG("ep=%p mq=%p type=%d bulkidx=%d flag=%d/%d nargs=%d "
+		_HFI_VDBG(" ep=%p mq=%p type=%d bulkidx=%d flag=%d/%d nargs=%d "
 			  "from_idx=%d pkt=%p/%p hidx=%d\n",
 			  ptl->ep, ptl->ep->mq, pkt->type, bulkidx, pkt->flag,
 			  bulkpkt->flag, nargs, shmidx, pkt, bulkpkt, hidx);
@@ -2198,7 +2198,7 @@ amsh_mq_isend(psm2_mq_t mq, psm2_epaddr_t epaddr, uint32_t flags_user,
 	req->req_data.context = context;
 	req->flags_user = flags_user;
 	req->flags_internal = flags_internal;
-	_HFI_VDBG("[ishrt][%s->%s][n=0][b=%p][l=%d][t=%08x.%08x.%08x]\n",
+	_HFI_VDBG(" [ishrt][%s->%s][n=0][b=%p][l=%d][t=%08x.%08x.%08x]\n",
 		  psmi_epaddr_get_name(epaddr->ptlctl->ep->epid),
 		  psmi_epaddr_get_name(epaddr->epid), ubuf, len,
 		  tag->tag[0], tag->tag[1], tag->tag[2]);
@@ -2214,7 +2214,7 @@ psm2_error_t
 amsh_mq_send(psm2_mq_t mq, psm2_epaddr_t epaddr, uint32_t flags,
 	     psm2_mq_tag_t *tag, const void *ubuf, uint32_t len)
 {
-	_HFI_VDBG("[shrt][%s->%s][n=0][b=%p][l=%d][t=%08x.%08x.%08x]\n",
+	_HFI_VDBG(" [shrt][%s->%s][n=0][b=%p][l=%d][t=%08x.%08x.%08x]\n",
 		  psmi_epaddr_get_name(epaddr->ptlctl->ep->epid),
 		  psmi_epaddr_get_name(epaddr->epid), ubuf, len,
 		  tag->tag[0], tag->tag[1], tag->tag[2]);
@@ -2307,12 +2307,12 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 	psmi_assert_always(buf == NULL && len == 0);
 	read_extra_ep_data(args[2].u32w0, &pid, &gpuid);
 
-	_HFI_VDBG("Conn op=%d, phase=%d, epid=%llx, err=%d\n",
+	_HFI_VDBG(" Conn op=%d, phase=%d, epid=%llx, err=%d\n",
 		  op, phase, (unsigned long long)epid, err);
 
 	switch (op) {
 	case PSMI_AM_CONN_REQ:
-		_HFI_VDBG("Connect from %d:%d\n",
+		_HFI_VDBG(" Connect from %d:%d\n",
 			  (int)psm2_epid_nid(epid), (int)psm2_epid_context(epid));
 		epaddr = psmi_epid_lookup(ptl->ep, epid);
 		if (epaddr && ((am_epaddr_t *) epaddr)->pid != pid) {
@@ -2374,7 +2374,7 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 
 	case PSMI_AM_CONN_REP:
 		if (ptl->connect_phase != phase) {
-			_HFI_VDBG("Out of phase connect reply\n");
+			_HFI_VDBG(" Out of phase connect reply\n");
 			return;
 		}
 		epaddr = ptl->am_ep[shmidx].epaddr;
@@ -2392,14 +2392,14 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 			= AMSH_CSTATE_OUTGOING_REPLIED;
 		((am_epaddr_t *) epaddr)->return_shmidx = return_shmidx;
 		ptl->connect_outgoing++;
-		_HFI_VDBG("CCC epaddr=%s connected to ptl=%p\n",
+		_HFI_VDBG(" CCC epaddr=%s connected to ptl=%p\n",
 			  psmi_epaddr_get_name(epaddr->epid), ptl);
 		break;
 
 	case PSMI_AM_DISC_REQ:
 		epaddr = psmi_epid_lookup(ptl->ep, epid);
 		if (!epaddr) {
-			_HFI_VDBG("Dropping disconnect request from an epid that we are not connected to\n");
+			_HFI_VDBG(" Dropping disconnect request from an epid that we are not connected to\n");
 			return;
 		}
 		args[0].u16w0 = PSMI_AM_DISC_REP;
@@ -2434,7 +2434,7 @@ amsh_conn_handler(void *toki, psm2_amarg_t *args, int narg, void *buf,
 
 	case PSMI_AM_DISC_REP:
 		if (ptl->connect_phase != phase) {
-			_HFI_VDBG("Out of phase disconnect reply\n");
+			_HFI_VDBG(" Out of phase disconnect reply\n");
 			return;
 		}
 		*perr = err;
@@ -2660,14 +2660,14 @@ static psm2_error_t amsh_fini(ptl_t *ptl_gen, int force, uint64_t timeout_ns)
 		while (ptl->connect_incoming > 0 || ptl->connect_outgoing > 0) {
 			if (!psmi_cycles_left(t_start, timeout_ns)) {
 				err = PSM2_TIMEOUT;
-				_HFI_VDBG("CCC timed out with from=%d,to=%d\n",
+				_HFI_VDBG(" CCC timed out with from=%d,to=%d\n",
 					  ptl->connect_incoming, ptl->connect_outgoing);
 				break;
 			}
 			psmi_poll_internal(ptl->ep, 1);
 		}
 	} else
-		_HFI_VDBG("CCC complete disconnect from=%d,to=%d\n",
+		_HFI_VDBG(" CCC complete disconnect from=%d,to=%d\n",
 			  ptl->connect_incoming, ptl->connect_outgoing);
 
 	if ((err_seg = psmi_shm_detach(ptl_gen))) {

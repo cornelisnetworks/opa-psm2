@@ -603,7 +603,7 @@ ips_spio_process_events(const struct ptl *ptl_gen)
 	}
 
 	/* First ack the driver the receipt of the events */
-	_HFI_VDBG("Acking event(s) 0x%" PRIx64 " to qib driver.\n",
+	_HFI_VDBG(" Acking event(s) 0x%" PRIx64 " to qib driver.\n",
 		  (uint64_t) event_mask);
 
 	psmi_hal_ack_hfi_event(event_mask, ctrl->context->psm_hw_ctxt);
@@ -617,7 +617,7 @@ ips_spio_process_events(const struct ptl *ptl_gen)
 			    ~(PSM_HAL_HFI_EVENT_LMC_CHANGE |
 				PSM_HAL_HFI_EVENT_SL2VL_CHANGE);
 		ips_ibta_link_updown_event(&((struct ptl_ips *)(ctrl->ptl))->proto);
-		_HFI_VDBG("Link down detected.\n");
+		_HFI_VDBG(" Link down detected.\n");
 	}
 
 	if (event_mask & PSM_HAL_HFI_EVENT_LID_CHANGE) {
@@ -635,10 +635,10 @@ ips_spio_process_events(const struct ptl *ptl_gen)
 	}
 
 	if (event_mask & PSM_HAL_HFI_EVENT_LMC_CHANGE)
-			_HFI_INFO("Fabric LMC changed.\n");
+			_HFI_INFO(" Fabric LMC changed.\n");
 
 	if (event_mask & PSM_HAL_HFI_EVENT_SL2VL_CHANGE) {
-		_HFI_INFO("SL2VL mapping changed for port.\n");
+		_HFI_INFO(" SL2VL mapping changed for port.\n");
 		ips_ibta_init_sl2sc_table(&((struct ptl_ips *)(ctrl->ptl))->proto);
 	}
 
@@ -751,7 +751,7 @@ fi_busy:
 		}
 	}
 
-	_HFI_VDBG("credits: total %d, avail %d index %d, fill %d "
+	_HFI_VDBG(" credits: total %d, avail %d index %d, fill %d "
 		  "free %d: %d %d %d %d %d; addr %llx\n",
 		  ctrl->spio_total_blocks,
 		  spio_ctrl->spio_available_blocks,
@@ -791,7 +791,7 @@ fi_busy:
 	if (do_lock)
 		pthread_spin_unlock(&ctrl->spio_lock);
 
-	_HFI_VDBG("PIO write: nblks %d length %d, paylen %d\n", nblks, length,
+	_HFI_VDBG(" PIO write: nblks %d length %d, paylen %d\n", nblks, length,
 		  paylen);
 
 	/* Setup PBC for this packet */
@@ -804,7 +804,7 @@ fi_busy:
 		ctrl->spio_block_index = 0;
 
 	ctrl->spio_blockcpy_med(pioaddr, (uint64_t *) pbc, 1);
-	_HFI_VDBG("pio qw write sop %p: 8\n", pioaddr);
+	_HFI_VDBG(" pio qw write sop %p: 8\n", pioaddr);
 
 	/* Write to PIO: other blocks of payload */
 #ifdef PSM_CUDA
@@ -842,7 +842,7 @@ fi_busy:
 		if (blks2end >= blks2send) {
 			blockcpy_fn(pioaddr,
 					(uint64_t *)payload, blks2send);
-			_HFI_VDBG("pio blk write %p: %d\n",
+			_HFI_VDBG(" pio blk write %p: %d\n",
 					pioaddr, blks2send);
 			ctrl->spio_block_index += blks2send;
 			if (ctrl->spio_block_index == ctrl->spio_total_blocks)
@@ -851,14 +851,14 @@ fi_busy:
 		} else {
 			blockcpy_fn(pioaddr,
 					(uint64_t *)payload, blks2end);
-			_HFI_VDBG("pio blk write %p: %d\n",
+			_HFI_VDBG(" pio blk write %p: %d\n",
 					pioaddr, blks2end);
 			payload += blks2end*16;
 
 			pioaddr = ctrl->spio_bufbase;
 			blockcpy_fn(pioaddr,
 				    (uint64_t *)payload, (blks2send-blks2end));
-			_HFI_VDBG("pio blk write %p: %d\n",
+			_HFI_VDBG(" pio blk write %p: %d\n",
 					pioaddr, (blks2send-blks2end));
 			ctrl->spio_block_index = blks2send - blks2end;
 			payload += (blks2send-blks2end)*16;
@@ -884,7 +884,7 @@ fi_busy:
 		/* Write the remaining qwords of payload */
 		if (qws) {
 			hfi_qwordcpy_safe(pioaddr, (uint64_t *) payload, qws);
-			_HFI_VDBG("pio qw write %p: %d\n", pioaddr, qws);
+			_HFI_VDBG(" pio qw write %p: %d\n", pioaddr, qws);
 			payload += qws << 1;
 			length -= qws << 3;
 
@@ -904,7 +904,7 @@ fi_busy:
 
 		/* Write the rest of qwords of current block */
 		hfi_qwordcpy_safe(pioaddr, (uint64_t *) blkbuf, 8 - qws);
-		_HFI_VDBG("pio qw write %p: %d\n", pioaddr, 8 - qws);
+		_HFI_VDBG(" pio qw write %p: %d\n", pioaddr, 8 - qws);
 
 		if (paylen > ((8 - qws) << 3)) {
 			/* We need another block */
@@ -917,7 +917,7 @@ fi_busy:
 			hfi_qwordcpy_safe(pioaddr,
 					  (uint64_t *) &blkbuf[(8 - qws) << 1],
 					  8);
-			_HFI_VDBG("pio qw write %p: %d\n", pioaddr, 8);
+			_HFI_VDBG(" pio qw write %p: %d\n", pioaddr, 8);
 		}
 	}
 	/*

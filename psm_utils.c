@@ -184,7 +184,7 @@ void *psmi_epid_lookup(psm2_ep_t ep, psm2_epid_t epid)
 {
 	void *entry = psmi_epid_lookup_inner(ep, epid, 0);
 	if (PSMI_EP_HOSTNAME != ep)
-		_HFI_VDBG("lookup of (%p,%" PRIx64 ") returns %p\n", ep, epid,
+		_HFI_VDBG(" lookup of (%p,%" PRIx64 ") returns %p\n", ep, epid,
 			  entry);
 	return entry;
 }
@@ -192,7 +192,7 @@ void *psmi_epid_lookup(psm2_ep_t ep, psm2_epid_t epid)
 void *psmi_epid_remove(psm2_ep_t ep, psm2_epid_t epid)
 {
 	if (PSMI_EP_HOSTNAME != ep)
-		_HFI_VDBG("remove of (%p,%" PRIx64 ")\n", ep, epid);
+		_HFI_VDBG(" remove of (%p,%" PRIx64 ")\n", ep, epid);
 	return psmi_epid_lookup_inner(ep, epid, 1);
 }
 
@@ -228,7 +228,7 @@ psm2_error_t psmi_epid_add(psm2_ep_t ep, psm2_epid_t epid, void *entry)
 	psm2_error_t err = PSM2_OK;
 
 	if (PSMI_EP_HOSTNAME != ep)
-		_HFI_VDBG("add of (%p,%" PRIx64 ") with entry %p\n", ep, epid,
+		_HFI_VDBG(" add of (%p,%" PRIx64 ") with entry %p\n", ep, epid,
 			  entry);
 	pthread_mutex_lock(&psmi_epid_table.tablock);
 	/* Leave this here, mostly for sanity and for the fact that the epid
@@ -709,7 +709,7 @@ psmi_parse_mpool_env(const psm2_mq_t mq, int level,
 		goto fail;
 	}
 
-	_HFI_VDBG("%s max=%u,chunk=%u (mode=%s(%u),min=%u,max=%u)\n",
+	_HFI_VDBG(" %s max=%u,chunk=%u (mode=%s(%u),min=%u,max=%u)\n",
 		  env, val, rlim->mode[mode].obj_chunk,
 		  psmi_memmode_string(mode), mode, rlim->minval, rlim->maxval);
 
@@ -1481,7 +1481,7 @@ void *psmi_malloc_internal(psm2_ep_t ep, psmi_memtype_t type,
 		hdr->original_allocation = newa;
 		psmi_log_memstats(type, newsz);
 		newa = (void *)(hdr + 1);
-		/* _HFI_INFO("alloc is %p\n", newa); */
+		/* _HFI_INFO(" alloc is %p\n", newa); */
 	}
 	return newa;
 }
@@ -1550,7 +1550,7 @@ void *psmi_memalign_internal(psm2_ep_t ep, psmi_memtype_t type,
 		hdr->original_allocation = newa;
 		psmi_log_memstats(type, newsz);
 		newa = rv;
-		/* _HFI_INFO("alloc is %p\n", newa); */
+		/* _HFI_INFO(" alloc is %p\n", newa); */
 	}
 	return newa;
 }
@@ -1592,7 +1592,7 @@ void MOCKABLE(psmi_free_internal)(void *ptr,const char *curloc)
 	if_pf(psmi_stats_mask & PSMI_STATSTYPE_MEMORY) {
 		struct psmi_memtype_hdr *hdr =
 		    (struct psmi_memtype_hdr *)ptr - 1;
-		/* _HFI_INFO("hdr is %p, ptr is %p\n", hdr, ptr); */
+		/* _HFI_INFO(" hdr is %p, ptr is %p\n", hdr, ptr); */
 		psmi_memtype_t type = hdr->type;
 		int64_t size = hdr->size;
 		int magic = (int)hdr->magic;
