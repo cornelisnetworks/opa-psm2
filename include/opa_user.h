@@ -78,11 +78,6 @@
 #include <sys/user.h>
 #include <syslog.h>
 
-/* Define WFR externally or default to JKR on this branch */
-#ifndef WFR
- #define JKR 1
-#endif
-
 #include "opa_intf.h"
 #include "opa_byteorder.h"
 #include "opa_udebug.h"

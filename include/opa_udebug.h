@@ -56,6 +56,12 @@
 #ifndef OPA_UDEBUG_H
 #define OPA_UDEBUG_H
 
+
+/* Define WFR externally or default to JKR on this branch */
+#ifndef WFR
+ #define JKR 1
+#endif
+
 #include <stdio.h>
 #include "opa_debug.h"
 

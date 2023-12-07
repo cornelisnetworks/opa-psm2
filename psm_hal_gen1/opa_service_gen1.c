@@ -344,10 +344,12 @@ int hfi_get_unit_active(int unit)
 {
 	int p,rv;
 
-	for (p = HFI_MIN_PORT; p <= HFI_MAX_PORT; p++)
+	for (p = HFI_MIN_PORT; p <= HFI_MAX_PORT; p++) {
+		_HFI_DBG("units %d, port %d, MIN %d, MAX %d\n", unit, p, HFI_MIN_PORT, HFI_MAX_PORT);
 		if ((rv=hfi_get_port_lid(unit, p)) > 0)
 			break;
-
+		_HFI_DBG("rv %d\n", rv);
+	}
 	if (p <= HFI_MAX_PORT)
 	{
 		return 1;
@@ -403,6 +405,8 @@ int hfi_get_port_active(int unit, int port)
 	int ret;
 	char *state;
 
+	_HFI_DBG(" %s: unit %d port %d\n",__func__, unit, port);
+
 	ret = hfi_sysfs_port_read(unit, port, "phys_state", &state);
 	if (ret == -1) {
 		if (errno == ENODEV)
@@ -422,6 +426,7 @@ int hfi_get_port_active(int unit, int port)
 			return 0;
 		}
 		free(state);
+		_HFI_DBG("Link is active for unit %u:%u\n", unit, port);
 		return 1;
 	}
 }
@@ -438,11 +443,12 @@ int hfi_get_port_lid(int unit, int port)
 	int ret;
 	int64_t val;
 
-	if (hfi_get_port_active(unit,port) != 1)
+	if ((ret = hfi_get_port_active(unit,port)) != 1) {
+		_HFI_DBG(" hfi_get_port_active: ret %d, unit %d port %d\n", ret, unit, port);
 		return -2;
+	}
 	ret = hfi_sysfs_port_read_s64(unit, port, "lid", &val, 0);
-	_HFI_VDBG(" hfi_get_port_lid: ret %d, unit %d port %d\n", ret, unit,
-		  port);
+	_HFI_VDBG(" hfi_get_port_lid: ret %d, unit %d port %d\n", ret, unit, port);
 
 	if (ret == -1) {
 		if (errno == ENODEV)
@@ -527,7 +533,7 @@ int hfi_get_port_gid(int unit, int port, uint64_t *hi, uint64_t *lo)
 		}
 		free(gid_str);
 	}
-
+	_HFI_DBG("ret %d for unit %u:%u\n", ret, unit, port);
 	return ret;
 }
 
@@ -569,6 +575,7 @@ int hfi_get_port_rate(int unit, int port)
 	}
 
 	free(data_rate);
+	_HFI_DBG("ret %d for unit %u:%u\n", ((int)(rate * 2) >> 1), unit, port);
 	return ((int)(rate * 2) >> 1);
 
 get_port_rate_error:

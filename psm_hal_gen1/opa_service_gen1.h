@@ -66,7 +66,12 @@
 
 /* upper and lower bounds for HFI port numbers */
 #define HFI_MIN_PORT 1
+#ifndef JKR
+#warning WFR
 #define HFI_MAX_PORT 1
+#else
+#define HFI_MAX_PORT 2
+#endif
 #ifndef HFI_NUM_PORTS_GEN1
 #define HFI_NUM_PORTS_GEN1 (HFI_MAX_PORT - HFI_MIN_PORT + 1)
 #endif

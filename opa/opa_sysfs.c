@@ -228,6 +228,7 @@ int hfi_sysfs_port_open(uint32_t unit, uint32_t port, const char *attr,
 
 	snprintf(buf, sizeof(buf), "%s%u/ports/%u/%s", hfi_sysfs_path(),
 		 unit, port, attr);
+	_HFI_DBG(" %s: %s unit %d port %d\n",__func__, buf, unit, port);
 	fd = open(buf, flags);
 	saved_errno = errno;
 
@@ -238,6 +239,7 @@ int hfi_sysfs_port_open(uint32_t unit, uint32_t port, const char *attr,
 	}
 
 	errno = saved_errno;
+	_HFI_DBG(" %s: fd %d \n",__func__, fd);
 	return fd;
 }
 
@@ -361,6 +363,7 @@ int hfi_sysfs_port_read(uint32_t unit, uint32_t port, const char *attr,
 	int fd = -1, ret = -1;
 	int saved_errno;
 
+	_HFI_DBG(" %s: unit %d port %d\n",__func__, unit, port);
 	fd = hfi_sysfs_port_open(unit, port, attr, O_RDONLY);
 	saved_errno = errno;
 
@@ -378,6 +381,7 @@ bail:
 		close(fd);
 	}
 
+	_HFI_DBG(" %s: ret %d fd %d errno %d/%d\n",__func__, ret, fd, errno, saved_errno);
 	errno = saved_errno;
 	return ret;
 }
@@ -586,9 +590,11 @@ int hfi_sysfs_port_read_s64(uint32_t unit, uint32_t port, const char *attr,
 	if (ret == -1) {
 		goto bail;
 	}
+	_HFI_DBG("ret %d data %s for unit %u:%u\n", ret, data, unit, port);
 
 	val = strtoll(data, &end, base);
 	saved_errno = errno;
+	_HFI_DBG("ret %d val %lld for unit %u:%u\n", ret, val, unit, port);
 
 	if (!*data || !(*end == '\0' || isspace(*end))) {
 		ret = -1;
@@ -601,5 +607,6 @@ int hfi_sysfs_port_read_s64(uint32_t unit, uint32_t port, const char *attr,
 bail:
 	free(data);
 	errno = saved_errno;
+	_HFI_DBG("ret %d for %s unit %u:%u\n", ret, attr, unit, port);
 	return ret;
 }
