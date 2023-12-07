@@ -96,7 +96,7 @@ INCLUDES := -I$(top_srcdir)/include -I$(top_srcdir)/mpspawn -I$(top_srcdir)/incl
 IFS_HFI_HEADER_PATH := /usr/include/uapi
 INCLUDES += -I${IFS_HFI_HEADER_PATH}
 
-BASECFLAGS +=-Wall $(WERROR)
+BASECFLAGS +=-Wall 
 
 #
 # test if compiler supports 32B(AVX2)/64B(AVX512F) move instruction.
