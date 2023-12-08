@@ -150,7 +150,18 @@ static int map_hfi_mem(int fd, struct _hfi_ctrl *ctrl, size_t subctxt_cnt)
 
 	/* 7. Map RXE per-context CSRs */
 	_HFI_VDBG(" :%u\n",__LINE__);
+#ifndef JKR
+#warning WFR
+	/* Not sure why this is page size but not changing now
+
+	#define HFI_MMAP_PGSIZE				sysconf(_SC_PAGESIZE)
+
+	 */
 	sz = HFI_MMAP_PGSIZE;
+#else
+	sz = 8192; /* Need HFI constant or is it genuinely
+	              2 pages? */
+#endif
 	HFI_MMAP_ERRCHECK(fd, binfo, user_regbase, sz, PROT_WRITE|PROT_READ);
 	arrsz[USER_REGBASE] = sz;
 	/* Set up addresses for optimized register writeback routines.
