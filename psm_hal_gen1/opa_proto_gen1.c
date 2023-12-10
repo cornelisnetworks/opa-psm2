@@ -575,6 +575,15 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 	/* Save some info. */
 	spctrl->fd = fd;
 	spctrl->__hfi_unit = cinfo->unit;
+#ifdef JKR
+	/* TBD where do we get the port ?  */
+	if (getenv("HFI_PORT")) {
+		spctrl->__hfi_port = atoi(getenv("HFI_PORT"));
+	} else {
+		spctrl->__hfi_port = HFI_PORT_NUM_ANY;
+	}
+#else
+#warning WFR
 	/*
 	 * driver should provide the port where the context is opened for, But
 	 * OPA driver does not have port interface to psm because there is only
@@ -584,6 +593,7 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 	 */
 	/* spctrl->__hfi_port = cinfo->port; */
 	spctrl->__hfi_port = 1;
+#endif
 	spctrl->__hfi_tidegrcnt = cinfo->egrtids;
 	spctrl->__hfi_tidexpcnt = cinfo->rcvtids - cinfo->egrtids;
         _HFI_VDBG(" :%u\n",__LINE__);
