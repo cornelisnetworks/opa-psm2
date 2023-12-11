@@ -591,7 +591,7 @@ static PSMI_HAL_INLINE int hfp_gen1_context_open(int unit,
 
 		struct _hfi_ctrl *ctrl = pc_private->ctrl;
 		int i;
-		_HFI_VDBG("__hfi_port %d", ctrl->__hfi_port);
+		_HFI_VDBG("__hfi_port %d\n", ctrl->__hfi_port);
 
 		if (hfi_get_port_lid(ctrl->__hfi_unit,
 				     ctrl->__hfi_port) <= 0) {
@@ -1966,7 +1966,7 @@ static PSMI_HAL_INLINE uint64_t hfp_gen1_get_gid_lo(psmi_hal_hw_context ctxt)
 	hfp_gen1_pc_private *psm_hw_ctxt = ctxt;
 	struct _hfi_ctrl *ctrl = psm_hw_ctxt->ctrl;
 	uint64_t gid_lo, gid_hi;
-	_HFI_VDBG("__hfi_port %d", ctrl->__hfi_port);
+	_HFI_VDBG("__hfi_port %d\n", ctrl->__hfi_port);
 
 	if (hfi_get_port_gid(ctrl->__hfi_unit,
 			     ctrl->__hfi_port, &gid_hi,
@@ -1982,7 +1982,7 @@ static PSMI_HAL_INLINE uint64_t hfp_gen1_get_gid_hi(psmi_hal_hw_context ctxt)
 	hfp_gen1_pc_private *psm_hw_ctxt = ctxt;
 	struct _hfi_ctrl *ctrl = psm_hw_ctxt->ctrl;
 	uint64_t gid_lo, gid_hi;
-	_HFI_VDBG("__hfi_port %d", ctrl->__hfi_port);
+	_HFI_VDBG("__hfi_port %d\n", ctrl->__hfi_port);
 
 	if (hfi_get_port_gid(ctrl->__hfi_unit,
 			     ctrl->__hfi_port, &gid_hi,
@@ -2011,7 +2011,7 @@ static PSMI_HAL_INLINE int      hfp_gen1_get_lid(psmi_hal_hw_context ctxt)
 	hfp_gen1_pc_private *psm_hw_ctxt = ctxt;
 	struct _hfi_ctrl *ctrl = psm_hw_ctxt->ctrl;
 	int lid;
-	_HFI_VDBG("__hfi_port %d", ctrl->__hfi_port);
+	_HFI_VDBG("__hfi_port %d\n", ctrl->__hfi_port);
 
 	if ((lid = hfi_get_port_lid(ctrl->__hfi_unit,
 				    ctrl->__hfi_port)) <= 0) {
@@ -2035,7 +2035,7 @@ static PSMI_HAL_INLINE int      hfp_gen1_get_port_num(psmi_hal_hw_context ctxt)
 {
 	hfp_gen1_pc_private *psm_hw_ctxt = ctxt;
 	struct _hfi_ctrl *ctrl = psm_hw_ctxt->ctrl;
-	_HFI_VDBG("__hfi_port %d", ctrl->__hfi_port);
+	_HFI_VDBG("__hfi_port %d\n", ctrl->__hfi_port);
 
 	return ctrl->__hfi_port;
 }

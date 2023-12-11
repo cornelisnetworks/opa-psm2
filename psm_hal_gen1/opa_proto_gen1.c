@@ -550,7 +550,7 @@ struct _hfi_ctrl *hfi_userinit_internal(int fd, bool skip_affinity,
 	/* spctrl->__hfi_port = cinfo->port; */
 	spctrl->__hfi_port = 1;
 #endif
-	_HFI_VDBG("__hfi_port %d", spctrl->__hfi_port);
+	_HFI_VDBG("__hfi_port %d\n", spctrl->__hfi_port);
 
 	spctrl->__hfi_tidegrcnt = cinfo->egrtids;
 	spctrl->__hfi_tidexpcnt = cinfo->rcvtids - cinfo->egrtids;
