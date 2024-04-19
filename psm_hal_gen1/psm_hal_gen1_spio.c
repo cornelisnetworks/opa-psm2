@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2024 Tactical Computing Labs, LLC
   Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2017 Intel Corporation.
 
@@ -91,7 +92,11 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 #endif
 	      )
 {
+#if defined(__x86_64__) || defined(__x86_64) || defined(__X86__) || defined(i386) || defined(__i386) || defined(__i386__) || \
+        defined(_X86_) || defined(__i486__) || defined(__i586__) || defined(__i686__)
+
 	cpuid_t id;
+#endif
 	hfp_gen1_pc_private *psm_hw_ctxt = context->psm_hw_ctxt;
 	struct _hfi_ctrl *con_ctrl = psm_hw_ctxt->ctrl;
 
@@ -161,6 +166,8 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 	/*
 	 * Setup the PIO block copying routines.
 	 */
+#if defined(__x86_64__) || defined(__x86_64) || defined(__X86__) || defined(i386) || defined(__i386) || defined(__i386__) || \
+        defined(_X86_) || defined(__i486__) || defined(__i586__) || defined(__i686__)
 
 	get_cpuid(0x1, 0, &id);
 
@@ -184,6 +191,15 @@ ips_spio_init(const struct psmi_context *context, struct ptl *ptl,
 
 #ifdef PSM_CUDA
 	ctrl->cuda_pio_buffer = NULL;
+#endif
+
+#else
+	/* 16B copying supported */
+	ctrl->spio_blockcpy_med = hfi_pio_blockcpy_64;
+
+	/* 32B copying supported */
+	ctrl->spio_blockcpy_large = ctrl->spio_blockcpy_med;
+
 #endif
 
 	_HFI_PRDBG("ips_spio_init() done\n");

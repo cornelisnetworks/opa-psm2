@@ -4,6 +4,7 @@
 #
 #  GPL LICENSE SUMMARY
 #
+#  Copyright(c) 2024 Tactical Computing Labs, LLC
 #  Copyright(c) 2015 Intel Corporation.
 #
 #  This program is free software; you can redistribute it and/or modify
@@ -54,7 +55,7 @@ $(error top_srcdir must be set to include makefile fragment)
 endif
 
 export os ?= $(shell uname -s | tr '[A-Z]' '[a-z]')
-export arch := $(shell uname -m | sed -e 's,\(i[456]86\|athlon$$\),i386,')
+export arch := $(shell uname -m | sed -e 's,\(i[456]86\|athlon$$\),i386,riscv64')
 export CCARCH ?= gcc
 
 ifeq (${CCARCH},$(filter ${CCARCH},gcc gcc4 icc clang))

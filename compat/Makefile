@@ -4,6 +4,7 @@
 #
 #  GPL LICENSE SUMMARY
 #
+#  Copyright(c) 2024 Tactical Computing Labs, LLC
 #  Copyright(c) 2015 Intel Corporation.
 #
 #  This program is free software; you can redistribute it and/or modify
@@ -69,11 +70,19 @@ DEPS:= $(${COMPATLIB}-objs:.o=.d)
 
 all .DEFAULT: ${${COMPATLIB}-objs} $(OUTDIR)/${COMPATLIB}.so.${MAJOR}
 
+ifeq (fedora,${DISTRO})
 install: all
 	install -m 0644 -D 40-psm-compat.rules ${DESTDIR}$(UDEVDIR)/rules.d/40-psm-compat.rules
 	install -m 0644 -D libpsm2-compat.conf ${DESTDIR}${LIBPSM2_COMPAT_CONF_DIR}/modprobe.d/libpsm2-compat.conf
 	install -m 0755 -D libpsm2-compat.cmds ${DESTDIR}/usr/lib/libpsm2/libpsm2-compat.cmds
 	install -D $(OUTDIR)/${COMPATLIB}.so.${MAJOR} ${DESTDIR}${COMPAT_LIB_TARG}/${COMPATLIB}.so.${MAJOR}
+else
+install: all
+	install -m 0644 -D 40-psm-compat.rules ${DESTDIR}$(UDEVDIR)/40-psm-compat.rules
+	install -m 0644 -D libpsm2-compat.conf ${DESTDIR}${LIBPSM2_COMPAT_CONF_DIR}/modprobe.d/libpsm2-compat.conf
+	install -m 0755 -D libpsm2-compat.cmds ${DESTDIR}/usr/lib/libpsm2/libpsm2-compat.cmds
+	install -D $(OUTDIR)/${COMPATLIB}.so.${MAJOR} ${DESTDIR}${COMPAT_LIB_TARG}/${COMPATLIB}.so.${MAJOR}
+endif
 
 $(OUTDIR)/%.o: $(compat_build_dir)/%.c
 	$(CC) $(CFLAGS) $(BASECFLAGS) $(INCLUDES) -MMD -c $< -o $@
