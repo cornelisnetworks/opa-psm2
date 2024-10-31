@@ -149,7 +149,7 @@ void ips_proto_show_header(struct ips_message_header *p_hdr, char *msg)
 /* linux doesn't have strlcat; this is a stripped down implementation */
 /* not super-efficient, but we use it rarely, and only for short strings */
 /* not fully standards conforming! */
-static size_t strlcat(char *d, const char *s, size_t l)
+static size_t psmi_strlcat(char *d, const char *s, size_t l)
 {
 	int dlen = strlen(d), slen, max;
 	if (l <= dlen)		/* bug */
@@ -169,19 +169,19 @@ void ips_proto_get_rhf_errstring(uint32_t err, char *msg, size_t len)
 	*msg = '\0';		/* if no errors, and so don't need to check what's first */
 
 	if (err & PSMI_HAL_RHF_ERR_ICRC)
-		strlcat(msg, "icrcerr ", len);
+		psmi_strlcat(msg, "icrcerr ", len);
 	if (err & PSMI_HAL_RHF_ERR_ECC)
-		strlcat(msg, "eccerr ", len);
+		psmi_strlcat(msg, "eccerr ", len);
 	if (err & PSMI_HAL_RHF_ERR_LEN)
-		strlcat(msg, "lenerr ", len);
+		psmi_strlcat(msg, "lenerr ", len);
 	if (err & PSMI_HAL_RHF_ERR_TID)
-		strlcat(msg, "tiderr ", len);
+		psmi_strlcat(msg, "tiderr ", len);
 	if (err & PSMI_HAL_RHF_ERR_DC)
-		strlcat(msg, "dcerr ", len);
+		psmi_strlcat(msg, "dcerr ", len);
 	if (err & PSMI_HAL_RHF_ERR_DCUN)
-		strlcat(msg, "dcuncerr ", len);
+		psmi_strlcat(msg, "dcuncerr ", len);
 	if (err & PSMI_HAL_RHF_ERR_KHDRLEN)
-		strlcat(msg, "khdrlenerr ", len);
+		psmi_strlcat(msg, "khdrlenerr ", len);
 }
 
 void ips_proto_dump_err_stats(struct ips_proto *proto)
@@ -208,49 +208,49 @@ void ips_proto_dump_err_stats(struct ips_proto *proto)
 		if (proto->error_stats.num_icrc_err) {
 			snprintf(tmp_buf, sizeof(tmp_buf), "ICRC: %" PRIu64 " ",
 				 proto->error_stats.num_icrc_err);
-			strlcat(err_stat_msg, tmp_buf, len);
+			psmi_strlcat(err_stat_msg, tmp_buf, len);
 		}
 
 		if (proto->error_stats.num_ecc_err) {
 			snprintf(tmp_buf, sizeof(tmp_buf), "ECC: %" PRIu64 " ",
 				 proto->error_stats.num_ecc_err);
-			strlcat(err_stat_msg, tmp_buf, len);
+			psmi_strlcat(err_stat_msg, tmp_buf, len);
 		}
 
 		if (proto->error_stats.num_len_err) {
 			snprintf(tmp_buf, sizeof(tmp_buf), "LEN: %" PRIu64 " ",
 				 proto->error_stats.num_len_err);
-			strlcat(err_stat_msg, tmp_buf, len);
+			psmi_strlcat(err_stat_msg, tmp_buf, len);
 		}
 
 		if (proto->error_stats.num_tid_err) {
 			snprintf(tmp_buf, sizeof(tmp_buf), "TID: %" PRIu64 " ",
 				 proto->error_stats.num_tid_err);
-			strlcat(err_stat_msg, tmp_buf, len);
+			psmi_strlcat(err_stat_msg, tmp_buf, len);
 		}
 
 		if (proto->error_stats.num_dc_err) {
 			snprintf(tmp_buf, sizeof(tmp_buf), "DC: %" PRIu64 " ",
 				 proto->error_stats.num_dc_err);
-			strlcat(err_stat_msg, tmp_buf, len);
+			psmi_strlcat(err_stat_msg, tmp_buf, len);
 		}
 
 		if (proto->error_stats.num_dcunc_err) {
 			snprintf(tmp_buf, sizeof(tmp_buf),
 				 "DCUNC: %" PRIu64 " ",
 				 proto->error_stats.num_dcunc_err);
-			strlcat(err_stat_msg, tmp_buf, len);
+			psmi_strlcat(err_stat_msg, tmp_buf, len);
 		}
 
 		if (proto->error_stats.num_khdrlen_err) {
 			snprintf(tmp_buf, sizeof(tmp_buf),
 				 "KHDRLEN: %" PRIu64 " ",
 				 proto->error_stats.num_khdrlen_err);
-			strlcat(err_stat_msg, tmp_buf, len);
+			psmi_strlcat(err_stat_msg, tmp_buf, len);
 		}
-		strlcat(err_stat_msg, "\n", len);
+		psmi_strlcat(err_stat_msg, "\n", len);
 	} else
-		strlcat(err_stat_msg, "No previous errors.\n", len);
+		psmi_strlcat(err_stat_msg, "No previous errors.\n", len);
 
 	_HFI_ERROR("%s", err_stat_msg);
 }
