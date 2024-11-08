@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2024 Tactical Computing Labs, LLC
   Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2016 Intel Corporation.
 
@@ -388,6 +389,10 @@ psm2_error_t __psm2_init(int *major, int *minor)
 	psmi_verno_client_val =
 	    min(PSMI_VERNO_MAKE(*major, *minor), psmi_verno);
 
+
+#if defined(__x86_64__) || defined(__x86_64) || defined(__X86__) || defined(i386) || defined(__i386) || defined(__i386__) || \
+        defined(_X86_) || defined(__i486__) || defined(__i586__) || defined(__i686__)
+
 	/* Check to see if we need to set Architecture flags to something
 	 * besides big core Xeons */
 	cpuid_t id;
@@ -410,6 +415,9 @@ psm2_error_t __psm2_init(int *major, int *minor)
 		psmi_cpu_model = ((id.eax & CPUID_MODEL_MASK) >> 4) |
 				((id.eax & CPUID_EXMODEL_MASK) >> 12);
 	}
+#else
+	psmi_cpu_model = CPUID_MODEL_UNDEFINED;
+#endif
 
 	psmi_refcount++;
 	/* hfi_debug lives in libhfi.so */

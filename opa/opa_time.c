@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2024 Tactical Computing Labs, LLC
   Copyright(c) 2015 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -116,14 +117,12 @@ static int timebase_debug;	/* off by default */
 
 static int hfi_timebase_isvalid(uint32_t pico_per_cycle)
 {
-#if defined(__x86_64__) || defined(__i386__)
 	/* If pico-per-cycle is less than 200, the clock speed would be greater
 	 * than 5 GHz.  Similarly, we minimally support a 1GHz clock.
 	 * Allow some slop, because newer kernels with HPET can be a few
 	 * units off, and we don't want to spend the startup time needlessly */
 	if (pico_per_cycle >= 198 && pico_per_cycle <= 1005)
 		return 1;
-#endif
 	else
 		return 0;
 }
@@ -289,7 +288,9 @@ static uint32_t hfi_timebase_from_cpuinfo(uint32_t old_pico_per_cycle)
 		return new_pico_per_cycle;
 	}
 
+#if defined(__x86_64__) || defined(__i386__)
 fail:
+#endif
 	new_pico_per_cycle = SAFEDEFAULT_PICOS_PER_CYCLE;
 	timebase_warn_always
 	    ("Problem obtaining CPU time base, detected to be %d "

@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2024 Tactical Computing Labs, LLC
   Copyright(c) 2017 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -64,16 +65,20 @@ struct ptl;
 struct ips_proto;
 struct ips_flow;
 
+#if defined(__x86_64__)
 /* 64B move instruction support */
 #define AVX512F_BIT		16	/* level 07h, ebx */
 /* 32B move instruction support */
 #define AVX2_BIT		 5	/* level 07h, ebx */
 /* 16B move instruction support */
 #define SSE2_BIT		26	/* level 01h, edx */
+#endif
 
 typedef
 void (*ips_spio_blockcpy_fn_t)(volatile uint64_t *dest,
 				const uint64_t *src, uint32_t nblock);
+
+#if defined(__x86_64__)
 #ifdef PSM_AVX512
 void hfi_pio_blockcpy_512(volatile uint64_t *dest,
 				const uint64_t *src, uint32_t nblock);
@@ -82,14 +87,18 @@ void hfi_pio_blockcpy_256(volatile uint64_t *dest,
 				const uint64_t *src, uint32_t nblock);
 void hfi_pio_blockcpy_128(volatile uint64_t *dest,
 				const uint64_t *src, uint32_t nblock);
+#endif
+
 void hfi_pio_blockcpy_64(volatile uint64_t *dest,
 				const uint64_t *src, uint32_t nblock);
 
 
 static PSMI_HAL_INLINE psm2_error_t ips_spio_init(const psmi_context_t *context,
 				struct ptl *ptl, struct ips_spio *ctrl
+#if defined(__x86_64__)
 #ifdef PSM_AVX512
 	            , int is_avx512_enabled
+#endif
 #endif
 );
 

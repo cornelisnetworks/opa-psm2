@@ -4,6 +4,7 @@
 #
 #  GPL LICENSE SUMMARY
 #
+#  Copyright(c) 2024 Tactical Computing Labs, LLC
 #  Copyright(c) 2021 Cornelis Networks.
 #  Copyright(c) 2017 Intel Corporation.
 #
@@ -131,7 +132,9 @@ INCLUDES += -I$(top_srcdir) -I$(top_srcdir)/ptl_ips -I$(OUTDIR)
 
 ifneq (x86_64,$(arch))
    ifneq (i386,$(arch))
-      anerr := $(error Unsupported architecture $(arch))
+      ifneq (riscv64,$(arch))
+         anerr := $(error Unsupported architecture $(arch))
+      endif
    endif
 endif
 
@@ -139,11 +142,25 @@ ifndef LIBDIR
    ifeq (${arch},x86_64)
       INSTALL_LIB_TARG=/usr/lib64
    else
-      INSTALL_LIB_TARG=/usr/lib
+      ifeq (${arch},riscv64)
+        INSTALL_LIB_TARG=/usr/lib64
+      else
+        INSTALL_LIB_TARG=/usr/lib
+      endif
    endif
 else
    INSTALL_LIB_TARG=${LIBDIR}
 endif
+
+ifeq (${arch},riscv64)
+  LINUX_ARCH=riscv64
+  INSTALL_ARCH=riscv
+endif
+ifeq (${arch},x86_64)
+  LINUX_ARCH=i386
+  INSTALL_ARCH=x86_64
+endif
+
 export DESTDIR
 export INSTALL_LIB_TARG
 
@@ -168,6 +185,13 @@ nthreads := $(shell echo $$(( `nproc` * 2 )) )
 
 DISTRO := $(shell . /etc/os-release; if [ "$$ID" = "sle_hpc" ]; then ID="sles"; fi; echo $$ID)
 
+UDEVDIR := $(shell $(PKG_CONFIG) --variable=udevdir udev 2>/dev/null)
+ifndef UDEVDIR
+	UDEVDIR = /lib/udev
+endif
+
+export UDEVDIR
+
 # By default the following two variables have the following values:
 LIBPSM2_COMPAT_CONF_DIR := /etc
 LIBPSM2_COMPAT_SYM_CONF_DIR := /etc
@@ -175,7 +199,7 @@ LIBPSM2_COMPAT_SYM_CONF_DIR := /etc
 # It then messes up sed operations for PSM_CUDA=1.
 # So leaving the commented out line here as documentation to NOT set it.
 # SPEC_FILE_RELEASE_DIST :=
-UDEV_40_PSM_RULES := %{_udevrulesdir}/40-psm.rules
+UDEV_40_PSM_RULES := $(UDEVDIR)/40-psm.rules
 
 ifeq (fedora,$(DISTRO))
 	# On Fedora, we change these two variables to these values:
@@ -251,13 +275,6 @@ endif
 LDLIBS := -lrt -ldl -lnuma ${EXTRA_LIBS} -pthread
 
 PKG_CONFIG ?= pkg-config
-
-UDEVDIR := $(shell $(PKG_CONFIG) --variable=udevdir udev 2>/dev/null)
-ifndef UDEVDIR
-	UDEVDIR = /lib/udev
-endif
-
-export UDEVDIR
 
 # The DIST variable is a name kernel corresponding to:
 # 1. The name of the directory containing the source code distribution
@@ -393,11 +410,11 @@ $(OUTDIR):
 	mkdir -p ${OUTDIR}
 
 symlinks:
-	@test -L $(top_srcdir)/include/linux-x86_64 || \
-		ln -sf linux-i386 $(top_srcdir)/include/linux-x86_64
+	@test -L $(top_srcdir)/include/linux-$(arch) || \
+		ln -sf linux-$(LINUX_ARC) $(top_srcdir)/include/linux-$(arch)
 
 cleanlinks:
-	rm -rf $(top_srcdir)/include/linux-x86_64
+	rm -rf $(top_srcdir)/include/linux-$(arch)
 
 install: all
 	for subdir in $(SUBDIRS) ; do \
@@ -416,14 +433,16 @@ install: all
 	install -m 0644 -D psm2.h ${DESTDIR}/usr/include/psm2.h
 	install -m 0644 -D psm2_mq.h ${DESTDIR}/usr/include/psm2_mq.h
 	install -m 0644 -D psm2_am.h ${DESTDIR}/usr/include/psm2_am.h
-ifneq (fedora,${DISTRO})
+ifeq (fedora,${DISTRO})
 	install -m 0644 -D 40-psm.rules ${DESTDIR}$(UDEVDIR)/rules.d/40-psm.rules
+else
+	install -m 0644 -D 40-psm.rules ${DESTDIR}$(UDEVDIR)/40-psm.rules
 endif
 	# The following files and dirs were part of the noship rpm:
 	mkdir -p ${DESTDIR}/usr/include/hfi1diag
-	mkdir -p ${DESTDIR}/usr/include/hfi1diag/linux-x86_64
-	install -m 0644 -D include/linux-x86_64/bit_ops.h ${DESTDIR}/usr/include/hfi1diag/linux-x86_64/bit_ops.h
-	install -m 0644 -D include/linux-x86_64/sysdep.h ${DESTDIR}/usr/include/hfi1diag/linux-x86_64/sysdep.h
+	mkdir -p ${DESTDIR}/usr/include/hfi1diag/linux-$(arch)
+	install -m 0644 -D include/linux-${INSTALL_ARCH}/bit_ops.h ${DESTDIR}/usr/include/hfi1diag/linux-${INSTALL_ARCH}/bit_ops.h
+	install -m 0644 -D include/linux-${INSTALL_ARCH}/sysdep.h ${DESTDIR}/usr/include/hfi1diag/linux-${INSTALL_ARCH}/sysdep.h
 	install -m 0644 -D include/opa_udebug.h ${DESTDIR}/usr/include/hfi1diag/opa_udebug.h
 	install -m 0644 -D include/opa_debug.h ${DESTDIR}/usr/include/hfi1diag/opa_debug.h
 	install -m 0644 -D include/opa_intf.h ${DESTDIR}/usr/include/hfi1diag/opa_intf.h
@@ -446,6 +465,7 @@ endif
 	install -m 0644 -D psm_hal_gen1/hfi1_deprecated_gen1.h ${DESTDIR}/usr/include/hfi1diag/hfi1_deprecated.h
 	rm -fr $(TEMP_INST_DIR)
 
+ifeq (fedora,${DISTRO})
 specfile: specfile_clean | $(OUTDIR)
 	sed -e 's/@VERSION@/'${VERSION_RELEASE}'/g' libpsm2.spec.in | \
 		sed -e 's/@TARGLIB@/'${TARGLIB}'/g' \
@@ -466,6 +486,28 @@ specfile: specfile_clean | $(OUTDIR)
 	else \
 		sed -i 's;@40_PSM_RULES@;'${UDEV_40_PSM_RULES}';g' ${OUTDIR}/${RPM_NAME}.spec; \
 	fi
+else
+specfile: specfile_clean | $(OUTDIR)
+	sed -e 's/@VERSION@/'${VERSION_RELEASE}'/g' libpsm2.spec.in | \
+		sed -e 's/@TARGLIB@/'${TARGLIB}'/g' \
+			-e 's/@RPM_NAME@/'${RPM_NAME}'/g' \
+			-e 's/@RPM_NAME_BASEEXT@/'${RPM_NAME_BASEEXT}'/g' \
+			-e 's/@COMPATLIB@/'${COMPATLIB}'/g' \
+			-e 's/@COMPATMAJOR@/'${COMPATMAJOR}'/g' \
+			-e 's;@UDEVDIR@;'${UDEVDIR}';g' \
+			-e 's/@MAJOR@/'${MAJOR}'/g' \
+			-e 's/@MINOR@/'${MINOR}'/g' \
+			-e 's:@LIBPSM2_COMPAT_CONF_DIR@:'${LIBPSM2_COMPAT_CONF_DIR}':g' \
+			-e 's:@LIBPSM2_COMPAT_SYM_CONF_DIR@:'${LIBPSM2_COMPAT_SYM_CONF_DIR}':g' \
+			-e 's;@SPEC_FILE_RELEASE_DIST@;'${SPEC_FILE_RELEASE_DIST}';g'  \
+			-e 's/@DIST_SHA@/'${DIST_SHA}'/g' > \
+		${OUTDIR}/${RPM_NAME}.spec
+	if [ -f /etc/redhat-release ] && [ `grep -o "[0-9.]*" /etc/redhat-release | cut -d"." -f1` -lt 7 ]; then \
+		sed -i 's;@40_PSM_RULES@;'${UDEVDIR}'/40-psm.rules;g' ${OUTDIR}/${RPM_NAME}.spec; \
+	else \
+		sed -i 's;@40_PSM_RULES@;'${UDEV_40_PSM_RULES}';g' ${OUTDIR}/${RPM_NAME}.spec; \
+	fi
+endif
 
 # We can't totally prevent two make dist calls in a row from packaging
 # the previous make dist, unless we switch to using a dedicated ./src folder

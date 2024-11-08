@@ -4,6 +4,7 @@
 #
 #  GPL LICENSE SUMMARY
 #
+#  Copyright(c) 2024 Tactical Computing Labs, LLC
 #  Copyright(c) 2017 Intel Corporation.
 #
 #  This program is free software; you can redistribute it and/or modify
@@ -63,7 +64,7 @@ URL: https://github.com/intel/opa-psm2/
 Source0: @RPM_NAME@-%{version}.tar.gz
 
 # The OPA product is supported on x86_64 only:
-ExclusiveArch: x86_64
+#ExclusiveArch: x86_64
 
 BuildRequires: gcc
 Provides: hfi1-psm
@@ -75,29 +76,14 @@ Summary: Intel PSM2 Libraries
 %endif
 Provides: @RPM_NAME@ = %{version}-%{release}
 Provides: @RPM_NAME@%{_isa} = %{version}-%{release}
-%if 0%{?suse_version}
-BuildRequires: libnuma-devel
-Requires: libnuma1
-%else
-%if 0%{?rhel}==0 || 0%{?rhel} > 6
-BuildRequires: systemd
-BuildRequires: numactl-devel
-Requires: numactl-libs
-%endif
-%endif
 
 %package -n @RPM_NAME@-devel
 Summary: Development files for Intel PSM2
-Requires: %{name}%{?_isa} = %{version}-%{release}
 Provides: hfi1-psm-devel
 Obsoletes: hfi1-psm-devel < 1.0.0
 
 %package -n @RPM_NAME@-compat
 Summary: Compat library for Intel PSM2
-Requires: %{name}%{?_isa} = %{version}-%{release}
-%if 0%{?fedora}
-Requires: systemd-udev
-%endif
 Provides: hfi1-psm-compat
 Obsoletes: hfi1-psm-compat < 1.0.0
 
@@ -166,7 +152,7 @@ make %{?_smp_mflags}
 %if 0%{?rhel} && 0%{?rhel} < 7
 @UDEVDIR@/rules.d/40-psm-compat.rules
 %else
-%{_udevrulesdir}/40-psm-compat.rules
+@UDEVDIR@/40-psm-compat.rules
 %endif
 @LIBPSM2_COMPAT_SYM_CONF_DIR@/modprobe.d/libpsm2-compat.conf
 %{_prefix}/lib/libpsm2
