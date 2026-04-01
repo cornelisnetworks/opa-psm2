@@ -4,6 +4,7 @@
 #
 #  GPL LICENSE SUMMARY
 #
+#  Copyright(c) 2024 Tactical Computing Labs, LLC
 #  Copyright(c) 2015 Intel Corporation.
 #
 #  This program is free software; you can redistribute it and/or modify
@@ -63,13 +64,15 @@ top_srcdir := $(this_srcdir)/..
 INCLUDES += -I$(top_srcdir) -I$(top_srcdir)/ptl_ips
 ifeq (${arch},x86_64)
 	PLATFORM_OBJ=opa_dwordcpy-x86_64-fast.o
+	BUILD_ARCH=${arch}
 else
-	PLATFORM_OBJ=
+	PLATFORM_OBJ=opa_dwordcpy-generic.o
+	BUILD_ARCH=generic
 endif
 
 ${TARGLIB}-objs := opa_debug.o opa_time.o \
 	opa_service.o opa_utils.o \
-	opa_dwordcpy-$(arch).o opa_sysfs.o opa_syslog.o \
+	opa_dwordcpy-$(BUILD_ARCH).o opa_sysfs.o opa_syslog.o \
 	$(PLATFORM_OBJ)
 
 ${TARGLIB}-objs := $(patsubst %.o, $(OUTDIR)/%.o, ${${TARGLIB}-objs})

@@ -4,6 +4,7 @@
 #
 #  GPL LICENSE SUMMARY
 #
+#  Copyright(c) 2024 Tactical Computing Labs, LLC
 #  Copyright(c) 2021 Cornelis Networks.
 #  Copyright(c) 2016 Intel Corporation.
 #
@@ -74,6 +75,13 @@ else
 	anerr := $(error Unknown Fortran compiler arch: ${FCARCH})
 endif # gfortran
 
+ifeq (${arch},riscv64)
+	ARCH=riscv64
+endif
+ifeq (${arch},x86_64)
+	ARCH=i386
+endif
+
 BASECFLAGS := $(BASE_FLAGS) -pthread
 LDFLAGS += $(BASE_FLAGS)
 ASFLAGS += $(BASE_FLAGS)
@@ -88,7 +96,16 @@ LINKER_SCRIPT := -Wl,--version-script $(LINKER_SCRIPT_FILE)
 endif
 
 WERROR := -Werror
-INCLUDES := -I$(top_srcdir)/include -I$(top_srcdir)/mpspawn -I$(top_srcdir)/include/$(os)-$(arch)
+
+ifeq (${arch},riscv64)
+ARCH_INCLUDES=linux-riscv
+endif
+
+ifeq (${arch},x86_64)
+ARCH_INCLUDES=linux-i386
+endif
+
+INCLUDES := -I$(top_srcdir)/include -I$(top_srcdir)/include/$(ARCH_INCLUDES) -I$(top_srcdir)/mpspawn -I$(top_srcdir)/include/$(os)-$(arch)
 
 #
 # use IFS provided hfi1_user.h if installed.
@@ -101,48 +118,50 @@ BASECFLAGS +=-Wall $(WERROR)
 #
 # test if compiler supports 32B(AVX2)/64B(AVX512F) move instruction.
 #
-ifeq (${CC},icc)
-	ifeq ($(PSM_DISABLE_AVX2),)
-		MAVX2=-xATOM_SSE4.2 -DPSM_AVX512
+ifeq (${arch},x86_64)
+	ifeq (${CC},icc)
+		ifeq ($(PSM_DISABLE_AVX2),)
+			MAVX2=-xATOM_SSE4.2 -DPSM_AVX512
+		else
+			MAVX2=-march=core-avx-i
+		endif
 	else
-		MAVX2=-march=core-avx-i
-	endif
-else
-	ifeq ($(PSM_DISABLE_AVX2),)
-		MAVX2=-mavx2
-	else
-		MAVX2=-mavx
-	endif
-endif
-
-ifneq (icc,${CC})
-	ifeq ($(PSM_DISABLE_AVX2),)
-		RET := $(shell echo "int main() {}" | ${CC} ${MAVX2} -E -dM -xc - 2>&1 | grep -q AVX2 ; echo $$?)
-	else
-		RET := $(shell echo "int main() {}" | ${CC} ${MAVX2} -E -dM -xc - 2>&1 | grep -q AVX ; echo $$?)
-                anerr := $(warning ***NOTE TO USER**** Disabling AVX2 will harm performance)
+		ifeq ($(PSM_DISABLE_AVX2),)
+			MAVX2=-mavx2
+		else
+			MAVX2=-mavx
+		endif
 	endif
 
-	ifeq (0,${RET})
-		BASECFLAGS += ${MAVX2}
+	ifneq (icc,${CC})
+		ifeq ($(PSM_DISABLE_AVX2),)
+			RET := $(shell echo "int main() {}" | ${CC} ${MAVX2} -E -dM -xc - 2>&1 | grep -q AVX2 ; echo $$?)
+		else
+			RET := $(shell echo "int main() {}" | ${CC} ${MAVX2} -E -dM -xc - 2>&1 | grep -q AVX ; echo $$?)
+                	anerr := $(warning ***NOTE TO USER**** Disabling AVX2 will harm performance)
+		endif
+
+		ifeq (0,${RET})
+			BASECFLAGS += ${MAVX2}
+		else
+			anerr := $(error Compiler does not support ${MAVX2} )
+		endif
 	else
-		anerr := $(error Compiler does not support ${MAVX2} )
-	endif
-else
 		BASECFLAGS += ${MAVX2}
-endif
+	endif
 
 # This support is dynamic at runtime, so is OK to enable as long as compiler can generate
 # the code.
-ifneq (,${PSM_AVX512})
-	ifneq (icc,${CC})
-		RET := $(shell echo "int main() {}" | ${CC} -mavx512f -E -dM -xc - 2>&1 | grep -q AVX512 ; echo $$?)
-		ifeq (0,${RET})
-			BASECFLAGS += -mavx512f
-		else
-			anerr := $(error Compiler does not support AVX512 )
+	ifneq (,${PSM_AVX512})
+		ifneq (icc,${CC})
+			RET := $(shell echo "int main() {}" | ${CC} -mavx512f -E -dM -xc - 2>&1 | grep -q AVX512 ; echo $$?)
+			ifeq (0,${RET})
+				BASECFLAGS += -mavx512f
+			else
+				anerr := $(error Compiler does not support AVX512 )
+			endif
+			BASECFLAGS += -DPSM_AVX512
 		endif
-		BASECFLAGS += -DPSM_AVX512
 	endif
 endif
 
@@ -183,8 +202,8 @@ endif
 ifneq (,${PSM_PROFILE})
 	BASECFLAGS += -DPSM_PROFILE
 endif
-BASECFLAGS += -DNVIDIA_GPU_DIRECT
 ifneq (,${PSM_CUDA})
+        BASECFLAGS += -DNVIDIA_GPU_DIRECT
 	BASECFLAGS += -DPSM_CUDA
 	CUDA_HOME ?= /usr/local/cuda
 	INCLUDES += -I$(CUDA_HOME)/include

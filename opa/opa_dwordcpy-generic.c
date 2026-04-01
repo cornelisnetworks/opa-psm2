@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2024 Tactical Computing Labs, LLC
   Copyright(c) 2015 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -54,12 +55,17 @@
 /* Copyright (c) 2003-2014 Intel Corporation. All rights reserved. */
 
 #include <stdint.h>
+#if defined(__x86_64__)
 #include <immintrin.h>
+#endif
 #include "opa_intf.h"
 #include "psm_user.h"
 
-#if defined(__x86_64__)
+#ifndef hfi_dwordcpy
 #define hfi_dwordcpy hfi_dwordcpy_safe
+#endif
+
+#ifndef hfi_qwordcpy
 #define hfi_qwordcpy hfi_qwordcpy_safe
 #endif
 
@@ -167,6 +173,7 @@ void hfi_qwordcpy(volatile uint64_t *dest, const uint64_t *src, uint32_t nqwords
 	}
 }
 
+#if defined(__x86_64__)
 #ifdef PSM_AVX512
 void hfi_pio_blockcpy_512(volatile uint64_t *dest, const uint64_t *src, uint32_t nblock)
 {
@@ -253,6 +260,7 @@ void hfi_pio_blockcpy_128(volatile uint64_t *dest, const uint64_t *src, uint32_t
 		} while ((--nblock) && (dp = dp+4) && (sp = sp+4));
 	}
 }
+#endif
 
 void hfi_pio_blockcpy_64(volatile uint64_t *dest, const uint64_t *src, uint32_t nblock)
 {

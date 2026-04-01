@@ -5,6 +5,8 @@
 /usr/include/hfi1diag/hfi1_deprecated_gen1.h
 /usr/include/hfi1diag/linux-x86_64/bit_ops.h
 /usr/include/hfi1diag/linux-x86_64/sysdep.h
+/usr/include/hfi1diag/linux-riscv/bit_ops.h
+/usr/include/hfi1diag/linux-riscv/sysdep.h
 /usr/include/hfi1diag/opa_udebug.h
 /usr/include/hfi1diag/opa_debug.h
 /usr/include/hfi1diag/opa_intf.h

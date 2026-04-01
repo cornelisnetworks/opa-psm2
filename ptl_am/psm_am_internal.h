@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2024 Tactical Computing Labs, LLC
   Copyright(c) 2015 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -256,6 +257,8 @@ void psmi_am_reqq_add(int amtype, ptl_t *ptl, psm2_epaddr_t epaddr,
 
 #define QISEMPTY(flag) (flag < QREADY)
 #if defined(__x86_64__) || defined(__i386__)
+#  define _QMARK_FLAG_FENCE()  asm volatile("" : : : "memory")	/* compilerfence */
+#elif defined(__riscv) || defined(__riscv_xlen)
 #  define _QMARK_FLAG_FENCE()  asm volatile("" : : : "memory")	/* compilerfence */
 #else
 #  error No _QMARK_FLAG_FENCE() defined for this platform

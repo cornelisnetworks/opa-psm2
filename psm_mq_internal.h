@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2024 Tactical Computing Labs, LLC
   Copyright(c) 2021 Cornelis Networks.
   Copyright(c) 2016 Intel Corporation.
 
@@ -58,6 +59,10 @@
 #ifndef MQ_INT_H
 #define MQ_INT_H
 
+#if defined(__riscv)
+#include <stdint.h>
+#endif
+
 /* Ugh. smmintrin.h eventually includes mm_malloc.h, which calls malloc */
 #ifdef malloc
 #undef malloc
@@ -65,11 +70,15 @@
 #ifdef free
 #undef free
 #endif
+#if !(__riscv)
 #include <smmintrin.h>
+#endif
 #include "psm_user.h"
 #include "psm_sysbuf.h"
 
 #include "psm2_mock_testing.h"
+
+#include <assert.h>
 
 #if 0
 typedef psm2_error_t(*psm_mq_unexpected_callback_fn_t)
@@ -275,18 +284,11 @@ struct psm2_mq_req {
 	};
 };
 
-PSMI_ALWAYS_INLINE(
-unsigned
-hash_64(uint64_t a))
-{
-	return _mm_crc32_u64(0, a);
-}
-PSMI_ALWAYS_INLINE(
-unsigned
-hash_32(uint32_t a))
-{
-	return _mm_crc32_u32(0, a);
-}
+#if defined(__riscv)
+#include "util-generic.h"
+#endif
+
+#include "hash.h"
 
 void MOCKABLE(psmi_mq_mtucpy)(void *vdest, const void *vsrc, uint32_t nchars);
 MOCK_DCL_EPILOGUE(psmi_mq_mtucpy);

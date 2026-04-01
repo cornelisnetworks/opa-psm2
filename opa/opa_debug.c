@@ -5,6 +5,7 @@
 
   GPL LICENSE SUMMARY
 
+  Copyright(c) 2024 Tactical Computing Labs, LLC
   Copyright(c) 2015 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify
@@ -195,8 +196,9 @@ static void hfi_sighdlr(int sig, siginfo_t *p1, void *ucv)
 		      "\n%.60s:%u terminated with signal %d", __progname,
 		      getpid(), sig);
 	if (ucv) {
-		static ucontext_t *uc;
-		uc = (ucontext_t *) ucv;
+#if defined(__x86_64__) || defined(__i386__)
+		static ucontext_t *uc = (ucontext_t *) ucv;
+#endif
 		id += snprintf(buf + id, sizeof(buf) - id, " at PC=%lx SP=%lx",
 #if defined(__x86_64__)
 			       (unsigned long)uc->uc_mcontext.gregs[REG_RIP],
@@ -204,6 +206,8 @@ static void hfi_sighdlr(int sig, siginfo_t *p1, void *ucv)
 #elif defined(__i386__)
 			       (unsigned long)uc->uc_mcontext.gregs[REG_EIP],
 			       (unsigned long)uc->uc_mcontext.gregs[REG_ESP]);
+#elif defined(__riscv) || defined(__riscv_xlen)
+			       0ul, 0ul);
 #else
 			       0ul, 0ul);
 #warning No stack pointer or instruction pointer for this arch
