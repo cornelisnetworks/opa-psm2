@@ -93,7 +93,7 @@ $(OUTDIR)/%.o: $(this_srcdir)/%.c | ${DEPS}
 	$(CC) $(CFLAGS) $(BASECFLAGS) $(INCLUDES) -c $< -o $@
 
 $(OUTDIR)/%.o: $(this_srcdir)/%.S | ${DEPS}
-	$(CC) $(ASFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(BASECFLAGS) $(INCLUDES) $(ASFLAGS) -c $< -o $@
 
 clean:
 	@rm -f $(OUTDIR)/_revision.c
