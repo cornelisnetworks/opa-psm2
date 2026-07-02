@@ -157,44 +157,23 @@ MINOR := $(PSM2_LIB_MINOR)
 
 nthreads := $(shell echo $$(( `nproc` * 2 )) )
 
-# The following line sets the DISTRO variable to:
-#  'rhel' if the host is running RHEL.
-#  'suse' if the host is running SUSE.
-#  'fedora' if the host is running Fedora.
-#  'ubuntu' if the host is running Ubuntu.
-#
-# The DISTRO variable is used subsequently for variable
-# behaviors of the 3 distros.
+PKG_CONFIG ?= pkg-config
 
-DISTRO := $(shell . /etc/os-release; if [ "$$ID" = "sle_hpc" ]; then ID="sles"; fi; echo $$ID)
+# Detect where kmod looks for packaged config files.
+# If that fails, default to /lib, which should work on all distros since 2011,
+# with or without /usr-merge.
+LIBPSM2_COMPAT_CONF_DIR := $(or $(shell $(PKG_CONFIG) --variable=distconfdir kmod 2>/dev/null),/lib)
+export LIBPSM2_COMPAT_CONF_DIR
 
-# By default the following two variables have the following values:
-LIBPSM2_COMPAT_CONF_DIR := /etc
-LIBPSM2_COMPAT_SYM_CONF_DIR := /etc
-# We can't set SPEC_FILE_RELEASE_DIST to an empty value, a space will result.
-# It then messes up sed operations for PSM_CUDA=1.
-# So leaving the commented out line here as documentation to NOT set it.
-# SPEC_FILE_RELEASE_DIST :=
-UDEV_40_PSM_RULES := %{_udevrulesdir}/40-psm.rules
+LIBPSM2_COMPAT_SYM_CONF_DIR := $(patsubst /usr%,\%{_prefix}%,$(LIBPSM2_COMPAT_CONF_DIR))
 
-ifeq (fedora,$(DISTRO))
-	# On Fedora, we change these two variables to these values:
-	LIBPSM2_COMPAT_CONF_DIR := /usr/lib
-	LIBPSM2_COMPAT_SYM_CONF_DIR := %{_prefix}/lib
-	SPEC_FILE_RELEASE_DIST := %{?dist}
-	UDEV_40_PSM_RULES :=#
-else ifeq (rhel,${DISTRO})
-	# Insert code specific to RHEL here.
-else ifeq (sles,${DISTRO})
-	# Insert code specific to SLES here.
-endif
+# Set %{?dist} on Fedora and Fedora-like distributions (ID or ID_LIKE contains "fedora").
+SPEC_FILE_RELEASE_DIST := $(shell . /etc/os-release; echo "$$ID $$ID_LIKE" | grep -qw fedora && echo '%{?dist}')
 
 ifdef PSM_CUDA
 #Value needs to be something without spaces or dashes '-'
-SPEC_FILE_RELEASE_DIST += cuda
+SPEC_FILE_RELEASE_DIST := $(SPEC_FILE_RELEASE_DIST)cuda
 endif
-
-export 	LIBPSM2_COMPAT_CONF_DIR
 
 # The desired version number comes from the most recent tag starting with "v"
 ifeq (true, $(shell git rev-parse --is-inside-work-tree 2>/dev/null))
@@ -249,8 +228,6 @@ VERSION_RELEASE := ${VERSION_RELEASE_OVERRIDE}
 endif
 
 LDLIBS := -lrt -ldl -lnuma ${EXTRA_LIBS} -pthread
-
-PKG_CONFIG ?= pkg-config
 
 UDEVDIR := $(shell $(PKG_CONFIG) --variable=udevdir udev 2>/dev/null)
 ifndef UDEVDIR
@@ -416,9 +393,6 @@ install: all
 	install -m 0644 -D psm2.h ${DESTDIR}/usr/include/psm2.h
 	install -m 0644 -D psm2_mq.h ${DESTDIR}/usr/include/psm2_mq.h
 	install -m 0644 -D psm2_am.h ${DESTDIR}/usr/include/psm2_am.h
-ifneq (fedora,${DISTRO})
-	install -m 0644 -D 40-psm.rules ${DESTDIR}$(UDEVDIR)/rules.d/40-psm.rules
-endif
 	# The following files and dirs were part of the noship rpm:
 	mkdir -p ${DESTDIR}/usr/include/hfi1diag
 	mkdir -p ${DESTDIR}/usr/include/hfi1diag/linux-x86_64
@@ -451,21 +425,12 @@ specfile: specfile_clean | $(OUTDIR)
 		sed -e 's/@TARGLIB@/'${TARGLIB}'/g' \
 			-e 's/@RPM_NAME@/'${RPM_NAME}'/g' \
 			-e 's/@RPM_NAME_BASEEXT@/'${RPM_NAME_BASEEXT}'/g' \
-			-e 's/@COMPATLIB@/'${COMPATLIB}'/g' \
-			-e 's/@COMPATMAJOR@/'${COMPATMAJOR}'/g' \
-			-e 's;@UDEVDIR@;'${UDEVDIR}';g' \
 			-e 's/@MAJOR@/'${MAJOR}'/g' \
 			-e 's/@MINOR@/'${MINOR}'/g' \
-			-e 's:@LIBPSM2_COMPAT_CONF_DIR@:'${LIBPSM2_COMPAT_CONF_DIR}':g' \
 			-e 's:@LIBPSM2_COMPAT_SYM_CONF_DIR@:'${LIBPSM2_COMPAT_SYM_CONF_DIR}':g' \
 			-e 's;@SPEC_FILE_RELEASE_DIST@;'${SPEC_FILE_RELEASE_DIST}';g'  \
 			-e 's/@DIST_SHA@/'${DIST_SHA}'/g' > \
 		${OUTDIR}/${RPM_NAME}.spec
-	if [ -f /etc/redhat-release ] && [ `grep -o "[0-9.]*" /etc/redhat-release | cut -d"." -f1` -lt 7 ]; then \
-		sed -i 's;@40_PSM_RULES@;'${UDEVDIR}'/rules.d/40-psm.rules;g' ${OUTDIR}/${RPM_NAME}.spec; \
-	else \
-		sed -i 's;@40_PSM_RULES@;'${UDEV_40_PSM_RULES}';g' ${OUTDIR}/${RPM_NAME}.spec; \
-	fi
 
 # We can't totally prevent two make dist calls in a row from packaging
 # the previous make dist, unless we switch to using a dedicated ./src folder

@@ -81,11 +81,9 @@ Provides: @RPM_NAME@%{_isa} = %{version}-%{release}
 BuildRequires: libnuma-devel
 Requires: libnuma1
 %else
-%if 0%{?rhel}==0 || 0%{?rhel} > 6
 BuildRequires: systemd
 BuildRequires: numactl-devel
 Requires: numactl-libs
-%endif
 %endif
 
 %package -n @RPM_NAME@-devel
@@ -147,13 +145,9 @@ make %{?_smp_mflags}
 %postun -p /sbin/ldconfig
 
 %files -n @RPM_NAME@@RPM_NAME_BASEEXT@
-%if 0%{?rhel} && 0%{?rhel} < 7
-%{!?_licensedir:%global license %doc}
-%endif
 %license COPYING
 %{_libdir}/@TARGLIB@.so.@MAJOR@.@MINOR@
 %{_libdir}/@TARGLIB@.so.@MAJOR@
-@40_PSM_RULES@
 
 %files -n @RPM_NAME@-devel
 %{_libdir}/@TARGLIB@.so
@@ -165,11 +159,7 @@ make %{?_smp_mflags}
 
 %files -n @RPM_NAME@-compat
 %{_libdir}/psm2-compat
-%if 0%{?rhel} && 0%{?rhel} < 7
-@UDEVDIR@/rules.d/40-psm-compat.rules
-%else
 %{_udevrulesdir}/40-psm-compat.rules
-%endif
 @LIBPSM2_COMPAT_SYM_CONF_DIR@/modprobe.d/libpsm2-compat.conf
 %{_prefix}/lib/libpsm2
 
